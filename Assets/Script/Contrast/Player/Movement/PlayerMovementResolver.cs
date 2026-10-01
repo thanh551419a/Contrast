@@ -22,11 +22,8 @@ namespace Contrast.Player
 
         private void Awake()
         {
-            overlapResolver =
-                GetComponent<PlayerOverlapResolver>();
-
-            collisionResolver =
-                GetComponent<PlayerCollisionResolver>();
+            overlapResolver = GetComponent<PlayerOverlapResolver>();
+            collisionResolver = GetComponent<PlayerCollisionResolver>();
         }
 
         public MovementResult Resolve(
@@ -39,23 +36,16 @@ namespace Contrast.Player
             float deltaTime)
         {
             Vector2 safeSize = new Vector2(
-                Mathf.Max(
-                    0.0001f,
-                    Mathf.Abs(playerSize.x)),
-                Mathf.Max(
-                    0.0001f,
-                    Mathf.Abs(playerSize.y)));
+                Mathf.Max(0.0001f, Mathf.Abs(playerSize.x)),
+                Mathf.Max(0.0001f, Mathf.Abs(playerSize.y)));
 
-            Aabb currentBounds =
-                Aabb.FromCenter(
-                    currentPosition + playerOffset,
-                    safeSize);
+            Aabb currentBounds = Aabb.FromCenter(
+                currentPosition + playerOffset,
+                safeSize);
 
-            // 1. Evaluate current overlap.
+            // 1. Current overlap state.
             OverlapResult overlap =
-                overlapResolver.Evaluate(
-                    currentBounds,
-                    playerColor);
+                overlapResolver.Evaluate(currentBounds, playerColor);
 
             if (overlap.IsStuck)
             {
@@ -72,57 +62,33 @@ namespace Contrast.Player
                     Vector2.zero);
             }
 
-            // 2. Apply the existing 80% movement reduction
-            // while pushing out.
+            // 2. Build ONE final intent vector.
             float controlMultiplier =
-                overlapResolver.GetControlMultiplier(
-                    overlap.IsPushingOut);
+                overlapResolver.GetControlMultiplier(overlap.IsPushingOut);
 
-            Vector2 adjustedInput =
-                inputMove * controlMultiplier;
+            Vector2 adjustedInput = inputMove * controlMultiplier;
 
-            float safeDeltaTime =
-                Mathf.Max(0f, deltaTime);
+            float safeDeltaTime = Mathf.Max(0f, deltaTime);
 
-            // Convert jump/fall displacement intent back to
-            // its current vertical velocity.
-            //
-            // jumpMove.y = velocityY * deltaTime
-            //
-            // Therefore:
-            // velocityY = jumpMove.y / deltaTime
-            float currentVerticalSpeed =
-                safeDeltaTime > Mathf.Epsilon
-                    ? jumpMove.y / safeDeltaTime
-                    : 0f;
+            // Convert the vertical movement intent back to its current vertical
+            // speed so the overlap resolver can guarantee that vertical push-out
+            // remains faster than the opposing vertical motion.
+            float currentVerticalSpeed = safeDeltaTime > Mathf.Epsilon
+                ? jumpMove.y / safeDeltaTime
+                : 0f;
 
-            // 3. Calculate one push speed.
-            //
-            // Horizontal:
-            //     uses the existing configurable push speed.
-            //
-            // Vertical:
-            //     automatically becomes greater than the current
-            //     vertical velocity by VerticalPushSpeedMargin.
-            float pushSpeed =
-                overlap.IsPushingOut
-                    ? overlapResolver.GetPushSpeed(
-                        overlap.PushDirection,
-                        currentVerticalSpeed)
-                    : 0f;
+            float pushSpeed = overlap.IsPushingOut
+                ? overlapResolver.GetPushSpeed(
+                    overlap.PushDirection,
+                    currentVerticalSpeed)
+                : 0f;
 
-            Vector2 pushMove =
-                overlap.IsPushingOut
-                    ? overlap.PushDirection *
-                      pushSpeed *
-                      safeDeltaTime
-                    : Vector2.zero;
+            Vector2 pushMove = overlap.IsPushingOut
+                ? overlap.PushDirection * pushSpeed * safeDeltaTime
+                : Vector2.zero;
 
-            // 4. Still build ONE final intent vector.
             Vector2 combinedIntent =
-                adjustedInput +
-                jumpMove +
-                pushMove;
+                adjustedInput + jumpMove + pushMove;
 
             if (logIntent)
             {
@@ -135,21 +101,19 @@ namespace Contrast.Player
                     $"combined={combinedIntent}");
             }
 
-            // 5. Predict + resolve that ONE vector.
-            CollisionResult collision =
-                collisionResolver.Resolve(
-                    currentPosition,
-                    safeSize,
-                    playerOffset,
-                    combinedIntent,
-                    playerColor,
-                    overlap.IsPushingOut);
+            // 3. Predict + resolve that ONE vector.
+            CollisionResult collision = collisionResolver.Resolve(
+                currentPosition,
+                safeSize,
+                playerOffset,
+                combinedIntent,
+                playerColor,
+                overlap.IsPushingOut);
 
             if (logIntent)
             {
                 Debug.Log(
-                    $"[PUSH][RESULT] " +
-                    $"active={overlap.IsPushingOut} " +
+                    $"[PUSH][RESULT] active={overlap.IsPushingOut} " +
                     $"direction={overlap.PushDirection} " +
                     $"verticalVelocity={currentVerticalSpeed:F3} " +
                     $"speed={pushSpeed:F3} " +
@@ -159,8 +123,7 @@ namespace Contrast.Player
                     $"move={pushMove}");
 
                 Debug.Log(
-                    $"[RESOLVE][RESULT] " +
-                    $"current={currentPosition} " +
+                    $"[RESOLVE][RESULT] current={currentPosition} " +
                     $"combined={combinedIntent} " +
                     $"final={collision.FinalMove} " +
                     $"blockedX={collision.BlockedX} " +

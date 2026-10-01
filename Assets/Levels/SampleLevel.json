@@ -1,16 +1,21 @@
 {
-  "spawnPoint": {
+  "startPos": {
     "position": { "x": 0.0, "y": 1.0 },
-    "initialPlayerColor": 0.0
+    "size": { "x": 1.0, "y": 1.0 },
+    "color": 0.0
   },
-  "deathY": -8.0,
+  "checkPoint": {
+    "position": { "x": 10.0, "y": 1.0 },
+    "size": { "x": 1.0, "y": 1.0 },
+    "color": 255.0
+  },
+  "end": {
+    "position": { "x": 21.0, "y": 1.5 },
+    "size": { "x": 1.5, "y": 2.0 }
+  },
   "cameraBoundary": {
     "position": { "x": 10.0, "y": 2.0 },
     "size": { "x": 36.0, "y": 16.0 }
-  },
-  "victoryObject": {
-    "position": { "x": 21.0, "y": 1.5 },
-    "size": { "x": 1.5, "y": 2.0 }
   },
   "platforms": [
     {
@@ -20,12 +25,12 @@
     },
     {
       "position": { "x": 4.0, "y": 1.5 },
-      "size": { "x": 1.0, "y": 3.0 },
+      "size": { "x": 1.0, "y": 2.0 },
       "rawGrayscaleColor": 0.0
     },
     {
       "position": { "x": 8.0, "y": 1.5 },
-      "size": { "x": 1.0, "y": 3.0 },
+      "size": { "x": 1.0, "y": 2.0 },
       "rawGrayscaleColor": 128.0
     },
     {

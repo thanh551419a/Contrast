@@ -1,5 +1,6 @@
 using System.IO;
 using Contrast.Camera;
+using Contrast.Color;
 using Contrast.Core;
 using Contrast.Data;
 using Contrast.Player;
@@ -8,8 +9,8 @@ using UnityEngine;
 namespace Contrast.Level
 {
     /// <summary>
-    /// Reads JSON, creates runtime ColorPlatforms, configures the camera boundary,
-    /// and moves the Player transform to the spawn position.
+    /// Reads JSON, creates runtime platforms and level interaction rectangles,
+    /// configures the camera boundary, and owns the current retry spawn state.
     /// </summary>
     public class LevelLoader : MonoBehaviour
     {
@@ -22,9 +23,13 @@ namespace Contrast.Level
 
         [Header("Hierarchy")]
         [SerializeField] private Transform platformsRoot;
+        [SerializeField] private Transform levelObjectsRoot;
 
         public LevelData CurrentLevelData { get; private set; }
         public float KillY { get; private set; } = -10f;
+
+        public Vector2 CurrentSpawnPosition { get; private set; }
+        public LogicalColor CurrentSpawnColor { get; private set; } = LogicalColor.Black;
 
         public void LoadAndInitializeLevel()
         {
@@ -81,13 +86,40 @@ namespace Contrast.Level
             if (data == null)
                 return;
 
-            EnsurePlatformsRoot();
+            EnsureRoots();
             ClearRuntimeLevel();
 
             KillY = ComputeKillY(data);
 
             // --------------------------------------------------
-            // Spawn runtime platforms.
+            // Start position / current retry spawn.
+            // --------------------------------------------------
+            StartPosData startData = data.startPos;
+            if (startData == null)
+                startData = ConvertLegacySpawnPoint(data.spawnPoint);
+
+            if (startData == null)
+                startData = new StartPosData();
+
+            CurrentSpawnPosition = startData.position != null
+                ? startData.position.ToVector2()
+                : Vector2.zero;
+
+            CurrentSpawnColor =
+                ColorClassifier.Classify(startData.color);
+
+            CreateMarker(
+                LevelMarkerType.StartPos,
+                startData.position != null
+                    ? startData.position.ToVector2()
+                    : Vector2.zero,
+                startData.size != null
+                    ? startData.size.ToVector2()
+                    : Vector2.one,
+                startData.color);
+
+            // --------------------------------------------------
+            // Runtime platforms.
             // --------------------------------------------------
             if (data.platforms != null)
             {
@@ -124,14 +156,38 @@ namespace Contrast.Level
                     }
 
                     platform.name = $"ColorPlatform_{i}";
-
-                    // ColorPlatform.Initialize() stores the custom gameplay AABB.
-                    // Unity Physics2D is not used for player collision.
                     platform.Initialize(
                         pData.position.ToVector2(),
                         pData.size.ToVector2(),
                         pData.rawGrayscaleColor);
                 }
+            }
+
+            // --------------------------------------------------
+            // One-shot checkpoint.
+            // --------------------------------------------------
+            if (data.checkPoint != null &&
+                data.checkPoint.position != null &&
+                data.checkPoint.size != null)
+            {
+                CreateMarker(
+                    LevelMarkerType.CheckPoint,
+                    data.checkPoint.position.ToVector2(),
+                    data.checkPoint.size.ToVector2(),
+                    data.checkPoint.color);
+            }
+
+            // --------------------------------------------------
+            // End-game rectangle.
+            // --------------------------------------------------
+            if (data.end != null &&
+                data.end.position != null &&
+                data.end.size != null)
+            {
+                CreateMarker(
+                    LevelMarkerType.End,
+                    data.end.position.ToVector2(),
+                    data.end.size.ToVector2());
             }
 
             // --------------------------------------------------
@@ -143,12 +199,16 @@ namespace Contrast.Level
             if (camFollow != null && data.cameraBoundary != null)
             {
                 camFollow.SetBoundary(
-                    data.cameraBoundary.position.ToVector2(),
-                    data.cameraBoundary.size.ToVector2());
+                    data.cameraBoundary.position != null
+                        ? data.cameraBoundary.position.ToVector2()
+                        : Vector2.zero,
+                    data.cameraBoundary.size != null
+                        ? data.cameraBoundary.size.ToVector2()
+                        : Vector2.zero);
             }
 
             // --------------------------------------------------
-            // Player spawn.
+            // Initial player state = StartPos position + color.
             // --------------------------------------------------
             PlayerController player =
                 GameManager.Instance != null
@@ -157,28 +217,152 @@ namespace Contrast.Level
 
             if (player != null)
             {
-                if (data.spawnPoint != null &&
-                    data.spawnPoint.position != null)
-                {
-                    player.SetSpawnPosition(
-                        data.spawnPoint.position.ToVector2());
-                }
-
-                player.ResetState();
+                player.Respawn(
+                    CurrentSpawnPosition,
+                    CurrentSpawnColor);
 
                 if (camFollow != null)
                     camFollow.Target = player.transform;
             }
         }
 
-        private void EnsurePlatformsRoot()
+        /// <summary>
+        /// Retry does NOT rebuild the level.
+        /// It only uses the current checkpoint-derived spawn state.
+        /// </summary>
+        public void RetryCurrentSpawn()
         {
-            if (platformsRoot != null)
+            PlayerController player =
+                GameManager.Instance != null
+                    ? GameManager.Instance.Player
+                    : FindAnyObjectByType<PlayerController>();
+
+            if (player == null)
                 return;
 
-            GameObject go = new GameObject("Platforms");
-            go.transform.SetParent(transform, false);
-            platformsRoot = go.transform;
+            player.Respawn(
+                CurrentSpawnPosition,
+                CurrentSpawnColor);
+
+            CameraFollow camFollow =
+                FindAnyObjectByType<CameraFollow>();
+
+            if (camFollow != null)
+                camFollow.Target = player.transform;
+        }
+
+        /// <summary>
+        /// Called once after Player movement. This is the authoritative contact
+        /// point for checkpoint/end interactions.
+        /// </summary>
+        public void ProcessPlayerInteractions(PlayerController player)
+        {
+            if (player == null)
+                return;
+
+            Aabb playerBounds = Aabb.FromCenter(
+    new Vector2(
+        player.transform.position.x,
+        player.transform.position.y) + player.PlayerOffset,
+    new Vector2(
+        Mathf.Max(0.0001f, Mathf.Abs(player.PlayerSize.x)),
+        Mathf.Max(0.0001f, Mathf.Abs(player.PlayerSize.y))));
+
+            for (int i = LevelMarker.All.Count - 1; i >= 0; i--)
+            {
+                LevelMarker marker = LevelMarker.All[i];
+
+                if (marker == null || marker.IsConsumed)
+                    continue;
+
+                if (!marker.Overlaps(playerBounds))
+                    continue;
+
+                if (marker.Type == LevelMarkerType.CheckPoint)
+                {
+                    CurrentSpawnPosition = marker.Position;
+                    CurrentSpawnColor = marker.LogicalColor;
+
+                    Debug.Log(
+                        $"[CHECKPOINT] reached position={CurrentSpawnPosition} " +
+                        $"color={CurrentSpawnColor} " +
+                        $"rawColor={marker.RawColor:F2}");
+
+                    marker.OnPlayerTouched();
+                    continue;
+                }
+
+                if (marker.Type == LevelMarkerType.End)
+                {
+                    Debug.Log(
+                        $"[END] Player touched End at {marker.Position}.");
+
+                    marker.OnPlayerTouched();
+                    GameManager.Instance?.OnPlayerWon();
+                    return;
+                }
+            }
+        }
+
+
+        private void CreateMarker(
+            LevelMarkerType type,
+            Vector2 position,
+            Vector2 size,
+            float color = 0f)
+        {
+            GameObject markerObject =
+                new GameObject(type.ToString());
+
+            markerObject.transform.SetParent(
+                levelObjectsRoot,
+                false);
+
+            LevelMarker marker =
+                markerObject.AddComponent<LevelMarker>();
+
+            marker.Initialize(
+                type,
+                position,
+                size,
+                color);
+        }
+
+        private static StartPosData ConvertLegacySpawnPoint(
+            SpawnPointData legacy)
+        {
+            if (legacy == null)
+                return null;
+
+            float color = legacy.initialPlayerColor >= 0f
+                ? legacy.initialPlayerColor
+                : legacy.color;
+
+            return new StartPosData
+            {
+                position = legacy.position,
+                size = new Vector2Data(1f, 1f),
+                color = color
+            };
+        }
+
+        private void EnsureRoots()
+        {
+            if (platformsRoot == null)
+            {
+                GameObject platforms =
+                    new GameObject("Platforms");
+                platforms.transform.SetParent(transform, false);
+                platformsRoot = platforms.transform;
+            }
+
+            if (levelObjectsRoot == null)
+            {
+                GameObject objects =
+                    new GameObject("LevelObjects");
+                objects.transform.SetParent(transform, false);
+                levelObjectsRoot = objects.transform;
+            }
         }
 
         private static float ComputeKillY(LevelData data)
@@ -217,16 +401,19 @@ namespace Contrast.Level
 
         private void ClearRuntimeLevel()
         {
-            // Destroy is deferred by Unity. Clear the registry immediately so
-            // collision logic cannot see old platform references during restart.
             ColorPlatform.ClearRegistry();
+            LevelMarker.ClearRegistry();
 
-            if (platformsRoot == null)
-                return;
-
-            for (int i = platformsRoot.childCount - 1; i >= 0; i--)
+            if (platformsRoot != null)
             {
-                Destroy(platformsRoot.GetChild(i).gameObject);
+                for (int i = platformsRoot.childCount - 1; i >= 0; i--)
+                    Destroy(platformsRoot.GetChild(i).gameObject);
+            }
+
+            if (levelObjectsRoot != null)
+            {
+                for (int i = levelObjectsRoot.childCount - 1; i >= 0; i--)
+                    Destroy(levelObjectsRoot.GetChild(i).gameObject);
             }
         }
 
@@ -234,9 +421,11 @@ namespace Contrast.Level
         {
             CurrentLevelData = new LevelData
             {
-                spawnPoint = new SpawnPointData
+                startPos = new StartPosData
                 {
-                    position = new Vector2Data(0f, 1f)
+                    position = new Vector2Data(0f, 1f),
+                    size = new Vector2Data(1f, 1f),
+                    color = 0f
                 },
                 cameraBoundary = new CameraBoundaryData
                 {

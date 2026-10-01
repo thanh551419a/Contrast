@@ -65,7 +65,6 @@ namespace Contrast.Player
 
             deltaTime = Mathf.Max(0f, deltaTime);
 
-            // 1. READ INPUT -> RAW INTENTS
             PlayerInputIntent input =
                 inputReader.ReadInput(deltaTime, moveSpeed, isGrounded);
 
@@ -92,11 +91,8 @@ namespace Contrast.Player
                 : Vector2.zero;
 
             if (logFlow)
-            {
                 Debug.Log($"[FLOW][JUMP_INTENT] {jumpIntent}");
-            }
 
-            // 2. COMBINE + PREDICT + COLLISION RESOLVE
             MovementResult result =
                 movementResolver.Resolve(
                     transform.position,
@@ -122,7 +118,6 @@ namespace Contrast.Player
                     $"final={result.FinalMove}");
             }
 
-            // 3. APPLY FINAL MOVE
             ApplyMove(result.FinalMove);
 
             isGrounded = result.IsGrounded;
@@ -143,7 +138,6 @@ namespace Contrast.Player
                 jumpMotion?.NotifyGrounded(false);
             }
 
-            // 4. DEATH
             GameManager gm = GameManager.Instance;
             if (gm != null && transform.position.y < gm.KillY)
                 Die();
@@ -192,6 +186,17 @@ namespace Contrast.Player
                 worldPosition.x,
                 worldPosition.y,
                 transform.position.z);
+        }
+
+        /// <summary>
+        /// Respawns using both position and gameplay color.
+        /// Retry and checkpoint activation both use this path.
+        /// </summary>
+        public void Respawn(Vector2 worldPosition, LogicalColor color)
+        {
+            SetColor(color);
+            SetSpawnPosition(worldPosition);
+            ResetState();
         }
 
         public void ResetState()

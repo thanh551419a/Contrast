@@ -1,4 +1,4 @@
-﻿using Contrast.Core;
+using Contrast.Core;
 using UnityEngine;
 using UnityEngine.EventSystems;
 using UnityEngine.UI;
@@ -6,23 +6,37 @@ using UnityEngine.UI;
 namespace Contrast.UI
 {
     /// <summary>
-    /// Màn hình "GAME OVER" + nút Restart. Tự tạo Canvas/Panel/Button lúc chạy,
-    /// nên chỉ cần có script này (GameManager tự tạo nếu chưa có trong scene).
+    /// Result overlay for GAME OVER / YOU WIN with a Restart button.
     /// </summary>
     public class GameOverUI : MonoBehaviour
     {
         private GameObject panel;
+        private Text titleText;
+        private Button retryButton;
 
         private void Awake()
         {
             EnsureEventSystem();
             BuildUI();
-            Show(false);
+            ShowResult(false, "GAME OVER", false);
         }
 
+        // Kept for compatibility with older callers.
         public void Show(bool visible)
         {
-            if (panel != null) panel.SetActive(visible);
+            ShowResult(visible, "GAME OVER", false);
+        }
+
+        public void ShowResult(bool visible, string title, bool allowRetry)
+        {
+            if (titleText != null)
+                titleText.text = title;
+
+            if (retryButton != null)
+                retryButton.gameObject.SetActive(allowRetry);
+
+            if (panel != null)
+                panel.SetActive(visible);
         }
 
         private void OnRestartClicked()
@@ -30,55 +44,62 @@ namespace Contrast.UI
             GameManager.Instance?.Restart();
         }
 
-        // ---------------- dựng UI ----------------
+        private void OnRetryClicked()
+        {
+            GameManager.Instance?.Retry();
+        }
 
         private void BuildUI()
         {
-            var canvasGo = new GameObject("Canvas", typeof(RectTransform));
+            GameObject canvasGo = new GameObject(
+                "Canvas",
+                typeof(RectTransform));
             canvasGo.transform.SetParent(transform, false);
 
-            var canvas = canvasGo.AddComponent<Canvas>();
+            Canvas canvas = canvasGo.AddComponent<Canvas>();
             canvas.renderMode = RenderMode.ScreenSpaceOverlay;
             canvas.sortingOrder = 100;
 
-            var scaler = canvasGo.AddComponent<CanvasScaler>();
+            CanvasScaler scaler = canvasGo.AddComponent<CanvasScaler>();
             scaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
             scaler.referenceResolution = new Vector2(1920, 1080);
 
             canvasGo.AddComponent<GraphicRaycaster>();
 
-            // Nền mờ phủ toàn màn hình
             panel = NewUI("Panel", canvasGo.transform);
-            var bg = panel.AddComponent<Image>();
+            Image bg = panel.AddComponent<Image>();
             bg.color = new UnityEngine.Color(0f, 0f, 0f, 0.7f);
             Stretch(panel.GetComponent<RectTransform>());
 
-            // Chữ GAME OVER
-            var title = NewUI("Title", panel.transform);
-            var titleText = title.AddComponent<Text>();
+            GameObject title = NewUI("Title", panel.transform);
+            titleText = title.AddComponent<Text>();
             titleText.font = GetFont();
             titleText.text = "GAME OVER";
             titleText.fontSize = 96;
             titleText.fontStyle = FontStyle.Bold;
             titleText.alignment = TextAnchor.MiddleCenter;
             titleText.color = UnityEngine.Color.white;
-            var titleRt = title.GetComponent<RectTransform>();
-            titleRt.sizeDelta = new Vector2(1000, 160);
-            titleRt.anchoredPosition = new Vector2(0, 100);
 
-            // Nút Restart
-            var btnGo = NewUI("RestartButton", panel.transform);
-            var btnImg = btnGo.AddComponent<Image>();
+            RectTransform titleRt = title.GetComponent<RectTransform>();
+            titleRt.sizeDelta = new Vector2(1000f, 160f);
+            titleRt.anchoredPosition = new Vector2(0f, 100f);
+
+            GameObject btnGo = NewUI("RestartButton", panel.transform);
+            Image btnImg = btnGo.AddComponent<Image>();
             btnImg.color = new UnityEngine.Color(0.9f, 0.9f, 0.9f, 1f);
-            var button = btnGo.AddComponent<Button>();
+
+            Button button = btnGo.AddComponent<Button>();
             button.targetGraphic = btnImg;
             button.onClick.AddListener(OnRestartClicked);
-            var btnRt = btnGo.GetComponent<RectTransform>();
-            btnRt.sizeDelta = new Vector2(360, 100);
-            btnRt.anchoredPosition = new Vector2(0, -60);
 
-            var label = NewUI("Label", btnGo.transform);
-            var labelText = label.AddComponent<Text>();
+            RectTransform btnRt = btnGo.GetComponent<RectTransform>();
+            btnRt.sizeDelta = new Vector2(360f, 100f);
+            btnRt.anchoredPosition = new Vector2(-200f, -60f);
+
+            retryButton = CreateRetryButton(panel.transform);
+
+            GameObject label = NewUI("Label", btnGo.transform);
+            Text labelText = label.AddComponent<Text>();
             labelText.font = GetFont();
             labelText.text = "RESTART";
             labelText.fontSize = 48;
@@ -86,25 +107,56 @@ namespace Contrast.UI
             labelText.color = UnityEngine.Color.black;
             Stretch(label.GetComponent<RectTransform>());
 
-            // Gợi ý phím tắt
-            var hint = NewUI("Hint", panel.transform);
-            var hintText = hint.AddComponent<Text>();
+            GameObject hint = NewUI("Hint", panel.transform);
+            Text hintText = hint.AddComponent<Text>();
             hintText.font = GetFont();
             hintText.text = "hoặc nhấn R / Enter";
             hintText.fontSize = 28;
             hintText.alignment = TextAnchor.MiddleCenter;
             hintText.color = new UnityEngine.Color(1f, 1f, 1f, 0.7f);
-            var hintRt = hint.GetComponent<RectTransform>();
-            hintRt.sizeDelta = new Vector2(600, 50);
-            hintRt.anchoredPosition = new Vector2(0, -150);
+
+            RectTransform hintRt = hint.GetComponent<RectTransform>();
+            hintRt.sizeDelta = new Vector2(600f, 50f);
+            hintRt.anchoredPosition = new Vector2(0f, -150f);
+        }
+
+
+        private Button CreateRetryButton(Transform parent)
+        {
+            GameObject btnGo = NewUI("RetryButton", parent);
+            Image btnImg = btnGo.AddComponent<Image>();
+            btnImg.color = new UnityEngine.Color(0.75f, 0.75f, 0.75f, 1f);
+
+            Button button = btnGo.AddComponent<Button>();
+            button.targetGraphic = btnImg;
+            button.onClick.AddListener(OnRetryClicked);
+
+            RectTransform btnRt = btnGo.GetComponent<RectTransform>();
+            btnRt.sizeDelta = new Vector2(360f, 100f);
+            btnRt.anchoredPosition = new Vector2(200f, -60f);
+
+            GameObject label = NewUI("Label", btnGo.transform);
+            Text labelText = label.AddComponent<Text>();
+            labelText.font = GetFont();
+            labelText.text = "RETRY";
+            labelText.fontSize = 48;
+            labelText.alignment = TextAnchor.MiddleCenter;
+            labelText.color = UnityEngine.Color.black;
+            Stretch(label.GetComponent<RectTransform>());
+
+            return button;
         }
 
         private static GameObject NewUI(string name, Transform parent)
         {
-            var go = new GameObject(name, typeof(RectTransform));
+            GameObject go = new GameObject(name, typeof(RectTransform));
             go.transform.SetParent(parent, false);
-            var rt = go.GetComponent<RectTransform>();
-            rt.anchorMin = rt.anchorMax = rt.pivot = new Vector2(0.5f, 0.5f);
+
+            RectTransform rt = go.GetComponent<RectTransform>();
+            rt.anchorMin = new Vector2(0.5f, 0.5f);
+            rt.anchorMax = new Vector2(0.5f, 0.5f);
+            rt.pivot = new Vector2(0.5f, 0.5f);
+
             return go;
         }
 
@@ -112,7 +164,8 @@ namespace Contrast.UI
         {
             rt.anchorMin = Vector2.zero;
             rt.anchorMax = Vector2.one;
-            rt.offsetMin = rt.offsetMax = Vector2.zero;
+            rt.offsetMin = Vector2.zero;
+            rt.offsetMax = Vector2.zero;
         }
 
         private static Font GetFont()
@@ -124,12 +177,12 @@ namespace Contrast.UI
 #endif
         }
 
-        // Nút UI cần EventSystem mới bấm được
         private static void EnsureEventSystem()
         {
-            if (FindAnyObjectByType<EventSystem>() != null) return;
+            if (FindAnyObjectByType<EventSystem>() != null)
+                return;
 
-            var go = new GameObject("EventSystem");
+            GameObject go = new GameObject("EventSystem");
             go.AddComponent<EventSystem>();
 #if ENABLE_INPUT_SYSTEM
             go.AddComponent<UnityEngine.InputSystem.UI.InputSystemUIInputModule>();
