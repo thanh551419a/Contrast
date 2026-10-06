@@ -1,0 +1,109 @@
+{
+    "startPos": {
+        "position": {
+            "x": 0.0,
+            "y": 1.0
+        },
+        "size": {
+            "x": 1.0,
+            "y": 1.0
+        },
+        "color": 0.0
+    },
+    "checkPoint": {
+        "position": {
+            "x": 10.0,
+            "y": 1.0
+        },
+        "size": {
+            "x": 1.0,
+            "y": 1.0
+        },
+        "color": 255.0
+    },
+    "end": {
+        "position": {
+            "x": 21.0,
+            "y": 1.5
+        },
+        "size": {
+            "x": 1.5,
+            "y": 2.0
+        }
+    },
+    "spawnPoint": {
+        "position": {
+            "x": 0.0,
+            "y": 0.0
+        },
+        "color": 0.0,
+        "initialPlayerColor": -1.0
+    },
+    "cameraBoundary": {
+        "position": {
+            "x": 10.0,
+            "y": 2.0
+        },
+        "size": {
+            "x": 36.0,
+            "y": 16.0
+        }
+    },
+    "platforms": [
+        {
+            "position": {
+                "x": 0.0,
+                "y": -0.5
+            },
+            "size": {
+                "x": 6.0,
+                "y": 1.0
+            },
+            "rawGrayscaleColor": 255.0
+        },
+        {
+            "position": {
+                "x": 4.0,
+                "y": 1.0041694641113282
+            },
+            "size": {
+                "x": 1.0,
+                "y": 4.073473930358887
+            },
+            "rawGrayscaleColor": 0.0
+        },
+        {
+            "position": {
+                "x": 8.0,
+                "y": 1.5
+            },
+            "size": {
+                "x": 1.0,
+                "y": 2.0
+            },
+            "rawGrayscaleColor": 128.0
+        },
+        {
+            "position": {
+                "x": 14.0,
+                "y": 0.0
+            },
+            "size": {
+                "x": 4.0,
+                "y": 1.0
+            },
+            "rawGrayscaleColor": 255.0
+        },
+        {
+            "position": {
+                "x": 20.0,
+                "y": 0.0
+            },
+            "size": {
+                "x": 6.0,
+                "y": 1.0
+            },
+            "rawGrayscaleColor": 128.0
+        }
+    ]
+}

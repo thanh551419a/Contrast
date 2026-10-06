@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using Contrast.Color;
+using Contrast.Player;
 using UnityEngine;
 
 namespace Contrast.Level
@@ -13,8 +14,11 @@ namespace Contrast.Level
 
     /// <summary>
     /// Runtime rectangle used for StartPos, CheckPoint and End.
-    /// Uses the same authoritative AABB geometry as the custom movement system.
-    /// Does not use Unity Physics2D for gameplay collision.
+    ///
+    /// The player movement system does not use Unity Physics2D for gameplay
+    /// collision, so contact is evaluated through the same authoritative AABB
+    /// geometry used by the movement resolver. A successful contact is exposed
+    /// as the logical OnPlayerTouched event below.
     /// </summary>
     [DisallowMultipleComponent]
     public sealed class LevelMarker : MonoBehaviour
@@ -31,21 +35,34 @@ namespace Contrast.Level
         private SpriteRenderer spriteRenderer;
 
         public LevelMarkerType Type => markerType;
-
-        public Vector2 Position =>
-            transform.position;
-
-        public Vector2 Size =>
-            size;
-
+        public Vector2 Position => transform.position;
+        public Vector2 Size => size;
         public LogicalColor LogicalColor =>
             ColorClassifier.Classify(rawColor);
+        public float RawColor => rawColor;
+        public bool IsConsumed => consumed;
 
-        public float RawColor =>
-            rawColor;
+        internal void SetEditorPosition(Vector2 position)
+        {
+            transform.position = new Vector3(position.x, position.y, 0f);
+        }
 
-        public bool IsConsumed =>
-            consumed;
+        internal void SetEditorData(Vector2 position, Vector2 markerSize, float color)
+        {
+            size = new Vector2(
+                Mathf.Max(0.0001f, Mathf.Abs(markerSize.x)),
+                Mathf.Max(0.0001f, Mathf.Abs(markerSize.y)));
+            rawColor = color;
+            transform.position = new Vector3(position.x, position.y, 0f);
+
+            EnsureVisual();
+            spriteRenderer.transform.localScale = new Vector3(size.x, size.y, 1f);
+            float visualValue = markerType == LevelMarkerType.End
+                ? 1f
+                : ColorClassifier.ToValue(LogicalColor);
+            spriteRenderer.color = new UnityEngine.Color(
+                visualValue, visualValue, visualValue, VisualAlpha);
+        }
 
         public void Initialize(
             LevelMarkerType type,
@@ -56,11 +73,9 @@ namespace Contrast.Level
             EnsureVisual();
 
             markerType = type;
-
             size = new Vector2(
                 Mathf.Max(0.0001f, Mathf.Abs(markerSize.x)),
                 Mathf.Max(0.0001f, Mathf.Abs(markerSize.y)));
-
             rawColor = color;
             consumed = false;
 
@@ -68,7 +83,6 @@ namespace Contrast.Level
                 position.x,
                 position.y,
                 0f);
-
             transform.localScale = Vector3.one;
 
             if (!All.Contains(this))
@@ -76,25 +90,15 @@ namespace Contrast.Level
 
             gameObject.name = type.ToString();
 
-            spriteRenderer.sprite =
-                ColorPlatform.GetDefaultSprite();
-
-            spriteRenderer.drawMode =
-                SpriteDrawMode.Simple;
-
+            spriteRenderer.sprite = ColorPlatform.GetDefaultSprite();
+            spriteRenderer.drawMode = SpriteDrawMode.Simple;
             spriteRenderer.transform.localScale =
-                new Vector3(
-                    size.x,
-                    size.y,
-                    1f);
-
+                new Vector3(size.x, size.y, 1f);
             spriteRenderer.sortingOrder = 5;
 
-            float visualValue =
-                type == LevelMarkerType.End
-                    ? 1f
-                    : ColorClassifier.ToValue(
-                        LogicalColor);
+            float visualValue = type == LevelMarkerType.End
+                ? 1f
+                : ColorClassifier.ToValue(LogicalColor);
 
             spriteRenderer.color = new UnityEngine.Color(
                 visualValue,
@@ -103,48 +107,36 @@ namespace Contrast.Level
                 VisualAlpha);
         }
 
-        internal bool Overlaps(
-            Contrast.Player.Aabb playerBounds)
+        internal bool Overlaps(Aabb playerBounds)
         {
-            if (consumed ||
-                !gameObject.activeInHierarchy)
-            {
+            if (consumed || !gameObject.activeInHierarchy)
                 return false;
-            }
 
-            return Contrast.Player.Aabb.Overlaps(
-                GetAabb(),
-                playerBounds);
+            return Aabb.Overlaps(GetAabb(), playerBounds);
         }
 
         /// <summary>
-        /// Logical contact callback.
+        /// Logical contact callback. The marker is one-shot for CheckPoint/End.
         /// StartPos remains persistent.
-        /// CheckPoint and End are one-shot.
         /// </summary>
         public void OnPlayerTouched()
         {
             if (consumed)
                 return;
 
-            if (markerType ==
-                LevelMarkerType.StartPos)
-            {
+            if (markerType == LevelMarkerType.StartPos)
                 return;
-            }
 
             consumed = true;
-
             All.Remove(this);
 
             gameObject.SetActive(false);
-
             Destroy(gameObject);
         }
 
-        internal Contrast.Player.Aabb GetAabb()
+        internal Aabb GetAabb()
         {
-            return Contrast.Player.Aabb.FromCenter(
+            return Aabb.FromCenter(
                 Position,
                 size);
         }
@@ -159,30 +151,20 @@ namespace Contrast.Level
             if (spriteRenderer != null)
                 return;
 
-            spriteRenderer =
-                GetComponentInChildren<SpriteRenderer>();
+            spriteRenderer = GetComponentInChildren<SpriteRenderer>();
 
             if (spriteRenderer == null)
             {
-                GameObject visual =
-                    new GameObject("Visual");
-
-                visual.transform.SetParent(
-                    transform,
-                    false);
-
-                spriteRenderer =
-                    visual.AddComponent<SpriteRenderer>();
+                GameObject visual = new GameObject("Visual");
+                visual.transform.SetParent(transform, false);
+                spriteRenderer = visual.AddComponent<SpriteRenderer>();
             }
         }
 
         private void OnDrawGizmosSelected()
         {
             Gizmos.color = UnityEngine.Color.cyan;
-
-            Gizmos.DrawWireCube(
-                transform.position,
-                size);
+            Gizmos.DrawWireCube(transform.position, size);
         }
     }
 }

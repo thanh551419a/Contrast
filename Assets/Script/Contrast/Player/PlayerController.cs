@@ -20,7 +20,8 @@ namespace Contrast.Player
         [SerializeField] private Vector2 playerOffset = Vector2.zero;
 
         [Header("Color")]
-        [SerializeField] private LogicalColor currentColor = LogicalColor.Black;
+        [SerializeField] private LogicalColor currentColor = LogicalColor.White;
+        [SerializeField, Range(0f, 254f)] private float currentColorValue = 0f;
         [SerializeField] private bool autoCreateSprite = true;
 
         [Header("Debug")]
@@ -28,6 +29,7 @@ namespace Contrast.Player
 
         public PlayerState State { get; private set; } = PlayerState.Falling;
         public LogicalColor CurrentColor => currentColor;
+        public float CurrentColorValue => currentColorValue;
         public Vector2 PlayerSize => playerSize;
         public Vector2 PlayerOffset => playerOffset;
 
@@ -36,6 +38,12 @@ namespace Contrast.Player
         private PlayerMovementResolver movementResolver;
         private PlayerJumpMotion jumpMotion;
         private bool isGrounded;
+        private Vector2 riderDisplacement;
+
+        public void SetRiderDisplacement(Vector2 disp)
+        {
+            riderDisplacement = disp;
+        }
 
         private void Awake()
         {
@@ -80,7 +88,9 @@ namespace Contrast.Player
                     $"grounded={isGrounded}");
             }
 
-            if (input.HasColorChange)
+            if (input.ColorChunkStep != 0)
+                StepColorChunk(input.ColorChunkStep);
+            else if (input.HasColorChange)
                 SetColor(input.RequestedColor);
 
             if (input.JumpRequested)
@@ -101,7 +111,10 @@ namespace Contrast.Player
                     input.Move,
                     jumpIntent,
                     currentColor,
-                    deltaTime);
+                    deltaTime,
+                    riderDisplacement);
+
+            riderDisplacement = Vector2.zero;
 
             if (logFlow)
             {
@@ -165,18 +178,58 @@ namespace Contrast.Player
             }
         }
 
+        public void StepColorChunk(int direction)
+        {
+            // Direction > 0: advance to next chunk (White -> Gray -> Black -> White)
+            // Direction < 0: go to previous chunk (Black -> Gray -> White -> Black)
+            LogicalColor next = currentColor;
+            if (direction > 0)
+            {
+                next = currentColor switch
+                {
+                    LogicalColor.White => LogicalColor.Gray,
+                    LogicalColor.Gray => LogicalColor.Black,
+                    LogicalColor.Black => LogicalColor.White,
+                    _ => LogicalColor.White
+                };
+            }
+            else if (direction < 0)
+            {
+                next = currentColor switch
+                {
+                    LogicalColor.White => LogicalColor.Black,
+                    LogicalColor.Gray => LogicalColor.White,
+                    LogicalColor.Black => LogicalColor.Gray,
+                    _ => LogicalColor.White
+                };
+            }
+
+            SetColor(next);
+        }
+
         public void SetColor(LogicalColor color)
         {
-            if (currentColor == color)
-                return;
-
             currentColor = color;
+            currentColorValue = ColorClassifier.DefaultValue(color);
             ApplyColorVisual();
 
             if (logFlow)
             {
                 Debug.Log(
-                    $"[COLOR] {currentColor} at {transform.position}");
+                    $"[COLOR] {currentColor} (val={currentColorValue}) at {transform.position}");
+            }
+        }
+
+        public void SetColorValue(float value)
+        {
+            currentColorValue = Mathf.Clamp(value, 0f, 254f);
+            currentColor = ColorClassifier.Classify(currentColorValue);
+            ApplyColorVisual();
+
+            if (logFlow)
+            {
+                Debug.Log(
+                    $"[COLOR_VALUE] val={currentColorValue} logical={currentColor} at {transform.position}");
             }
         }
 

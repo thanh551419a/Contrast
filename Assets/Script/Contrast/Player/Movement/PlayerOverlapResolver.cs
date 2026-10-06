@@ -189,10 +189,14 @@ namespace Contrast.Player
             ColorPlatform platform,
             LogicalColor playerColor)
         {
-            return platform != null &&
-                   platform.gameObject.activeInHierarchy &&
-                   platform.enabled &&
-                   platform.Logical != playerColor;
+            if (platform == null || !platform.gameObject.activeInHierarchy || !platform.enabled)
+                return false;
+
+            // Value 255 (Universal / Everything): player can stand on this platform with any color
+            if (platform.IsUniversal || platform.Logical == LogicalColor.Universal || platform.RawGrayscaleColor >= 254.5f)
+                return true;
+
+            return platform.Logical != playerColor;
         }
 
         private static Aabb FromPlatform(ColorPlatform platform)

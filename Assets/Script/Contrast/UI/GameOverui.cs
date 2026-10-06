@@ -2,7 +2,6 @@ using Contrast.Core;
 using UnityEngine;
 using UnityEngine.EventSystems;
 using UnityEngine.UI;
-
 namespace Contrast.UI
 {
     /// <summary>

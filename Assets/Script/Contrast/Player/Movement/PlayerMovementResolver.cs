@@ -33,7 +33,8 @@ namespace Contrast.Player
             Vector2 inputMove,
             Vector2 jumpMove,
             LogicalColor playerColor,
-            float deltaTime)
+            float deltaTime,
+            Vector2 riderMove = default)
         {
             Vector2 safeSize = new Vector2(
                 Mathf.Max(0.0001f, Mathf.Abs(playerSize.x)),
@@ -88,7 +89,7 @@ namespace Contrast.Player
                 : Vector2.zero;
 
             Vector2 combinedIntent =
-                adjustedInput + jumpMove + pushMove;
+                adjustedInput + jumpMove + pushMove + riderMove;
 
             if (logIntent)
             {
@@ -98,6 +99,7 @@ namespace Contrast.Player
                     $"adjustedInput={adjustedInput} " +
                     $"jump={jumpMove} " +
                     $"push={pushMove} " +
+                    $"rider={riderMove} " +
                     $"combined={combinedIntent}");
             }
 

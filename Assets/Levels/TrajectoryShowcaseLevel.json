@@ -1,0 +1,304 @@
+{
+  "startPos": {
+    "position": { "x": 0.0, "y": 1.0 },
+    "size": { "x": 1.0, "y": 1.0 },
+    "color": 0.0
+  },
+  "checkPoint": [
+    {
+      "position": { "x": 34.0, "y": 12.0 },
+      "size": { "x": 1.0, "y": 1.0 },
+      "color": 255.0
+    },
+    {
+      "position": { "x": 64.0, "y": 5.0 },
+      "size": { "x": 1.0, "y": 1.0 },
+      "color": 255.0
+    }
+  ],
+  "end": {
+    "position": { "x": 98.0, "y": 5.5 },
+    "size": { "x": 1.5, "y": 2.0 }
+  },
+  "cameraBoundary": {
+    "position": { "x": 48.0, "y": 8.0 },
+    "size": { "x": 120.0, "y": 30.0 }
+  },
+  "platforms": [
+    {
+      "position": { "x": 0.0, "y": -0.5 },
+      "size": { "x": 8.0, "y": 1.0 },
+      "rawGrayscaleColor": 255.0
+    },
+    {
+      "position": { "x": 7.0, "y": -0.5 },
+      "size": { "x": 3.0, "y": 0.8 },
+      "rawGrayscaleColor": 255.0,
+      "trajectory": {
+        "enabled": true,
+        "curveType": 0,
+        "domainMode": 0,
+        "playbackMode": 1,
+        "originX": 7.0,
+        "originY": -0.5,
+        "rotation": 0.0,
+        "scaleX": 6.0,
+        "scaleY": 1.0,
+        "paramMin": 0.0,
+        "paramMax": 1.0,
+        "boundsXMin": -10.0,
+        "boundsXMax": 10.0,
+        "boundsYMin": -10.0,
+        "boundsYMax": 10.0,
+        "radius": 2.0,
+        "duration": 10.0,
+        "reverseDirection": false
+      }
+    },
+    {
+      "position": { "x": 15.0, "y": -0.5 },
+      "size": { "x": 3.0, "y": 0.8 },
+      "rawGrayscaleColor": 255.0,
+      "trajectory": {
+        "enabled": true,
+        "curveType": 0,
+        "domainMode": 0,
+        "playbackMode": 1,
+        "originX": 15.0,
+        "originY": -0.5,
+        "rotation": 90.0,
+        "scaleX": 5.0,
+        "scaleY": 1.0,
+        "paramMin": 0.0,
+        "paramMax": 1.0,
+        "boundsXMin": -10.0,
+        "boundsXMax": 10.0,
+        "boundsYMin": -10.0,
+        "boundsYMax": 10.0,
+        "radius": 2.0,
+        "duration": 10.0,
+        "reverseDirection": false
+      }
+    },
+    {
+      "position": { "x": 18.0, "y": 4.5 },
+      "size": { "x": 3.0, "y": 1.0 },
+      "rawGrayscaleColor": 255.0
+    },
+    {
+      "position": { "x": 21.0, "y": 4.5 },
+      "size": { "x": 3.0, "y": 0.8 },
+      "rawGrayscaleColor": 255.0,
+      "trajectory": {
+        "enabled": true,
+        "curveType": 0,
+        "domainMode": 0,
+        "playbackMode": 1,
+        "originX": 21.0,
+        "originY": 4.5,
+        "rotation": 45.0,
+        "scaleX": 7.0,
+        "scaleY": 1.0,
+        "paramMin": 0.0,
+        "paramMax": 1.0,
+        "boundsXMin": -10.0,
+        "boundsXMax": 10.0,
+        "boundsYMin": -10.0,
+        "boundsYMax": 10.0,
+        "radius": 2.0,
+        "duration": 12.0,
+        "reverseDirection": false
+      }
+    },
+    {
+      "position": { "x": 28.0, "y": 10.5 },
+      "size": { "x": 3.0, "y": 0.8 },
+      "rawGrayscaleColor": 255.0,
+      "trajectory": {
+        "enabled": true,
+        "curveType": 0,
+        "domainMode": 1,
+        "playbackMode": 1,
+        "originX": 28.0,
+        "originY": 10.5,
+        "rotation": 0.0,
+        "scaleX": 1.0,
+        "scaleY": 1.0,
+        "paramMin": 0.0,
+        "paramMax": 1.0,
+        "boundsXMin": 28.0,
+        "boundsXMax": 34.0,
+        "boundsYMin": 9.0,
+        "boundsYMax": 12.0,
+        "radius": 2.0,
+        "duration": 10.0,
+        "reverseDirection": false
+      }
+    },
+    {
+      "position": { "x": 34.0, "y": 10.5 },
+      "size": { "x": 4.0, "y": 1.0 },
+      "rawGrayscaleColor": 255.0
+    },
+    {
+      "position": { "x": 38.0, "y": 10.5 },
+      "size": { "x": 2.5, "y": 0.8 },
+      "rawGrayscaleColor": 255.0,
+      "trajectory": {
+        "enabled": true,
+        "curveType": 0,
+        "domainMode": 0,
+        "playbackMode": 0,
+        "originX": 38.0,
+        "originY": 10.5,
+        "rotation": 0.0,
+        "scaleX": 6.0,
+        "scaleY": 1.0,
+        "paramMin": 0.0,
+        "paramMax": 1.0,
+        "boundsXMin": -10.0,
+        "boundsXMax": 10.0,
+        "boundsYMin": -10.0,
+        "boundsYMax": 10.0,
+        "radius": 2.0,
+        "duration": 10.0,
+        "reverseDirection": false
+      }
+    },
+    {
+      "position": { "x": 46.0, "y": 10.5 },
+      "size": { "x": 3.0, "y": 0.8 },
+      "rawGrayscaleColor": 255.0,
+      "trajectory": {
+        "enabled": true,
+        "curveType": 0,
+        "domainMode": 0,
+        "playbackMode": 2,
+        "originX": 46.0,
+        "originY": 10.5,
+        "rotation": -35.0,
+        "scaleX": 8.0,
+        "scaleY": 1.0,
+        "paramMin": 0.0,
+        "paramMax": 1.0,
+        "boundsXMin": -10.0,
+        "boundsXMax": 10.0,
+        "boundsYMin": -10.0,
+        "boundsYMax": 10.0,
+        "radius": 2.0,
+        "duration": 12.0,
+        "reverseDirection": false
+      }
+    },
+    {
+      "position": { "x": 58.0, "y": 6.0 },
+      "size": { "x": 2.5, "y": 0.8 },
+      "rawGrayscaleColor": 255.0,
+      "trajectory": {
+        "enabled": true,
+        "curveType": 1,
+        "domainMode": 0,
+        "playbackMode": 0,
+        "originX": 55.0,
+        "originY": 6.0,
+        "rotation": 0.0,
+        "scaleX": 5.0,
+        "scaleY": 1.0,
+        "paramMin": 0.0,
+        "paramMax": 360.0,
+        "boundsXMin": -10.0,
+        "boundsXMax": 10.0,
+        "boundsYMin": -10.0,
+        "boundsYMax": 10.0,
+        "radius": 3.0,
+        "duration": 14.0,
+        "reverseDirection": false
+      }
+    },
+    {
+      "position": { "x": 64.0, "y": 3.5 },
+      "size": { "x": 4.0, "y": 1.0 },
+      "rawGrayscaleColor": 255.0
+    },
+    {
+      "position": { "x": 71.0, "y": 4.0 },
+      "size": { "x": 2.5, "y": 0.8 },
+      "rawGrayscaleColor": 255.0,
+      "trajectory": {
+        "enabled": true,
+        "curveType": 1,
+        "domainMode": 0,
+        "playbackMode": 1,
+        "originX": 68.0,
+        "originY": 4.0,
+        "rotation": 0.0,
+        "scaleX": 5.0,
+        "scaleY": 1.0,
+        "paramMin": 0.0,
+        "paramMax": 180.0,
+        "boundsXMin": -10.0,
+        "boundsXMax": 10.0,
+        "boundsYMin": -10.0,
+        "boundsYMax": 10.0,
+        "radius": 3.0,
+        "duration": 12.0,
+        "reverseDirection": false
+      }
+    },
+    {
+      "position": { "x": 82.0, "y": 4.0 },
+      "size": { "x": 2.5, "y": 0.8 },
+      "rawGrayscaleColor": 255.0,
+      "trajectory": {
+        "enabled": true,
+        "curveType": 0,
+        "domainMode": 0,
+        "playbackMode": 1,
+        "originX": 76.0,
+        "originY": 4.0,
+        "rotation": 0.0,
+        "scaleX": 6.0,
+        "scaleY": 1.0,
+        "paramMin": 0.0,
+        "paramMax": 1.0,
+        "boundsXMin": -10.0,
+        "boundsXMax": 10.0,
+        "boundsYMin": -10.0,
+        "boundsYMax": 10.0,
+        "radius": 2.0,
+        "duration": 10.0,
+        "reverseDirection": true
+      }
+    },
+    {
+      "position": { "x": 91.0, "y": 4.0 },
+      "size": { "x": 2.5, "y": 0.8 },
+      "rawGrayscaleColor": 255.0,
+      "trajectory": {
+        "enabled": true,
+        "curveType": 1,
+        "domainMode": 0,
+        "playbackMode": 1,
+        "originX": 88.0,
+        "originY": 4.0,
+        "rotation": 0.0,
+        "scaleX": 5.0,
+        "scaleY": 1.0,
+        "paramMin": 180.0,
+        "paramMax": 360.0,
+        "boundsXMin": -10.0,
+        "boundsXMax": 10.0,
+        "boundsYMin": -10.0,
+        "boundsYMax": 10.0,
+        "radius": 3.0,
+        "duration": 12.0,
+        "reverseDirection": true
+      }
+    },
+    {
+      "position": { "x": 98.0, "y": 4.0 },
+      "size": { "x": 6.0, "y": 1.0 },
+      "rawGrayscaleColor": 255.0
+    }
+  ]
+}

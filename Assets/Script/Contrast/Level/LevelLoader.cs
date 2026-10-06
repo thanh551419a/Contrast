@@ -31,6 +31,9 @@ namespace Contrast.Level
         public Vector2 CurrentSpawnPosition { get; private set; }
         public LogicalColor CurrentSpawnColor { get; private set; } = LogicalColor.Black;
 
+        public Transform PlatformsRoot => platformsRoot;
+        public Transform LevelObjectsRoot => levelObjectsRoot;
+
         public void LoadAndInitializeLevel()
         {
             string json = LoadJsonString();
@@ -85,6 +88,13 @@ namespace Contrast.Level
         {
             if (data == null)
                 return;
+
+            CurrentLevelData = data;
+
+            Debug.Log(
+                $"[FLOW][LEVEL_LOAD] platforms={data.platforms?.Length ?? 0} " +
+                $"checkpoints={data.checkPoint?.Length ?? 0} " +
+                $"hasEnd={data.end != null}");
 
             EnsureRoots();
             ClearRuntimeLevel();
@@ -160,21 +170,36 @@ namespace Contrast.Level
                         pData.position.ToVector2(),
                         pData.size.ToVector2(),
                         pData.rawGrayscaleColor);
+
+                    // Initialize trajectory (disabled by default for old data).
+                    platform.InitializeTrajectory(pData.trajectory);
                 }
             }
 
             // --------------------------------------------------
-            // One-shot checkpoint.
+            // Checkpoints.
+            // Multiple checkpoints are supported. The latest checkpoint
+            // reached by the player updates CurrentSpawnPosition/Color.
             // --------------------------------------------------
-            if (data.checkPoint != null &&
-                data.checkPoint.position != null &&
-                data.checkPoint.size != null)
+            if (data.checkPoint != null)
             {
-                CreateMarker(
-                    LevelMarkerType.CheckPoint,
-                    data.checkPoint.position.ToVector2(),
-                    data.checkPoint.size.ToVector2(),
-                    data.checkPoint.color);
+                for (int i = 0; i < data.checkPoint.Length; i++)
+                {
+                    CheckPointData checkPointData = data.checkPoint[i];
+
+                    if (checkPointData == null ||
+                        checkPointData.position == null ||
+                        checkPointData.size == null)
+                    {
+                        continue;
+                    }
+
+                    CreateMarker(
+                        LevelMarkerType.CheckPoint,
+                        checkPointData.position.ToVector2(),
+                        checkPointData.size.ToVector2(),
+                        checkPointData.color);
+                }
             }
 
             // --------------------------------------------------
@@ -217,6 +242,10 @@ namespace Contrast.Level
 
             if (player != null)
             {
+                Debug.Log(
+                    $"[FLOW][SPAWN_INITIAL] position={CurrentSpawnPosition} " +
+                    $"color={CurrentSpawnColor}");
+
                 player.Respawn(
                     CurrentSpawnPosition,
                     CurrentSpawnColor);
@@ -240,6 +269,13 @@ namespace Contrast.Level
             if (player == null)
                 return;
 
+            Debug.Log(
+                $"[FLOW][SPAWN_RETRY] position={CurrentSpawnPosition} " +
+                $"color={CurrentSpawnColor}");
+
+            // Deterministically reset all moving platforms back to their initial phase
+            TrajectorySystem.ResetAll();
+
             player.Respawn(
                 CurrentSpawnPosition,
                 CurrentSpawnColor);
@@ -261,12 +297,12 @@ namespace Contrast.Level
                 return;
 
             Aabb playerBounds = Aabb.FromCenter(
-    new Vector2(
-        player.transform.position.x,
-        player.transform.position.y) + player.PlayerOffset,
-    new Vector2(
-        Mathf.Max(0.0001f, Mathf.Abs(player.PlayerSize.x)),
-        Mathf.Max(0.0001f, Mathf.Abs(player.PlayerSize.y))));
+                new Vector2(
+                    player.transform.position.x,
+                    player.transform.position.y) + player.PlayerOffset,
+                new Vector2(
+                    Mathf.Max(0.0001f, Mathf.Abs(player.PlayerSize.x)),
+                    Mathf.Max(0.0001f, Mathf.Abs(player.PlayerSize.y))));
 
             for (int i = LevelMarker.All.Count - 1; i >= 0; i--)
             {

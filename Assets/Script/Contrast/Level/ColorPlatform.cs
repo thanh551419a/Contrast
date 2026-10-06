@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using Contrast.Color;
+using Contrast.Data;
 using UnityEngine;
 
 namespace Contrast.Level
@@ -9,6 +10,7 @@ namespace Contrast.Level
     /// The platform stores its gameplay AABB as data. Unity Physics2D is not
     /// used by the Contrast movement/collision system.
     /// </summary>
+    [ExecuteAlways]
     public class ColorPlatform : MonoBehaviour
     {
         [Header("Gameplay Geometry")]
@@ -19,8 +21,18 @@ namespace Contrast.Level
         [SerializeField] private float rawGrayscaleColor = 255f;
 
         public LogicalColor Logical { get; private set; }
+        public bool IsUniversal => Logical == LogicalColor.Universal || rawGrayscaleColor >= 254.5f;
         public Vector2 Position => transform.position;
         public Vector2 Size => size + colliderPadding;
+
+        /// <summary>
+        /// The authored/saved position before trajectory motion.
+        /// Used to anchor trajectory origin on export.
+        /// </summary>
+        public Vector2 AuthoredPosition { get; private set; }
+
+        private Trajectory trajectory;
+        public float RawGrayscaleColor => rawGrayscaleColor;
 
         private SpriteRenderer spriteRenderer;
 
@@ -33,6 +45,41 @@ namespace Contrast.Level
         private void Awake()
         {
             EnsureComponents();
+        }
+
+        /// <summary>
+        /// Safe registry cleanup on destroy. Prevents stale entries
+        /// when a platform is deleted in the editor.
+        /// </summary>
+        private void OnDestroy()
+        {
+            All.Remove(this);
+        }
+
+        /// <summary>
+        /// Get or lazily add the Trajectory component.
+        /// </summary>
+        public Trajectory GetTrajectory()
+        {
+            if (trajectory == null)
+                trajectory = GetComponent<Trajectory>();
+            return trajectory;
+        }
+
+        /// <summary>
+        /// Ensure a Trajectory component exists and assign its config.
+        /// </summary>
+        public void InitializeTrajectory(TrajectoryData data)
+        {
+            if (trajectory == null)
+                trajectory = GetComponent<Trajectory>();
+            if (trajectory == null)
+                trajectory = gameObject.AddComponent<Trajectory>();
+
+            if (data != null)
+                trajectory.SetConfig(data.Clone());
+            else
+                trajectory.SetConfig(TrajectoryData.CreateDefault(Position));
         }
 
         public void Initialize(
@@ -51,6 +98,7 @@ namespace Contrast.Level
                 position.y,
                 0f);
             transform.localScale = Vector3.one;
+            AuthoredPosition = position;
 
             if (!All.Contains(this))
                 All.Add(this);
@@ -70,8 +118,46 @@ namespace Contrast.Level
             spriteRenderer.drawMode = SpriteDrawMode.Simple;
             spriteRenderer.sortingOrder = 0;
 
-            float v = Mathf.Clamp01(rawColor / 255f);
-            spriteRenderer.color = new UnityEngine.Color(v, v, v, 1f);
+            spriteRenderer.color = ColorClassifier.GetPlatformVisualColor(rawColor);
+        }
+
+
+        internal void SetEditorData(
+            Vector2 position,
+            Vector2 platformSize,
+            float rawColor)
+        {
+            size = new Vector2(
+                Mathf.Max(0.0001f, Mathf.Abs(platformSize.x)),
+                Mathf.Max(0.0001f, Mathf.Abs(platformSize.y)));
+
+            rawGrayscaleColor = rawColor;
+            Logical = ColorClassifier.Classify(rawColor);
+
+            transform.position = new Vector3(
+                position.x,
+                position.y,
+                0f);
+            AuthoredPosition = position;
+
+            EnsureComponents();
+
+            if (spriteRenderer == null)
+            {
+                GameObject visual = new GameObject("Visual");
+                visual.transform.SetParent(transform, false);
+                spriteRenderer = visual.AddComponent<SpriteRenderer>();
+            }
+
+            spriteRenderer.transform.localScale = new Vector3(
+                size.x + VisualOverlap,
+                size.y + VisualOverlap,
+                1f);
+            spriteRenderer.sprite = GetDefaultSprite();
+            spriteRenderer.drawMode = SpriteDrawMode.Simple;
+            spriteRenderer.sortingOrder = 0;
+
+            spriteRenderer.color = ColorClassifier.GetPlatformVisualColor(rawColor);
         }
 
         /// <summary>

@@ -1,4 +1,5 @@
 using Contrast.Camera;
+using Contrast.Data;
 using Contrast.Level;
 using Contrast.Player;
 using Contrast.UI;
@@ -10,23 +11,27 @@ using UnityEngine.InputSystem;
 namespace Contrast.Core
 {
     /// <summary>
-    /// Single gameplay coordinator. Restart rebuilds the complete runtime level.
-    /// Retry only restores the latest checkpoint position + color.
+    /// Single coordinator for menu, gameplay and level editing.
+    /// Gameplay still has one Update path for Player movement.
     /// </summary>
-    public class GameManager : MonoBehaviour
+    public sealed class GameManager : MonoBehaviour
     {
         public static GameManager Instance { get; private set; }
 
         [SerializeField] private GameOverUI gameOverUI;
         [SerializeField] private GameControlUI gameControlUI;
+        [SerializeField] private MainMenuUI mainMenuUI;
+        [SerializeField] private LevelEditorUI levelEditorUI;
+        [SerializeField] private LevelEditorController levelEditor;
         [SerializeField] private PlayerController player;
         [SerializeField] private LevelLoader levelLoader;
         [SerializeField] private CameraFollow cameraFollow;
 
-        public GameState State { get; private set; } = GameState.Playing;
-        public float KillY =>
-            levelLoader != null ? levelLoader.KillY : -50f;
+        public GameState State { get; private set; } = GameState.MainMenu;
+        public float KillY => levelLoader != null ? levelLoader.KillY : -50f;
         public PlayerController Player => player;
+        public LevelLoader LevelLoader => levelLoader;
+        public CameraFollow CameraFollow => cameraFollow;
 
         private void Awake()
         {
@@ -38,74 +43,131 @@ namespace Contrast.Core
 
             Instance = this;
 
-            if (player == null)
-                player = FindAnyObjectByType<PlayerController>();
-
-            if (levelLoader == null)
-                levelLoader = FindAnyObjectByType<LevelLoader>();
-
-            if (cameraFollow == null)
-                cameraFollow = FindAnyObjectByType<CameraFollow>();
-
-            if (gameOverUI == null)
-            {
-                gameOverUI =
-                    FindAnyObjectByType<GameOverUI>(
-                        FindObjectsInactive.Include);
-            }
+            player ??= FindAnyObjectByType<PlayerController>();
+            levelLoader ??= FindAnyObjectByType<LevelLoader>();
+            cameraFollow ??= FindAnyObjectByType<CameraFollow>();
+            gameOverUI ??= FindAnyObjectByType<GameOverUI>(FindObjectsInactive.Include);
+            gameControlUI ??= FindAnyObjectByType<GameControlUI>(FindObjectsInactive.Include);
+            mainMenuUI ??= FindAnyObjectByType<MainMenuUI>(FindObjectsInactive.Include);
+            levelEditorUI ??= FindAnyObjectByType<LevelEditorUI>(FindObjectsInactive.Include);
+            levelEditor ??= FindAnyObjectByType<LevelEditorController>(FindObjectsInactive.Include);
 
             if (gameOverUI == null)
-                gameOverUI =
-                    new GameObject("GameOverUI")
-                        .AddComponent<GameOverUI>();
+                gameOverUI = new GameObject("GameOverUI").AddComponent<GameOverUI>();
 
             if (gameControlUI == null)
-            {
-                gameControlUI =
-                    FindAnyObjectByType<GameControlUI>(
-                        FindObjectsInactive.Include);
-            }
+                gameControlUI = new GameObject("GameControlUI").AddComponent<GameControlUI>();
 
-            if (gameControlUI == null)
-                gameControlUI =
-                    new GameObject("GameControlUI")
-                        .AddComponent<GameControlUI>();
+            if (mainMenuUI == null)
+                mainMenuUI = new GameObject("MainMenuUI").AddComponent<MainMenuUI>();
+
+            if (levelEditor == null)
+                levelEditor = new GameObject("LevelEditorController").AddComponent<LevelEditorController>();
+
+            if (levelEditorUI == null)
+                levelEditorUI = new GameObject("LevelEditorUI").AddComponent<LevelEditorUI>();
+
+            if (player != null)
+                player.gameObject.SetActive(false);
         }
 
         private void Start()
         {
-            SetPlayer(player);
-            SetState(GameState.Playing);
-
-            if (levelLoader != null)
-                levelLoader.LoadAndInitializeLevel();
-            else
-                player?.ResetState();
+            SetState(GameState.MainMenu);
         }
 
-        // The only Unity Update driving gameplay.
+        // The only gameplay Update path.
         private void Update()
         {
+            if (State == GameState.Editing || State == GameState.MainMenu)
+                return;
+
             if (State != GameState.Playing)
             {
                 if (State == GameState.GameOver && RestartKeyPressed())
                     Restart();
-
                 return;
             }
 
-            player?.ProcessUpdate(Time.deltaTime);
+            if (player == null)
+                return;
 
-            // Level interactions happen after the final player movement.
+            // 1. Advance all trajectory-driven platforms BEFORE player movement
+            //    so that ColorPlatform.GetAabb() returns current geometry.
+            TrajectorySystem.UpdateAll(Time.deltaTime);
+
+            // 2. Apply rider-carry: if the player stands on a moving platform,
+            //    pass its frame displacement into the player's movement pipeline.
+            Vector2 riderDisp = TrajectorySystem.GetRiderDisplacement(
+                (Vector2)player.transform.position + player.PlayerOffset,
+                player.PlayerSize,
+                player.CurrentColor);
+            player.SetRiderDisplacement(riderDisp);
+
+            // 3. Normal player movement pipeline.
+            player.ProcessUpdate(Time.deltaTime);
             levelLoader?.ProcessPlayerInteractions(player);
-
             cameraFollow?.ProcessCameraUpdate();
+        }
+
+        public void StartGame()
+        {
+            Debug.Log("[FLOW][START_GAME] entering gameplay flow");
+            levelEditor?.StopEditing();
+            levelEditorUI?.Show(false);
+
+            if (player != null)
+                player.gameObject.SetActive(true);
+
+            SetState(GameState.Playing);
+
+            levelLoader?.LoadAndInitializeLevel();
+        }
+
+        public void StartGameWithLevelData(LevelData data)
+        {
+            Debug.Log("[FLOW][START_GAME_CUSTOM] entering gameplay flow with custom level data");
+            levelEditor?.StopEditing();
+            levelEditorUI?.Show(false);
+
+            if (player != null)
+                player.gameObject.SetActive(true);
+
+            SetState(GameState.Playing);
+
+            if (data != null && levelLoader != null)
+                levelLoader.BuildRuntimeLevel(data);
+            else
+                levelLoader?.LoadAndInitializeLevel();
+        }
+
+        public void OpenEditor()
+        {
+            Debug.Log("[FLOW][OPEN_EDITOR] entering edit flow");
+            SetState(GameState.Editing);
+
+            if (player != null)
+                player.gameObject.SetActive(false);
+
+            levelEditor?.StartEditing();
+            levelEditorUI?.Show(true);
+        }
+
+        public void ReturnToMainMenu()
+        {
+            Debug.Log("[FLOW][RETURN_MENU] leaving editor/gameplay");
+            levelEditor?.StopEditing();
+            levelEditorUI?.Show(false);
+
+            if (player != null)
+                player.gameObject.SetActive(false);
+
+            SetState(GameState.MainMenu);
         }
 
         public void SetPlayer(PlayerController pc)
         {
             player = pc;
-
             if (cameraFollow != null && player != null)
                 cameraFollow.Target = player.transform;
         }
@@ -114,7 +176,6 @@ namespace Contrast.Core
         {
             if (State != GameState.Playing)
                 return;
-
             SetState(GameState.GameOver);
         }
 
@@ -122,32 +183,30 @@ namespace Contrast.Core
         {
             if (State != GameState.Playing)
                 return;
-
             SetState(GameState.Won);
         }
 
-        /// <summary>
-        /// Rebuilds the complete runtime level and resets the spawn state to
-        /// StartPos position + color.
-        /// </summary>
         public void Restart()
         {
-            SetState(GameState.Playing);
+            Debug.Log("[FLOW][RESTART] reload full level");
+            if (State == GameState.Editing)
+                return;
 
-            if (levelLoader != null)
-                levelLoader.LoadAndInitializeLevel();
-            else
-                player?.ResetState();
+            if (player != null)
+                player.gameObject.SetActive(true);
+
+            SetState(GameState.Playing);
+            levelLoader?.LoadAndInitializeLevel();
         }
 
-        /// <summary>
-        /// Does not reload JSON and does not recreate checkpoints/platforms.
-        /// Only current checkpoint spawn position + color are restored.
-        /// </summary>
         public void Retry()
         {
+            Debug.Log("[FLOW][RETRY] use latest checkpoint spawn");
             if (levelLoader == null)
                 return;
+
+            if (player != null)
+                player.gameObject.SetActive(true);
 
             SetState(GameState.Playing);
             levelLoader.RetryCurrentSpawn();
@@ -155,24 +214,19 @@ namespace Contrast.Core
 
         private void SetState(GameState state)
         {
+            GameState previous = State;
             State = state;
+            Debug.Log($"[FLOW][STATE] {previous} -> {State}");
 
-            if (gameControlUI != null)
-                gameControlUI.Show(state == GameState.Playing);
+            mainMenuUI?.Show(state == GameState.MainMenu);
+            gameControlUI?.Show(state == GameState.Playing);
+            levelEditorUI?.Show(state == GameState.Editing);
 
             if (gameOverUI != null)
             {
-                bool showResult =
-                    state == GameState.GameOver ||
-                    state == GameState.Won;
-
-                string title =
-                    state == GameState.Won
-                        ? "YOU WIN"
-                        : "GAME OVER";
-
-                bool allowRetry = state == GameState.GameOver;
-                gameOverUI.ShowResult(showResult, title, allowRetry);
+                bool showResult = state == GameState.GameOver || state == GameState.Won;
+                string title = state == GameState.Won ? "YOU WIN" : "GAME OVER";
+                gameOverUI.ShowResult(showResult, title, state == GameState.GameOver);
             }
         }
 
@@ -181,11 +235,9 @@ namespace Contrast.Core
 #if ENABLE_INPUT_SYSTEM
             Keyboard kb = Keyboard.current;
             return kb != null &&
-                   (kb.rKey.wasPressedThisFrame ||
-                    kb.enterKey.wasPressedThisFrame);
+                   (kb.rKey.wasPressedThisFrame || kb.enterKey.wasPressedThisFrame);
 #else
-            return Input.GetKeyDown(KeyCode.R) ||
-                   Input.GetKeyDown(KeyCode.Return);
+            return Input.GetKeyDown(KeyCode.R) || Input.GetKeyDown(KeyCode.Return);
 #endif
         }
     }

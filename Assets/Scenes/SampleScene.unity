@@ -129,11 +129,13 @@ GameObject:
   m_Component:
   - component: {fileID: 331062054}
   - component: {fileID: 331062053}
-  - component: {fileID: 331062049}
+  - component: {fileID: 331062057}
   - component: {fileID: 331062051}
   - component: {fileID: 331062055}
-  - component: {fileID: 331062057}
   - component: {fileID: 331062056}
+  - component: {fileID: 331062060}
+  - component: {fileID: 331062059}
+  - component: {fileID: 331062058}
   m_Layer: 0
   m_Name: Player
   m_TagString: Untagged
@@ -141,18 +143,6 @@ GameObject:
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
   m_IsActive: 1
---- !u!114 &331062049
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 331062048}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 3d6ab19a75caeef42b5879a6b0a229d9, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: Assembly-CSharp::Contrast.Player.PlayerStateMachine
 --- !u!114 &331062051
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -166,7 +156,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::Contrast.Player.PlayerController
   moveSpeed: 6
-  playerSize: {x: 1, y: 1}
+  playerSize: {x: 2.5, y: 2.5}
   playerOffset: {x: 0, y: 0}
   currentColor: 1
   autoCreateSprite: 1
@@ -240,8 +230,8 @@ Transform:
   m_GameObject: {fileID: 331062048}
   serializedVersion: 2
   m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
-  m_LocalPosition: {x: 0.5, y: 3.09, z: 0}
-  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_LocalPosition: {x: -1.7979, y: 4.4352, z: 0}
+  m_LocalScale: {x: 3.4, y: 3.4, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []
   m_Father: {fileID: 0}
@@ -258,9 +248,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: b8da978944331a449b299ca6eb90d349, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::Contrast.Player.PlayerMovementResolver
-  stuckOverlapPercent: 50
-  collisionEpsilon: 0.0001
-  groundEpsilon: 0.02
+  logIntent: 1
 --- !u!114 &331062056
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -303,6 +291,52 @@ Rigidbody2D:
   m_SleepingMode: 1
   m_CollisionDetection: 0
   m_Constraints: 0
+--- !u!114 &331062058
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 331062048}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: ec2ee0e3837fa604bab2eb6adacc51ba, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::Contrast.Player.PlayerCollisionResolver
+  collisionEpsilon: 0.0001
+  groundEpsilon: 0.02
+  logCollision: 1
+--- !u!114 &331062059
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 331062048}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 983906029262d8a409181c3af380adb4, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::Contrast.Player.PlayerOverlapResolver
+  stuckOverlapPercent: 50
+  overlapPushSpeed: 2
+  verticalPushSpeed: 2
+  verticalPushSpeedMargin: 2
+  overlapSpeedReductionPercent: 80
+  logOverlap: 1
+--- !u!114 &331062060
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 331062048}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 864dea4a771a6fc45907c69ec84ec045, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::Contrast.Player.PlayerInput
+  logInput: 1
 --- !u!1 &519420028
 GameObject:
   m_ObjectHideFlags: 0
@@ -605,10 +639,11 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: d7bb0935e5d37404aa036455ae67d6d9, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::Contrast.Level.LevelLoader
-  levelJsonAsset: {fileID: 0}
+  levelJsonAsset: {fileID: 4900000, guid: 94eac2b0ef0892d438af1be645aca017, type: 3}
   levelJsonFilePath: Assets/Levels/SampleLevel.json
   platformPrefab: {fileID: 0}
   platformsRoot: {fileID: 0}
+  levelObjectsRoot: {fileID: 0}
 --- !u!114 &680530470
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -622,6 +657,10 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::Contrast.Core.GameManager
   gameOverUI: {fileID: 0}
+  gameControlUI: {fileID: 0}
+  mainMenuUI: {fileID: 0}
+  levelEditorUI: {fileID: 0}
+  levelEditor: {fileID: 0}
   player: {fileID: 0}
   levelLoader: {fileID: 0}
   cameraFollow: {fileID: 0}

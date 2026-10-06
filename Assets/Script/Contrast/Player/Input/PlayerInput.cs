@@ -25,7 +25,8 @@ namespace Contrast.Player
             Vector2 moveIntent = Vector2.zero;
             bool jumpRequested = false;
             bool hasColorChange = false;
-            LogicalColor requestedColor = LogicalColor.Black;
+            int colorChunkStep = 0;
+            LogicalColor requestedColor = LogicalColor.White;
 
 #if ENABLE_INPUT_SYSTEM
             Keyboard kb = Keyboard.current;
@@ -34,63 +35,91 @@ namespace Contrast.Player
                 if (logInput)
                     Debug.Log("[INPUT] Keyboard.current = null");
 
-                return new PlayerInputIntent(moveIntent, false, false, requestedColor);
+                return new PlayerInputIntent(moveIntent, false, false, requestedColor, 0);
             }
 
+            // A/D for horizontal movement
             float inputX =
-                ((kb.rightArrowKey.isPressed || kb.dKey.isPressed) ? 1f : 0f) -
-                ((kb.leftArrowKey.isPressed || kb.aKey.isPressed) ? 1f : 0f);
+                (kb.dKey.isPressed ? 1f : 0f) -
+                (kb.aKey.isPressed ? 1f : 0f);
 
             moveIntent = Vector2.right * inputX * moveSpeed * deltaTime;
 
             if (kb.spaceKey.wasPressedThisFrame && isGrounded)
                 jumpRequested = true;
 
-            if (kb.digit1Key.wasPressedThisFrame)
+            // Arrow keys change color by chunk of 84
+            if (kb.rightArrowKey.wasPressedThisFrame || kb.upArrowKey.wasPressedThisFrame)
             {
-                hasColorChange = true;
-                requestedColor = LogicalColor.Black;
+                colorChunkStep = 1;
             }
-            else if (kb.digit2Key.wasPressedThisFrame)
+            else if (kb.leftArrowKey.wasPressedThisFrame || kb.downArrowKey.wasPressedThisFrame)
             {
-                hasColorChange = true;
-                requestedColor = LogicalColor.Gray;
+                colorChunkStep = -1;
             }
-            else if (kb.digit3Key.wasPressedThisFrame)
+
+            // Direct digit keys: 1=White (0..84), 2=Gray (85..169), 3=Black (170..254)
+            if (kb.digit1Key.wasPressedThisFrame || kb.numpad1Key.wasPressedThisFrame)
             {
                 hasColorChange = true;
                 requestedColor = LogicalColor.White;
             }
+            else if (kb.digit2Key.wasPressedThisFrame || kb.numpad2Key.wasPressedThisFrame)
+            {
+                hasColorChange = true;
+                requestedColor = LogicalColor.Gray;
+            }
+            else if (kb.digit3Key.wasPressedThisFrame || kb.numpad3Key.wasPressedThisFrame)
+            {
+                hasColorChange = true;
+                requestedColor = LogicalColor.Black;
+            }
 #else
-            float inputX = Input.GetAxisRaw("Horizontal");
+            // Fallback for classic InputManager
+            float inputX = 0f;
+            if (Input.GetKey(KeyCode.D)) inputX += 1f;
+            if (Input.GetKey(KeyCode.A)) inputX -= 1f;
+
             moveIntent = Vector2.right * inputX * moveSpeed * deltaTime;
 
             if (Input.GetKeyDown(KeyCode.Space) && isGrounded)
                 jumpRequested = true;
 
-            if (Input.GetKeyDown(KeyCode.Alpha1))
+            // Arrow keys change color by chunk of 84
+            if (Input.GetKeyDown(KeyCode.RightArrow) || Input.GetKeyDown(KeyCode.UpArrow))
             {
-                hasColorChange = true;
-                requestedColor = LogicalColor.Black;
+                colorChunkStep = 1;
             }
-            else if (Input.GetKeyDown(KeyCode.Alpha2))
+            else if (Input.GetKeyDown(KeyCode.LeftArrow) || Input.GetKeyDown(KeyCode.DownArrow))
             {
-                hasColorChange = true;
-                requestedColor = LogicalColor.Gray;
+                colorChunkStep = -1;
             }
-            else if (Input.GetKeyDown(KeyCode.Alpha3))
+
+            // Direct digit keys
+            if (Input.GetKeyDown(KeyCode.Alpha1) || Input.GetKeyDown(KeyCode.Keypad1))
             {
                 hasColorChange = true;
                 requestedColor = LogicalColor.White;
             }
+            else if (Input.GetKeyDown(KeyCode.Alpha2) || Input.GetKeyDown(KeyCode.Keypad2))
+            {
+                hasColorChange = true;
+                requestedColor = LogicalColor.Gray;
+            }
+            else if (Input.GetKeyDown(KeyCode.Alpha3) || Input.GetKeyDown(KeyCode.Keypad3))
+            {
+                hasColorChange = true;
+                requestedColor = LogicalColor.Black;
+            }
 #endif
 
-            if (logInput)
+            if (logInput && (inputX != 0f || jumpRequested || hasColorChange || colorChunkStep != 0))
             {
                 Debug.Log(
-                    $"[INPUT] inputX={moveIntent.x / Mathf.Max(0.0001f, moveSpeed * deltaTime):F2} " +
+                    $"[INPUT] inputX={inputX:F2} " +
                     $"moveIntent={moveIntent} " +
                     $"jumpRequested={jumpRequested} " +
+                    $"colorStep={colorChunkStep} " +
                     $"colorChange={hasColorChange} " +
                     $"requestedColor={requestedColor}");
             }
@@ -99,7 +128,8 @@ namespace Contrast.Player
                 moveIntent,
                 jumpRequested,
                 hasColorChange,
-                requestedColor);
+                requestedColor,
+                colorChunkStep);
         }
     }
 
@@ -109,17 +139,20 @@ namespace Contrast.Player
         public readonly bool JumpRequested;
         public readonly bool HasColorChange;
         public readonly LogicalColor RequestedColor;
+        public readonly int ColorChunkStep;
 
         public PlayerInputIntent(
             Vector2 move,
             bool jumpRequested,
             bool hasColorChange,
-            LogicalColor requestedColor)
+            LogicalColor requestedColor,
+            int colorChunkStep = 0)
         {
             Move = move;
             JumpRequested = jumpRequested;
             HasColorChange = hasColorChange;
             RequestedColor = requestedColor;
+            ColorChunkStep = colorChunkStep;
         }
     }
 }

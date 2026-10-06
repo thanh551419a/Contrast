@@ -8,8 +8,9 @@ namespace Contrast.Data
         // New level spawn definition.
         public StartPosData startPos;
 
-        // One-shot checkpoint.
-        public CheckPointData checkPoint;
+        // Checkpoints are evaluated in order during gameplay.
+        // The latest checkpoint touched becomes the current retry spawn.
+        public CheckPointData[] checkPoint;
 
         // End-game contact area.
         public EndData end;
@@ -64,6 +65,13 @@ namespace Contrast.Data
         public Vector2Data position          = new Vector2Data(0f, 0f);
         public Vector2Data size              = new Vector2Data(1f, 1f);
         public float       rawGrayscaleColor = 255f;
+
+        /// <summary>
+        /// Optional trajectory configuration. Null or disabled means the
+        /// platform is stationary. Legacy JSON without this field deserializes
+        /// as null — fully backward-compatible.
+        /// </summary>
+        public TrajectoryData trajectory;
     }
 
     [System.Serializable]
