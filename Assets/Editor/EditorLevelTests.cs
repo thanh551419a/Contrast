@@ -4,7 +4,10 @@ using System.IO;
 using Contrast.Color;
 using Contrast.Data;
 using Contrast.Level;
+using Contrast.Level.EditorInteraction;
 using Contrast.Player;
+using Contrast.Presentation;
+using Contrast.UI;
 using UnityEditor;
 using UnityEngine;
 
@@ -49,6 +52,15 @@ namespace Contrast.Tests
             Test_LevelPersistence_RoundTrip();
             Test_LegacyJson_BackwardCompatibility();
             Test_TrajectoryShowcaseLevelFile();
+            Test_VisualPresentation_Integration();
+            Test_EditorInputRouter();
+            Test_TrajectoryInteractionState_Preview_Commit_Rollback();
+            Test_TrajectoryHandleVisualizer_HitTesting();
+            Test_TrajectoryEditController_LockstepAndSnapping();
+            Test_Platform_SizeAndColor_Editing();
+            Test_FitMap_And_LevelBounds_Calculations();
+            Test_ResetLevel_Functionality();
+            Test_GhostPlatform_TestPlay_Lifecycle_And_Reset();
 
             Debug.Log("================================================================================");
             Debug.Log($"[TEST_SUITE] COMPLETED: {passedCount} PASSED, {failedCount} FAILED, 0 BLOCKED");
@@ -632,5 +644,613 @@ namespace Contrast.Tests
             AssertTrue(hasArc, "ShowcaseLevel_Arc", "Has 180 Arc semi-circle");
             AssertTrue(hasReverse, "ShowcaseLevel_Reverse", "Has Reverse direction");
         }
+
+        private static void Test_VisualPresentation_Integration()
+        {
+            // 1. Verify BackgroundPresentation sets camera clear background correctly
+            GameObject camGo = new GameObject("TestCam");
+            UnityEngine.Camera cam = camGo.AddComponent<UnityEngine.Camera>();
+            cam.tag = "MainCamera";
+
+            GameObject bgGo = new GameObject("TestBg");
+            var bg = bgGo.AddComponent<Contrast.Presentation.BackgroundPresentation>();
+            AssertTrue(bg != null, "Visual_Background_Creation", "BackgroundPresentation initialized");
+            AssertTrue(cam.clearFlags == CameraClearFlags.SolidColor, "Visual_Background_ClearFlags", "Camera clear flags set to SolidColor");
+            AssertApproximately(0.02f, cam.backgroundColor.r, 0.015f, "Visual_Background_Color_R", "Background color red component");
+            AssertApproximately(0.031f, cam.backgroundColor.g, 0.015f, "Visual_Background_Color_G", "Background color green component");
+            AssertApproximately(0.071f, cam.backgroundColor.b, 0.015f, "Visual_Background_Color_B", "Background color blue component");
+
+            // 2. Verify PlatformVisualPresentation generates optical styles without modifying AABB
+            GameObject platGo = new GameObject("TestPlatform");
+            var plat = platGo.AddComponent<ColorPlatform>();
+            plat.Initialize(new Vector2(5f, 2f), new Vector2(4f, 1f), 255f);
+            var platPres = platGo.AddComponent<Contrast.Presentation.PlatformVisualPresentation>();
+            platPres.InitializeVisuals();
+
+            AssertTrue(platPres != null, "Visual_Platform_Creation", "PlatformVisualPresentation created");
+            Rect aabb = plat.GetAabb();
+            AssertApproximately(4f, aabb.width, 0.01f, "Visual_Platform_AABB_Width_Preserved", "Platform AABB width untouched");
+            AssertApproximately(1f, aabb.height, 0.01f, "Visual_Platform_AABB_Height_Preserved", "Platform AABB height untouched");
+            AssertApproximately(5f, aabb.center.x, 0.01f, "Visual_Platform_AABB_CenterX_Preserved", "Platform AABB center X untouched");
+            AssertApproximately(2f, aabb.center.y, 0.01f, "Visual_Platform_AABB_CenterY_Preserved", "Platform AABB center Y untouched");
+
+            // 3. Verify PlayerVisualPresentation creates optical children without altering PlayerSize
+            GameObject playerGo = new GameObject("TestPlayer");
+            var pc = playerGo.AddComponent<PlayerController>();
+            var pPres = playerGo.AddComponent<Contrast.Presentation.PlayerVisualPresentation>();
+            pPres.InitializeVisuals();
+            AssertTrue(pPres != null, "Visual_Player_Creation", "PlayerVisualPresentation created");
+            Transform visualRoot = playerGo.transform.Find("VisualPresentationRoot");
+            AssertTrue(visualRoot != null, "Visual_Player_Root_Hierarchy", "VisualPresentationRoot exists as child");
+            AssertTrue(visualRoot.Find("OpticalBody") != null, "Visual_Player_OpticalBody_Child", "OpticalBody child exists");
+            AssertTrue(visualRoot.Find("GlowHalo") != null, "Visual_Player_GlowHalo_Child", "GlowHalo child exists");
+            AssertTrue(visualRoot.Find("CoreLight") != null, "Visual_Player_CoreLight_Child", "CoreLight child exists");
+
+            // 4. Verify NewtonRingsPresentation initializes without exceptions
+            GameObject newtonGo = new GameObject("TestNewton");
+            var newton = newtonGo.AddComponent<Contrast.Presentation.NewtonRingsPresentation>();
+            AssertTrue(newton != null, "Visual_Newton_Creation", "NewtonRingsPresentation created");
+
+            // Cleanup test objects
+            UnityEngine.Object.DestroyImmediate(playerGo);
+            UnityEngine.Object.DestroyImmediate(platGo);
+            UnityEngine.Object.DestroyImmediate(bgGo);
+            UnityEngine.Object.DestroyImmediate(camGo);
+            UnityEngine.Object.DestroyImmediate(newtonGo);
+        }
+
+        private static void Test_EditorInputRouter()
+        {
+            var router = new EditorInputRouter();
+            AssertTrue(!router.HasPointerCapture, "InputRouter_InitialCapture", "No capture initially");
+
+            object ownerA = "ownerA";
+            object ownerB = "ownerB";
+
+            AssertTrue(router.CapturePointer(ownerA), "InputRouter_CaptureA", "Owner A acquires capture");
+            AssertTrue(router.HasPointerCapture, "InputRouter_HasCapture", "Has capture after acquire");
+            AssertTrue(router.IsOwner(ownerA), "InputRouter_IsOwnerA", "IsOwner matches owner A");
+            AssertTrue(!router.IsOwner(ownerB), "InputRouter_NotOwnerB", "IsOwner returns false for owner B");
+
+            // Owner B cannot steal capture while owner A holds it
+            AssertTrue(!router.CapturePointer(ownerB), "InputRouter_CannotSteal", "Owner B cannot steal capture from owner A");
+
+            router.ReleasePointer(ownerA);
+            AssertTrue(!router.HasPointerCapture, "InputRouter_Released", "Capture released successfully");
+
+            // Can now be acquired by owner B
+            AssertTrue(router.CapturePointer(ownerB), "InputRouter_CaptureB", "Owner B acquires capture after release");
+            router.ForceReleasePointer();
+            AssertTrue(!router.HasPointerCapture, "InputRouter_ForceRelease", "ForceRelease clears capture");
+        }
+
+        private static void Test_TrajectoryInteractionState_Preview_Commit_Rollback()
+        {
+            GameObject go = new GameObject("TestPlat_InteractionState");
+            var plat = go.AddComponent<ColorPlatform>();
+            plat.Initialize(new Vector2(10f, 5f), new Vector2(4f, 1f), 255f);
+
+            var cfg = TrajectoryData.CreateDefault(new Vector2(10f, 5f));
+            cfg.enabled = true;
+            cfg.curveType = TrajectoryCurveType.Line;
+            cfg.scaleX = 6f;
+            cfg.rotation = 0f;
+            plat.InitializeTrajectory(cfg);
+
+            var state = new TrajectoryInteractionState();
+            AssertTrue(!state.IsDragging, "InteractionState_Init", "Initially idle");
+
+            // 1. Begin drag on LineEnd handle
+            Vector2 handleWorld = new Vector2(16f, 5f);
+            AssertTrue(state.BeginDrag(TrajectoryHandleKind.LineEnd, handleWorld, plat), "InteractionState_BeginDrag", "Begin drag succeeded");
+            AssertTrue(state.IsDragging, "InteractionState_Dragging", "Phase is dragging");
+            AssertTrue(state.ActiveHandle == TrajectoryHandleKind.LineEnd, "InteractionState_ActiveHandle", "Active handle is LineEnd");
+
+            // 2. Drag pointer to (10, 13) -> vertical line of length 8 (scaleX=8, rotation=90)
+            Vector2 dragWorld = new Vector2(10f, 13f);
+            AssertTrue(state.CalculatePreview(dragWorld, out Vector2 previewPlatformPos), "InteractionState_CalcPreview", "CalculatePreview returned true");
+            AssertApproximately(8f, state.WorkingPreviewConfig.scaleX, 0.01f, "InteractionState_PreviewScale", "Preview scaleX is 8");
+            AssertApproximately(90f, state.WorkingPreviewConfig.rotation, 0.1f, "InteractionState_PreviewRot", "Preview rotation is 90 deg");
+
+            // 3. Rollback: should restore initial state
+            TrajectoryData rolledBack = state.Rollback(out Vector2 restoredPos);
+            AssertTrue(!state.IsDragging, "InteractionState_Rollback_Idle", "Phase returns to idle after rollback");
+            AssertApproximately(6f, rolledBack.scaleX, 0.01f, "InteractionState_Rollback_ScaleRestored", "ScaleX restored to 6");
+            AssertApproximately(0f, rolledBack.rotation, 0.01f, "InteractionState_Rollback_RotRestored", "Rotation restored to 0");
+            AssertApproximately(10f, restoredPos.x, 0.01f, "InteractionState_Rollback_PosRestoredX", "Platform X restored to 10");
+            AssertApproximately(5f, restoredPos.y, 0.01f, "InteractionState_Rollback_PosRestoredY", "Platform Y restored to 5");
+
+            // 4. Begin drag again and Commit
+            state.BeginDrag(TrajectoryHandleKind.LineEnd, handleWorld, plat);
+            state.CalculatePreview(dragWorld, out _);
+            TrajectoryData committed = state.Commit(out Vector2 finalPos);
+            AssertTrue(!state.IsDragging, "InteractionState_Commit_Idle", "Phase returns to idle after commit");
+            AssertApproximately(8f, committed.scaleX, 0.01f, "InteractionState_Commit_ScaleCommitted", "Committed scaleX is 8");
+            AssertApproximately(90f, committed.rotation, 0.1f, "InteractionState_Commit_RotCommitted", "Committed rotation is 90 deg");
+            AssertApproximately(8f, plat.GetTrajectory().Config.scaleX, 0.01f, "InteractionState_Authoritative_Scale", "Platform trajectory config updated");
+
+            UnityEngine.Object.DestroyImmediate(go);
+        }
+
+        private static void Test_TrajectoryHandleVisualizer_HitTesting()
+        {
+            var visualizer = new TrajectoryHandleVisualizer(0.16f, 0.35f);
+
+            // 1. Line mode
+            var lineCfg = new TrajectoryData
+            {
+                enabled = true,
+                curveType = TrajectoryCurveType.Line,
+                domainMode = TrajectoryDomainMode.ParameterRange,
+                originX = 5f,
+                originY = 2f,
+                scaleX = 10f,
+                rotation = 0f,
+                paramMin = 0f,
+                paramMax = 1f,
+                duration = 4f
+            };
+
+            // Hit near origin (5, 2)
+            AssertTrue(visualizer.HitTest(new Vector2(5.1f, 2.05f), lineCfg) == TrajectoryHandleKind.Origin,
+                "HitTest_Line_Origin", "Origin handle hit detected");
+
+            // Hit near endpoint (15, 2)
+            AssertTrue(visualizer.HitTest(new Vector2(14.95f, 2.1f), lineCfg) == TrajectoryHandleKind.LineEnd,
+                "HitTest_Line_LineEnd", "LineEnd handle hit detected");
+
+            // Miss
+            AssertTrue(visualizer.HitTest(new Vector2(10f, 10f), lineCfg) == TrajectoryHandleKind.None,
+                "HitTest_Line_Miss", "Miss returns None");
+
+            // 2. Circle mode
+            var circleCfg = new TrajectoryData
+            {
+                enabled = true,
+                curveType = TrajectoryCurveType.Circle,
+                domainMode = TrajectoryDomainMode.ParameterRange,
+                originX = 20f,
+                originY = 10f,
+                radius = 5f,
+                paramMin = 0f,
+                paramMax = 360f,
+                duration = 6f
+            };
+
+            // Hit center (20, 10)
+            AssertTrue(visualizer.HitTest(new Vector2(20.1f, 9.95f), circleCfg) == TrajectoryHandleKind.CircleCenter,
+                "HitTest_Circle_Center", "Circle center handle hit detected");
+
+            // Hit radius handle (20 + 5, 10) = (25, 10)
+            AssertTrue(visualizer.HitTest(new Vector2(25.05f, 10.1f), circleCfg) == TrajectoryHandleKind.CircleRadius,
+                "HitTest_Circle_Radius", "Circle radius handle hit detected");
+
+            // 3. Spatial bounds line
+            var boundsCfg = new TrajectoryData
+            {
+                enabled = true,
+                curveType = TrajectoryCurveType.Line,
+                domainMode = TrajectoryDomainMode.SpatialBounds,
+                originX = 0f,
+                originY = 0f,
+                scaleX = 10f,
+                rotation = 0f,
+                boundsXMin = -8f,
+                boundsXMax = 8f,
+                boundsYMin = -4f,
+                boundsYMax = 4f,
+                duration = 4f
+            };
+
+            // Hit MinX handle at (-8, 0)
+            AssertTrue(visualizer.HitTest(new Vector2(-8.1f, 0.05f), boundsCfg) == TrajectoryHandleKind.BoundsMinX,
+                "HitTest_Bounds_MinX", "SpatialBounds MinX handle hit detected");
+            // Hit MaxX handle at (8, 0)
+            AssertTrue(visualizer.HitTest(new Vector2(7.95f, -0.05f), boundsCfg) == TrajectoryHandleKind.BoundsMaxX,
+                "HitTest_Bounds_MaxX", "SpatialBounds MaxX handle hit detected");
+        }
+
+        private static void Test_TrajectoryEditController_LockstepAndSnapping()
+        {
+            var editCtrl = new TrajectoryEditController(0.16f, 0.35f);
+
+            GameObject go = new GameObject("TestPlat_EditCtrl");
+            var plat = go.AddComponent<ColorPlatform>();
+            plat.Initialize(new Vector2(10f, 5f), new Vector2(4f, 1f), 255f);
+
+            var cfg = TrajectoryData.CreateDefault(new Vector2(10f, 5f));
+            cfg.enabled = true;
+            cfg.curveType = TrajectoryCurveType.Line;
+            cfg.domainMode = TrajectoryDomainMode.SpatialBounds;
+            cfg.originX = 10f;
+            cfg.originY = 5f;
+            cfg.boundsXMin = 5f;
+            cfg.boundsXMax = 15f;
+            cfg.boundsYMin = 2f;
+            cfg.boundsYMax = 8f;
+            plat.InitializeTrajectory(cfg);
+
+            editCtrl.SetTarget(plat, null);
+
+            // Test lockstep offset
+            Vector2 initialOrigin = new Vector2(10f, 5f);
+            Vector2 initialBoundsMin = new Vector2(5f, 2f);
+            Vector2 initialBoundsMax = new Vector2(15f, 8f);
+            Vector2 delta = new Vector2(3f, -2f);
+
+            editCtrl.ApplyLockstepOffset(initialOrigin, initialBoundsMin, initialBoundsMax, delta, null);
+
+            var activeCfg = plat.GetTrajectory().Config;
+            AssertApproximately(13f, activeCfg.originX, 0.001f, "EditCtrl_Lockstep_OriginX", "Origin X translated lockstep");
+            AssertApproximately(3f, activeCfg.originY, 0.001f, "EditCtrl_Lockstep_OriginY", "Origin Y translated lockstep");
+            AssertApproximately(8f, activeCfg.boundsXMin, 0.001f, "EditCtrl_Lockstep_BoundsMinX", "Bounds MinX translated lockstep");
+            AssertApproximately(18f, activeCfg.boundsXMax, 0.001f, "EditCtrl_Lockstep_BoundsMaxX", "Bounds MaxX translated lockstep");
+            AssertApproximately(0f, activeCfg.boundsYMin, 0.001f, "EditCtrl_Lockstep_BoundsMinY", "Bounds MinY translated lockstep");
+            AssertApproximately(6f, activeCfg.boundsYMax, 0.001f, "EditCtrl_Lockstep_BoundsMaxY", "Bounds MaxY translated lockstep");
+
+            editCtrl.ClearTarget(null);
+            UnityEngine.Object.DestroyImmediate(go);
+        }
+
+        private static void Test_Platform_SizeAndColor_Editing()
+        {
+            GameObject go = new GameObject("TestPlat_SizeColor");
+            var plat = go.AddComponent<ColorPlatform>();
+            plat.Initialize(new Vector2(0f, 0f), new Vector2(4f, 1f), 255f);
+
+            var pres = go.AddComponent<PlatformVisualPresentation>();
+            pres.InitializeVisuals();
+
+            // Find surface renderer and border renderer
+            Transform visualRoot = go.transform.Find("PlatformVisualPresentationRoot");
+            AssertTrue(visualRoot != null, "SizeColor_RootExists", "Visual root exists");
+            SpriteRenderer surfaceSr = visualRoot.Find("Surface")?.GetComponent<SpriteRenderer>();
+            SpriteRenderer borderSr = visualRoot.Find("Border")?.GetComponent<SpriteRenderer>();
+
+            AssertTrue(surfaceSr != null, "SizeColor_SurfaceExists", "Surface renderer exists");
+            AssertApproximately(4f, surfaceSr.transform.localScale.x, 0.01f, "SizeColor_InitScaleX", "Initial scale X is 4");
+            AssertApproximately(1f, surfaceSr.transform.localScale.y, 0.01f, "SizeColor_InitScaleY", "Initial scale Y is 1");
+
+            // 1. Change size via SetEditorData
+            plat.SetEditorData(new Vector2(0f, 0f), new Vector2(8f, 3f), 255f);
+            AssertApproximately(8f, plat.Size.x, 0.01f, "SizeColor_PlatSizeX", "Platform Size X updated");
+            AssertApproximately(3f, plat.Size.y, 0.01f, "SizeColor_PlatSizeY", "Platform Size Y updated");
+
+            // Verify visual presentation updated to 8x3 with 9-slice borders
+            AssertApproximately(8f, surfaceSr.transform.localScale.x, 0.01f, "SizeColor_VisualScaleX", "Visual surface scale X updated to 8");
+            AssertApproximately(3f, surfaceSr.transform.localScale.y, 0.01f, "SizeColor_VisualScaleY", "Visual surface scale Y updated to 3");
+            AssertApproximately(8f, borderSr.size.x, 0.01f, "SizeColor_BorderSizeX", "Visual border size X updated to 8");
+            AssertApproximately(3f, borderSr.size.y, 0.01f, "SizeColor_BorderSizeY", "Visual border size Y updated to 3");
+
+            // 2. Change color to White (0) via SetEditorData
+            plat.SetEditorData(new Vector2(0f, 0f), new Vector2(8f, 3f), 0f);
+            AssertApproximately(0f, plat.RawGrayscaleColor, 0.01f, "SizeColor_PlatColorRaw", "Platform color updated to 0 (White)");
+            AssertTrue(plat.Logical == LogicalColor.White, "SizeColor_PlatLogical", "Platform logical color is White");
+
+            // Verify visual presentation updated to high-contrast White border (crisp slate outline)
+            UnityEngine.Color whiteBorder = new UnityEngine.Color(0.18f, 0.25f, 0.35f, 0.95f);
+            AssertApproximately(whiteBorder.r, borderSr.color.r, 0.02f, "SizeColor_VisualBorderColorR", "Visual border color R matches White high-contrast border");
+            AssertApproximately(whiteBorder.a, borderSr.color.a, 0.02f, "SizeColor_VisualBorderColorA", "Visual border color A matches White high-contrast border");
+
+            // 3. Test through LevelEditorController.ApplySelectedPlatformFromUI
+            GameObject ctrlGo = new GameObject("TestCtrl_SizeColor");
+            var ctrl = ctrlGo.AddComponent<LevelEditorController>();
+            ctrl.SelectPlatform(plat);
+
+            ctrl.ApplySelectedPlatformFromUI(new Vector2(2f, 1f), new Vector2(12f, 4f), 127f); // Gray, 12x4 at (2, 1)
+
+            AssertApproximately(12f, plat.Size.x, 0.01f, "SizeColor_CtrlSizeX", "Platform Size X updated via controller");
+            AssertApproximately(4f, plat.Size.y, 0.01f, "SizeColor_CtrlSizeY", "Platform Size Y updated via controller");
+            AssertApproximately(12f, surfaceSr.transform.localScale.x, 0.01f, "SizeColor_CtrlVisualScaleX", "Visual scale X updated via controller");
+            AssertApproximately(4f, surfaceSr.transform.localScale.y, 0.01f, "SizeColor_CtrlVisualScaleY", "Visual scale Y updated via controller");
+            AssertApproximately(12f, borderSr.size.x, 0.01f, "SizeColor_CtrlBorderSizeX", "Visual border size X updated via controller");
+            AssertApproximately(4f, borderSr.size.y, 0.01f, "SizeColor_CtrlBorderSizeY", "Visual border size Y updated via controller");
+            AssertTrue(plat.Logical == LogicalColor.Gray, "SizeColor_CtrlLogical", "Platform logical color is Gray via controller");
+
+            UnityEngine.Color grayBorder = new UnityEngine.Color(0.769f, 0.800f, 0.835f, 0.50f);
+            AssertApproximately(grayBorder.r, borderSr.color.r, 0.02f, "SizeColor_CtrlVisualBorderR", "Visual border color R matches Gray");
+
+            UnityEngine.Object.DestroyImmediate(ctrlGo);
+            UnityEngine.Object.DestroyImmediate(go);
+        }
+
+        private static void Test_FitMap_And_LevelBounds_Calculations()
+        {
+            // Clean slate for testing bounds
+            ColorPlatform.ClearRegistry();
+            LevelMarker.All.Clear();
+
+            // Create temporary camera
+            GameObject camGo = new GameObject("TestFitMap_Cam");
+            var cam = camGo.AddComponent<UnityEngine.Camera>();
+            cam.tag = "MainCamera";
+            cam.orthographic = true;
+            cam.orthographicSize = 5f;
+            cam.transform.position = new Vector3(0f, 0f, -10f);
+
+            GameObject ctrlGo = new GameObject("TestFitMap_Ctrl");
+            var ctrl = ctrlGo.AddComponent<LevelEditorController>();
+
+            // 1. Degenerate / Empty level fallback bounds
+            Bounds emptyBounds = ctrl.CalculateLevelBounds();
+            AssertApproximately(0f, emptyBounds.center.x, 0.01f, "FitMap_EmptyBoundsCenterX", "Empty bounds centered at X=0");
+            AssertApproximately(0f, emptyBounds.center.y, 0.01f, "FitMap_EmptyBoundsCenterY", "Empty bounds centered at Y=0");
+            AssertApproximately(20f, emptyBounds.size.x, 0.01f, "FitMap_EmptyBoundsSizeX", "Empty bounds fallback width 20");
+            AssertApproximately(10f, emptyBounds.size.y, 0.01f, "FitMap_EmptyBoundsSizeY", "Empty bounds fallback height 10");
+
+            // 2. Multi-object level bounds (including negative coordinates and platforms of various sizes)
+            GameObject p1Go = new GameObject("P1");
+            var p1 = p1Go.AddComponent<ColorPlatform>();
+            p1.Initialize(new Vector2(-20f, -5f), new Vector2(6f, 2f), 0f); // White platform at (-20, -5)
+
+            GameObject p2Go = new GameObject("P2");
+            var p2 = p2Go.AddComponent<ColorPlatform>();
+            p2.Initialize(new Vector2(40f, 15f), new Vector2(10f, 2f), 212f); // Black platform at (40, 15)
+
+            // StartPos marker at (-10, 0)
+            GameObject markerGo = new GameObject("StartPos");
+            var marker = markerGo.AddComponent<LevelMarker>();
+            marker.Initialize(LevelMarkerType.StartPos, new Vector2(-10f, 0f), new Vector2(1f, 1f), 0f);
+
+            Bounds multiBounds = ctrl.CalculateLevelBounds();
+            // X span: (-20 - 3) = -23 to (40 + 5) = 45 -> width 68, center 11
+            // Y span: (-5 - 1) = -6 to (15 + 1) = 16 -> height 22, center 5
+            AssertApproximately(11f, multiBounds.center.x, 0.1f, "FitMap_MultiBoundsCenterX", "Multi bounds center X correct");
+            AssertApproximately(5f, multiBounds.center.y, 0.1f, "FitMap_MultiBoundsCenterY", "Multi bounds center Y correct");
+            AssertApproximately(68f, multiBounds.size.x, 0.1f, "FitMap_MultiBoundsSizeX", "Multi bounds size X correct");
+            AssertApproximately(22f, multiBounds.size.y, 0.1f, "FitMap_MultiBoundsSizeY", "Multi bounds size Y correct");
+
+            // 3. Trajectory extent expansion
+            // Add trajectory to P2 moving from (40, 15) to (70, 25)
+            var traj = p2.GetTrajectory();
+            var trajData = new TrajectoryData
+            {
+                enabled = true,
+                curveType = TrajectoryCurveType.Line,
+                domainMode = TrajectoryDomainMode.ParameterRange,
+                originX = 40f,
+                originY = 15f,
+                rotation = 0f,
+                scaleX = 30f,
+                paramMin = 0f,
+                paramMax = 1f,
+                duration = 4f
+            };
+            p2.InitializeTrajectory(trajData);
+
+            Bounds trajBounds = ctrl.CalculateLevelBounds();
+            // Trajectory extends to X=70 -> total X span -23 to 70 = 93
+            AssertTrue(trajBounds.size.x >= 92f, "FitMap_TrajBoundsExpanded", "Trajectory motion expands bounds");
+
+            // 4. Test FitMap execution
+            ctrl.StartEditing();
+            ctrl.FitMap();
+
+            // Verify orthographic size enlarged to fit bounds comfortably
+            AssertTrue(cam.orthographicSize > 15f, "FitMap_CamOrthoSizeExpanded", "Camera orthographic size fits level content");
+
+            // Verify camera position centered on bounds (accounting for UI panel margins)
+            float camXBefore = cam.transform.position.x;
+            float camYBefore = cam.transform.position.y;
+            float orthoBefore = cam.orthographicSize;
+
+            // Repeated FitMap call should be idempotent and stable
+            ctrl.FitMap();
+            AssertApproximately(camXBefore, cam.transform.position.x, 0.001f, "FitMap_IdempotentX", "FitMap repeated call preserves X");
+            AssertApproximately(camYBefore, cam.transform.position.y, 0.001f, "FitMap_IdempotentY", "FitMap repeated call preserves Y");
+            AssertApproximately(orthoBefore, cam.orthographicSize, 0.001f, "FitMap_IdempotentOrtho", "FitMap repeated call preserves OrthoSize");
+
+            // 5. White platform visibility aid and selection box verification
+            ctrl.SelectPlatform(p1);
+            AssertTrue(ctrl.SelectedPlatform == p1, "FitMap_SelectWhitePlat", "White platform selected successfully");
+            AssertTrue(p1.Logical == LogicalColor.White, "FitMap_WhiteColorSemantic", "White platform preserves White semantic");
+
+            ctrl.StopEditing();
+
+            // Cleanup
+            UnityEngine.Object.DestroyImmediate(p1Go);
+            UnityEngine.Object.DestroyImmediate(p2Go);
+            UnityEngine.Object.DestroyImmediate(markerGo);
+            UnityEngine.Object.DestroyImmediate(ctrlGo);
+            UnityEngine.Object.DestroyImmediate(camGo);
+            ColorPlatform.ClearRegistry();
+            LevelMarker.All.Clear();
+        }
+
+        // ── 24. Reset Level Functionality ─────────────────────────
+        private static void Test_ResetLevel_Functionality()
+        {
+            GameObject camGo = new GameObject("MainCamera");
+            camGo.tag = "MainCamera";
+            UnityEngine.Camera cam = camGo.AddComponent<UnityEngine.Camera>();
+            cam.orthographic = true;
+            cam.orthographicSize = 10f;
+            cam.transform.position = new Vector3(0f, 0f, -10f);
+
+            GameObject loaderGo = new GameObject("LevelLoader");
+            LevelLoader loader = loaderGo.AddComponent<LevelLoader>();
+
+            GameObject ctrlGo = new GameObject("LevelEditorController");
+            LevelEditorController ctrl = ctrlGo.AddComponent<LevelEditorController>();
+
+            // Setup platforms root
+            GameObject platRoot = new GameObject("Platforms");
+            GameObject p1Go = new GameObject("Platform_1");
+            p1Go.transform.SetParent(platRoot.transform);
+            ColorPlatform p1 = p1Go.AddComponent<ColorPlatform>();
+            p1.Initialize(new Vector2(0f, 0f), new Vector2(4f, 1f), 255f);
+
+            GameObject p2Go = new GameObject("Platform_2");
+            p2Go.transform.SetParent(platRoot.transform);
+            ColorPlatform p2 = p2Go.AddComponent<ColorPlatform>();
+            p2.Initialize(new Vector2(10f, 5f), new Vector2(3f, 1f), 0f);
+
+            // Setup level markers root
+            GameObject markerRoot = new GameObject("LevelObjects");
+            GameObject startGo = new GameObject("StartPos");
+            startGo.transform.SetParent(markerRoot.transform);
+            LevelMarker startMarker = startGo.AddComponent<LevelMarker>();
+            startMarker.Initialize(LevelMarkerType.StartPos, new Vector2(0f, 2f), Vector2.one, 0f);
+
+            ctrl.StartEditing();
+            AssertTrue(ColorPlatform.All.Count >= 2, "ResetLevel_InitPlatforms", "Platforms registered before reset");
+            AssertTrue(LevelMarker.All.Count >= 1, "ResetLevel_InitMarkers", "Markers registered before reset");
+
+            // Select a platform
+            ctrl.SelectPlatform(p1);
+            AssertTrue(ctrl.SelectedPlatform == p1, "ResetLevel_SelectionBefore", "Platform selected before reset");
+
+            // Save camera state before reset
+            Vector3 camPosBefore = cam.transform.position;
+            float orthoBefore = cam.orthographicSize;
+
+            // Execute Reset
+            ctrl.ResetLevel();
+
+            // Verify GameObjects and registries cleared
+            AssertTrue(ColorPlatform.All.Count == 0, "ResetLevel_PlatformsCleared", "All platforms cleared from registry");
+            AssertTrue(LevelMarker.All.Count == 0, "ResetLevel_MarkersCleared", "All markers cleared from registry");
+            AssertTrue(ctrl.SelectedPlatform == null, "ResetLevel_SelectionCleared", "Selection cleared after reset");
+
+            // Verify camera view was NOT reset (preserved as required)
+            AssertApproximately(camPosBefore.x, cam.transform.position.x, 0.001f, "ResetLevel_CamXPreserved", "Camera X preserved after reset");
+            AssertApproximately(camPosBefore.y, cam.transform.position.y, 0.001f, "ResetLevel_CamYPreserved", "Camera Y preserved after reset");
+            AssertApproximately(orthoBefore, cam.orthographicSize, 0.001f, "ResetLevel_OrthoPreserved", "Camera zoom preserved after reset");
+
+            // Verify exported data has 0 platforms and no resurrected markers
+            LevelData exportData = ctrl.BuildExportData();
+            AssertTrue(exportData != null, "ResetLevel_ExportNonNull", "Export LevelData non-null");
+            AssertTrue(exportData.platforms != null && exportData.platforms.Length == 0, "ResetLevel_ExportPlatformsEmpty", "Exported platforms array is empty");
+            AssertTrue(exportData.checkPoint == null || exportData.checkPoint.Length == 0, "ResetLevel_ExportCheckpointsEmpty", "Exported checkpoints empty");
+            AssertTrue(exportData.end == null, "ResetLevel_ExportEndNull", "Exported End marker is null");
+
+            // Verify second reset on empty level (idempotent / safe)
+            ctrl.ResetLevel();
+            AssertTrue(ColorPlatform.All.Count == 0, "ResetLevel_EmptyLevelSafe", "Second reset on empty level safe");
+
+            ctrl.StopEditing();
+
+            // Cleanup
+            UnityEngine.Object.DestroyImmediate(platRoot);
+            UnityEngine.Object.DestroyImmediate(markerRoot);
+            UnityEngine.Object.DestroyImmediate(ctrlGo);
+            UnityEngine.Object.DestroyImmediate(loaderGo);
+            UnityEngine.Object.DestroyImmediate(camGo);
+            ColorPlatform.ClearRegistry();
+            LevelMarker.All.Clear();
+        }
+
+        private static void Test_GhostPlatform_TestPlay_Lifecycle_And_Reset()
+        {
+            GameObject camGo = new GameObject("MainCamera");
+            camGo.tag = "MainCamera";
+            UnityEngine.Camera cam = camGo.AddComponent<UnityEngine.Camera>();
+
+            GameObject loaderGo = new GameObject("LevelLoader");
+            LevelLoader loader = loaderGo.AddComponent<LevelLoader>();
+
+            GameObject ctrlGo = new GameObject("LevelEditorController");
+            LevelEditorController ctrl = ctrlGo.AddComponent<LevelEditorController>();
+
+            // 1. Verify roots are initialized early and unified
+            AssertTrue(loader.PlatformsRoot != null, "GhostTest_LoaderPlatformsRootNonNull", "LevelLoader.PlatformsRoot is non-null before play");
+            AssertTrue(loader.LevelObjectsRoot != null, "GhostTest_LoaderLevelObjectsRootNonNull", "LevelLoader.LevelObjectsRoot is non-null before play");
+
+            ctrl.StartEditing();
+
+            // 2. Authored level in Edit mode with 1 static and 1 moving platform
+            LevelData authoredData = new LevelData
+            {
+                startPos = new StartPosData { position = new Vector2Data(0f, 1f), size = new Vector2Data(1f, 1f), color = 0f },
+                cameraBoundary = new CameraBoundaryData { position = new Vector2Data(10f, 0f), size = new Vector2Data(30f, 15f) },
+                platforms = new ColorPlatformData[]
+                {
+                    new ColorPlatformData { position = new Vector2Data(0f, 0f), size = new Vector2Data(4f, 1f), rawGrayscaleColor = 255f },
+                    new ColorPlatformData
+                    {
+                        position = new Vector2Data(10f, 2f),
+                        size = new Vector2Data(3f, 1f),
+                        rawGrayscaleColor = 0f,
+                        trajectory = new TrajectoryData
+                        {
+                            enabled = true,
+                            curveType = TrajectoryCurveType.Line,
+                            playbackMode = TrajectoryPlaybackMode.PingPong,
+                            originX = 10f,
+                            originY = 2f,
+                            scaleX = 8f,
+                            duration = 4f
+                        }
+                    }
+                }
+            };
+
+            loader.BuildRuntimeLevel(authoredData);
+
+            int editSceneCount = UnityEngine.Object.FindObjectsByType<ColorPlatform>().Length;
+            AssertTrue(ColorPlatform.All.Count == 2, "GhostTest_EditPlatformCount", "2 platforms registered in edit mode");
+            AssertTrue(editSceneCount == 2, "GhostTest_EditSceneObjectCount", "Exactly 2 platform GameObjects in scene in edit mode");
+
+            // 3. Transition into Test Play
+            // Export working copy and build runtime level (simulating Test Play entry)
+            LevelData testPlayData = ctrl.BuildExportData();
+            loader.BuildRuntimeLevel(testPlayData);
+
+            int testPlaySceneCount = UnityEngine.Object.FindObjectsByType<ColorPlatform>().Length;
+            AssertTrue(ColorPlatform.All.Count == 2, "GhostTest_TestPlayPlatformCount", "Exactly 2 platforms registered during Test Play");
+            AssertTrue(testPlaySceneCount == 2, "GhostTest_NoGhostObjectsCreated", "No ghost or duplicate platform GameObjects exist in scene on Test Play start");
+
+            // 4. Advance trajectory movement
+            TrajectorySystem.UpdateAll(1.0f); // 1s into 4s PingPong => phase 0.25 => X moves to 10 + 8 * 0.25 = 12
+            ColorPlatform movingPlat = null;
+            for (int i = 0; i < ColorPlatform.All.Count; i++)
+            {
+                if (ColorPlatform.All[i].GetTrajectory() != null && ColorPlatform.All[i].GetTrajectory().Config != null && ColorPlatform.All[i].GetTrajectory().Config.enabled)
+                    movingPlat = ColorPlatform.All[i];
+            }
+            AssertTrue(movingPlat != null, "GhostTest_MovingPlatformFound", "Moving platform exists");
+            AssertApproximately(12f, movingPlat.transform.position.x, 0.05f, "GhostTest_PlatformMoved", "Moving platform advanced along trajectory to x=12");
+
+            // Verify scene objects count remains 2 (no ghosts at original x=10)
+            int movingSceneCount = UnityEngine.Object.FindObjectsByType<ColorPlatform>().Length;
+            AssertTrue(movingSceneCount == 2, "GhostTest_NoStationaryGhostAtOrigin", "Scene platform count strictly equals 2 during movement (no stationary ghosts at origin)");
+
+            // 5. Test Reset clears all platforms, markers, and ghost candidates
+            ctrl.ResetLevel();
+            int resetPlatCount = UnityEngine.Object.FindObjectsByType<ColorPlatform>().Length;
+            int resetMarkerCount = UnityEngine.Object.FindObjectsByType<LevelMarker>().Length;
+            AssertTrue(ColorPlatform.All.Count == 0, "GhostTest_ResetRegistryEmpty", "ColorPlatform.All is empty after Reset");
+            AssertTrue(resetPlatCount == 0, "GhostTest_ResetScenePlatformsEmpty", "Zero ColorPlatform GameObjects remain in scene after Reset");
+            AssertTrue(resetMarkerCount == 0, "GhostTest_ResetSceneMarkersEmpty", "Zero LevelMarker GameObjects remain in scene after Reset");
+
+            // 6. Test Position Restoration after stopping Test Play
+            // Re-load authored level, move it, then test return to Edit mode
+            loader.BuildRuntimeLevel(authoredData);
+            LevelData beforeTestPlay = ctrl.BuildExportData();
+            loader.BuildRuntimeLevel(beforeTestPlay);
+            TrajectorySystem.UpdateAll(2.0f); // advance to turnaround point x=18
+
+            // Stop Test Play and return to Edit (rebuilds from working copy)
+            ctrl.StartEditing();
+            ColorPlatform restoredPlat = null;
+            for (int i = 0; i < ColorPlatform.All.Count; i++)
+            {
+                if (ColorPlatform.All[i].GetTrajectory() != null && ColorPlatform.All[i].GetTrajectory().Config != null && ColorPlatform.All[i].GetTrajectory().Config.enabled)
+                    restoredPlat = ColorPlatform.All[i];
+            }
+            AssertTrue(restoredPlat != null, "GhostTest_RestoredPlatFound", "Platform found after returning to Edit");
+            AssertApproximately(10f, restoredPlat.transform.position.x, 0.001f, "GhostTest_RestoredPositionX", "Platform position restored to authored edit position (10, 2)");
+            AssertApproximately(2f, restoredPlat.transform.position.y, 0.001f, "GhostTest_RestoredPositionY", "Platform position Y matches authored edit position");
+
+            ctrl.StopEditing();
+
+            // Cleanup
+            UnityEngine.Object.DestroyImmediate(ctrlGo);
+            UnityEngine.Object.DestroyImmediate(loaderGo);
+            UnityEngine.Object.DestroyImmediate(camGo);
+            ColorPlatform.ClearRegistry();
+            LevelMarker.All.Clear();
+        }
     }
 }
+

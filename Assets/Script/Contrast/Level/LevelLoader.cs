@@ -31,35 +31,83 @@ namespace Contrast.Level
         public Vector2 CurrentSpawnPosition { get; private set; }
         public LogicalColor CurrentSpawnColor { get; private set; } = LogicalColor.Black;
 
-        public Transform PlatformsRoot => platformsRoot;
-        public Transform LevelObjectsRoot => levelObjectsRoot;
+        public Transform PlatformsRoot
+        {
+            get
+            {
+                EnsureRoots();
+                return platformsRoot;
+            }
+        }
+
+        public Transform LevelObjectsRoot
+        {
+            get
+            {
+                EnsureRoots();
+                return levelObjectsRoot;
+            }
+        }
+
+        private void Awake()
+        {
+            EnsureRoots();
+        }
 
         public void LoadAndInitializeLevel()
         {
-            string json = LoadJsonString();
-
-            if (string.IsNullOrEmpty(json))
+            if (GameManager.Instance != null && GameManager.Instance.CurrentLevelSource != null)
             {
-                Debug.LogWarning(
-                    "[LevelLoader] Không tìm thấy JSON — dùng level dự phòng.");
-                CreateFallbackLevel();
+                GameManager.Instance.Restart();
                 return;
             }
 
-            try
+            // Ensure persistent levels directory has default level if empty
+            LevelRepository.EnsureDefaultLevelFile();
+            string[] files = LevelRepository.ListLevelFiles();
+            string path = (files != null && files.Length > 0) ? files[0] : null;
+
+            if (!string.IsNullOrEmpty(path) && File.Exists(path))
             {
-                CurrentLevelData =
-                    JsonUtility.FromJson<LevelData>(json);
-            }
-            catch (System.Exception ex)
-            {
-                Debug.LogError(
-                    $"[LevelLoader] Lỗi parse JSON: {ex.Message}");
-                CreateFallbackLevel();
-                return;
+                Debug.Log($"[FLOW][LEVEL_FILE] load path={path}");
+                try
+                {
+                    string json = LevelRepository.ReadAllText(path);
+                    LevelData data = JsonUtility.FromJson<LevelData>(json);
+                    data = LevelDataSanitizer.Sanitize(data, json, out var report);
+                    if (report != null && report.Count > 0)
+                    {
+                        Debug.Log($"[LEVEL_FIX] Automatically fixed {report.Count} issues.");
+                        foreach (string item in report)
+                            Debug.Log($"[LEVEL_FIX] {item}");
+                    }
+                    BuildRuntimeLevel(data);
+                    return;
+                }
+                catch (System.Exception ex)
+                {
+                    Debug.LogError($"[LevelLoader] Error loading level from {path}: {ex.Message}");
+                }
             }
 
-            BuildRuntimeLevel(CurrentLevelData);
+            // Legacy fallback if no persistent file is available
+            string legacyJson = LoadJsonString();
+            if (!string.IsNullOrEmpty(legacyJson))
+            {
+                try
+                {
+                    LevelData data = JsonUtility.FromJson<LevelData>(legacyJson);
+                    data = LevelDataSanitizer.Sanitize(data, legacyJson, out _);
+                    BuildRuntimeLevel(data);
+                    return;
+                }
+                catch (System.Exception ex)
+                {
+                    Debug.LogError($"[LevelLoader] Error parsing legacy JSON: {ex.Message}");
+                }
+            }
+
+            CreateFallbackLevel();
         }
 
         private string LoadJsonString()
@@ -166,10 +214,16 @@ namespace Contrast.Level
                     }
 
                     platform.name = $"ColorPlatform_{i}";
+                    var pres = platform.GetComponent<Contrast.Presentation.PlatformVisualPresentation>();
+                    if (pres == null)
+                        pres = platform.gameObject.AddComponent<Contrast.Presentation.PlatformVisualPresentation>();
+
                     platform.Initialize(
                         pData.position.ToVector2(),
                         pData.size.ToVector2(),
                         pData.rawGrayscaleColor);
+
+                    pres.InitializeVisuals();
 
                     // Initialize trajectory (disabled by default for old data).
                     platform.InitializeTrajectory(pData.trajectory);
@@ -324,6 +378,7 @@ namespace Contrast.Level
                         $"color={CurrentSpawnColor} " +
                         $"rawColor={marker.RawColor:F2}");
 
+                    Contrast.Presentation.VisualPresentationManager.Instance?.NotifyCheckpointReached();
                     marker.OnPlayerTouched();
                     continue;
                 }
@@ -382,22 +437,54 @@ namespace Contrast.Level
             };
         }
 
-        private void EnsureRoots()
+        public void EnsureRoots()
         {
             if (platformsRoot == null)
             {
-                GameObject platforms =
-                    new GameObject("Platforms");
-                platforms.transform.SetParent(transform, false);
-                platformsRoot = platforms.transform;
+                Transform existingChild = transform.Find("Platforms");
+                if (existingChild != null)
+                {
+                    platformsRoot = existingChild;
+                }
+                else
+                {
+                    GameObject existing = GameObject.Find("Platforms");
+                    if (existing != null)
+                    {
+                        platformsRoot = existing.transform;
+                    }
+                    else
+                    {
+                        GameObject platforms =
+                            new GameObject("Platforms");
+                        platforms.transform.SetParent(transform, false);
+                        platformsRoot = platforms.transform;
+                    }
+                }
             }
 
             if (levelObjectsRoot == null)
             {
-                GameObject objects =
-                    new GameObject("LevelObjects");
-                objects.transform.SetParent(transform, false);
-                levelObjectsRoot = objects.transform;
+                Transform existingChild = transform.Find("LevelObjects");
+                if (existingChild != null)
+                {
+                    levelObjectsRoot = existingChild;
+                }
+                else
+                {
+                    GameObject existing = GameObject.Find("LevelObjects");
+                    if (existing != null)
+                    {
+                        levelObjectsRoot = existing.transform;
+                    }
+                    else
+                    {
+                        GameObject objects =
+                            new GameObject("LevelObjects");
+                        objects.transform.SetParent(transform, false);
+                        levelObjectsRoot = objects.transform;
+                    }
+                }
             }
         }
 
@@ -435,22 +522,104 @@ namespace Contrast.Level
             return -50f;
         }
 
-        private void ClearRuntimeLevel()
+        public void ClearLevel(bool preserveCameraBoundary = true)
         {
+            CameraBoundaryData boundary = preserveCameraBoundary ? CurrentLevelData?.cameraBoundary : null;
+            CurrentLevelData = new LevelData
+            {
+                platforms = new ColorPlatformData[0],
+                startPos = null,
+                checkPoint = null,
+                end = null,
+                spawnPoint = null,
+                cameraBoundary = boundary
+            };
+            ClearRuntimeLevel();
+        }
+
+        public void ClearRuntimeLevel()
+        {
+            EnsureRoots();
+
+            // Destroy all registered platforms first
+            for (int i = ColorPlatform.All.Count - 1; i >= 0; i--)
+            {
+                ColorPlatform p = ColorPlatform.All[i];
+                if (p != null && p.gameObject != null)
+                    SafeDestroy(p.gameObject);
+            }
             ColorPlatform.ClearRegistry();
+
+            // Destroy all registered markers first
+            for (int i = LevelMarker.All.Count - 1; i >= 0; i--)
+            {
+                LevelMarker m = LevelMarker.All[i];
+                if (m != null && m.gameObject != null)
+                    SafeDestroy(m.gameObject);
+            }
             LevelMarker.ClearRegistry();
 
+            // Destroy any remaining children under platformsRoot
             if (platformsRoot != null)
             {
                 for (int i = platformsRoot.childCount - 1; i >= 0; i--)
-                    Destroy(platformsRoot.GetChild(i).gameObject);
+                    SafeDestroy(platformsRoot.GetChild(i).gameObject);
             }
 
+            // Destroy any remaining children under levelObjectsRoot
             if (levelObjectsRoot != null)
             {
                 for (int i = levelObjectsRoot.childCount - 1; i >= 0; i--)
-                    Destroy(levelObjectsRoot.GetChild(i).gameObject);
+                    SafeDestroy(levelObjectsRoot.GetChild(i).gameObject);
             }
+
+            // Sweep scene for any orphaned ColorPlatform or LevelMarker
+            ColorPlatform[] strayPlatforms = FindObjectsByType<ColorPlatform>();
+            for (int i = 0; i < strayPlatforms.Length; i++)
+            {
+                if (strayPlatforms[i] != null && strayPlatforms[i].gameObject != null)
+                    SafeDestroy(strayPlatforms[i].gameObject);
+            }
+
+            LevelMarker[] strayMarkers = FindObjectsByType<LevelMarker>();
+            for (int i = 0; i < strayMarkers.Length; i++)
+            {
+                if (strayMarkers[i] != null && strayMarkers[i].gameObject != null)
+                    SafeDestroy(strayMarkers[i].gameObject);
+            }
+
+            // Clean up any redundant root containers named "Platforms" or "LevelObjects" in the scene
+            GameObject scenePlatRoot = GameObject.Find("Platforms");
+            if (scenePlatRoot != null && scenePlatRoot.transform != platformsRoot)
+            {
+                for (int i = scenePlatRoot.transform.childCount - 1; i >= 0; i--)
+                    SafeDestroy(scenePlatRoot.transform.GetChild(i).gameObject);
+                SafeDestroy(scenePlatRoot);
+            }
+
+            GameObject sceneObjRoot = GameObject.Find("LevelObjects");
+            if (sceneObjRoot != null && sceneObjRoot.transform != levelObjectsRoot)
+            {
+                for (int i = sceneObjRoot.transform.childCount - 1; i >= 0; i--)
+                    SafeDestroy(sceneObjRoot.transform.GetChild(i).gameObject);
+                SafeDestroy(sceneObjRoot);
+            }
+        }
+
+        private static void SafeDestroy(GameObject go)
+        {
+            if (go == null)
+                return;
+
+            go.SetActive(false);
+#if UNITY_EDITOR
+            if (!Application.isPlaying)
+            {
+                DestroyImmediate(go);
+                return;
+            }
+#endif
+            Destroy(go);
         }
 
         private void CreateFallbackLevel()

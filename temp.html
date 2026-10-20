@@ -1,0 +1,2505 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no" />
+    <title>CONTRAST — Giải đố giao thoa ánh sáng</title>
+    <style>
+        :root {
+            color-scheme: dark;
+        }
+
+        html,
+        body {
+            margin: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background: #050812;
+        }
+
+        body {
+            display: grid;
+            place-items: center;
+            font-family: Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+        }
+
+        #wrap {
+            position: relative;
+            width: 100vw;
+            height: 100vh;
+            display: grid;
+            place-items: center;
+            overflow: hidden;
+        }
+
+        canvas {
+            display: block;
+            width: min(100vw, calc(100vh * 16 / 9));
+            height: min(100vh, calc(100vw * 9 / 16));
+            background: #07101c;
+            box-shadow: 0 0 80px rgba(0, 0, 0, .55);
+            outline: none;
+        }
+
+        #fallback {
+            display: none;
+        }
+    </style>
+</head>
+
+<body>
+    <div id="wrap">
+        <canvas id="game" width="1600" height="900"
+            aria-label="CONTRAST - trò chơi giải đố giao thoa ánh sáng"></canvas>
+        <div id="fallback">CONTRAST · CHỌN MÀN ĐỂ BẮT ĐẦU</div>
+    </div>
+    <script>
+        (() => {
+            'use strict';
+
+            // ============================================================
+            // CONTRAST — single-file browser prototype
+            // Continuous cyclic phase tuning -> interference intensity -> collision state.
+            // Visual language is intentionally monochrome: only BRIGHT/DARK are extrema; GRAY means in-between TUNING.
+            // ============================================================
+
+            const canvas = document.getElementById('game');
+            const ctx = canvas.getContext('2d', { alpha: false });
+            const V = { w: 1600, h: 900 };
+            const WORLD = { w: 5600, h: 1200, deathY: 1080 };
+            const MAT = { WHITE: 'WHITE', GRAY: 'GRAY', BLACK: 'BLACK' };
+            const keys = new Set();
+            const pressed = new Set();
+            let debug = false;
+            let elapsed = 0;
+            let last = performance.now();
+            let gameState = 'LEVEL_SELECT'; // LEVEL_SELECT, PLAY, DYING, LENS_TRANSITION, MEASUREMENT, MEASUREMENT_RESULT, COMPLETE
+            let selectedLevel = 'EASY';
+            let menuIndex = 0;
+            let deathTimer = 0;
+            let completeTimer = 0;
+            let screenPulse = 0;
+            let checkpointFlash = 0;
+            let hintTimer = 0;
+            let audioReady = false;
+            let lastGrounded = false;
+            let tuneDir = 0;
+
+            // Test/free-move mode. Press T during PLAY to toggle it.
+            // Pointer Lock keeps the cursor logically centered while raw mouse deltas move the player through world space.
+            const TEST_MOVE = {
+                enabled: false,
+                dx: 0,
+                dy: 0,
+                sensitivity: 1.0
+            };
+
+            // Lens / Newton Rings continuation. The player's current RELATIVE PHASE is captured at the chamber.
+            // The optical source wavelength itself stays fixed for the Newton-ring measurement stage.
+            const SOURCE_LAMBDA = 550;
+            let lensTransitionTimer = 0;
+            let samplePhase = Math.PI / 2;
+            let sampleIntensity = 0.5;
+            let measurementIntroTimer = 0;
+            let measurementResultTimer = 0;
+            let measurementStep = 0;
+            let reticleX = 800;
+            let reticleVX = 0;
+            let shotPulse = 0;
+            let missTimer = 0;
+            let missCountForStep = 0;
+            let fringeHintTimer = 0;
+            let lockFeedbackTimer = 0;
+            let lockFeedbackText = '';
+            const measurementMarkers = [];
+            const MEASURE = {
+                cx: 800, cy: 405, axisMin: 330, axisMax: 1270,
+                i: 2, k: 4, referenceLambda: 550, ringScale: 118,
+                reticleSpeed: 560, tolerance: 24
+            };
+
+            const CFG = {
+                playerW: 38,
+                playerH: 64,
+                maxSpeed: 360,          // slightly tuned above brief value so signature gap is viable
+                groundAccel: 2300,
+                airAccel: 1600,
+                groundDecel: 2800,
+                gravity: 1650,
+                jumpVel: -820,          // tuned so the final climb is physically completable
+                maxFall: 1050,
+                coyote: 0.10,
+                jumpBuffer: 0.12,
+                phaseSpeed: 2.75,        // rad/s; half-cycle BRIGHT -> DARK takes ~1.14 s, and tuning loops forever
+            };
+
+            const player = {
+                x: 150, y: 780 - CFG.playerH, w: CFG.playerW, h: CFG.playerH,
+                vx: 0, vy: 0,
+                grounded: false,
+                groundedOn: null,
+                coyote: 0,
+                jumpBuffer: 0,
+                phase: Math.PI / 2,
+                intensity: 0.5,
+                state: 'TUNING',
+                facing: 1,
+                ghost: new Set(),
+                trail: [],
+                respawnX: 150,
+                respawnFeet: 780,
+                respawnPhase: Math.PI / 2,
+            };
+
+            const camera = { x: 0, y: 235, zoom: 1, targetZoom: 1 };
+            let tunerPanelX = (V.w - 500) / 2;
+
+            let nextId = 1;
+            const terrain = [];
+            let checkpoints = [];
+            let activeCheckpoint = 0;
+            let grayLift = null;
+            let hardExitPlatform = null;
+            let hardPortal = null;
+            const movingPlatforms = [];
+            const newtonRails = [];
+            let newtonVestibule = null;
+            let newtonMeasurementStarted = false;
+            let newtonMeasurementStep = 0;
+            let newtonRevealTimer = 0;
+            let newtonFeedbackTimer = 0;
+            let newtonFeedbackText = '';
+            let newtonMissCount = 0;
+            let newtonShotPulse = 0;
+            const newtonMarkers = [];
+            // EASY Newton finale: two horizontal platforms orbit the prescribed dark fringes.
+            // The player chooses K; that choice fixes the K-O axis and therefore I and K'.
+            let newtonOrbitClock = 0;
+            let easyNewtonAxisAngle = null;
+            let easyNewtonAxisLockedAt = 0;
+            let hardNewtonAxisLockedAt = 0;
+
+            // HARD-only living hazard: a hidden interference maw periodically bites a wedge
+            // out of the Newton field. The sequence is deterministic so players can learn it.
+            const HARD_NEWTON_BITE = {
+                cycle: 5.8,
+                warning: 1.05,
+                lunge: .34,
+                hold: .34,
+                retreat: .46,
+                halfAngle: .205,
+                angles: [0.12 * Math.PI, 0.30 * Math.PI]
+            };
+            function angleDelta(a, b) {
+                let d = (a - b) % (Math.PI * 2);
+                if (d > Math.PI) d -= Math.PI * 2;
+                if (d < -Math.PI) d += Math.PI * 2;
+                return d;
+            }
+            function hardNewtonBiteState() {
+                const cfg = LEVEL_MEASURE.HARD;
+                const cycle = HARD_NEWTON_BITE.cycle;
+                const index = Math.floor(newtonOrbitClock / cycle);
+                const local = newtonOrbitClock - index * cycle;
+                const angle = HARD_NEWTON_BITE.angles[index % HARD_NEWTON_BITE.angles.length];
+                const w = HARD_NEWTON_BITE.warning, l = HARD_NEWTON_BITE.lunge, h = HARD_NEWTON_BITE.hold, r = HARD_NEWTON_BITE.retreat;
+                let depth = 0, stage = 'REST';
+                if (local < w) { stage = 'WARNING'; depth = 0; }
+                else if (local < w + l) { stage = 'LUNGE'; depth = smooth(5, (local - w) / l); }
+                else if (local < w + l + h) { stage = 'BITE'; depth = 1; }
+                else if (local < w + l + h + r) { stage = 'RETREAT'; depth = 1 - smooth(5, (local - w - l - h) / r); }
+                const t = newtonTargets(cfg);
+                const outer = darkRingRadiusWorld(cfg.outerN + .65, cfg) + 76;
+                const inner = t.ri - 52;
+                const currentInner = lerp(outer + 68, inner, clamp(depth, 0, 1));
+                return {
+                    cfg, index, local, angle, depth, stage, outer, inner, currentInner,
+                    lethal: local >= w + l * .55 && local <= w + l + h + r * .30
+                };
+            }
+            // Integrated Newton measurement apparatus at the END of each playable level.
+            // Each level gets one different exercise and a different physical display size.
+            const LEVEL_MEASURE = {
+                EASY: { cx: 6200, cy: 560, ringScale: 220, tolerance: 30, Rmm: 855, revealDuration: 5.6, i: 2, k: 4, outerN: 7, worldW: 7050, label: 'BÀI ĐO A' },
+                HARD: { cx: 6600, cy: 520, ringScale: 220, tolerance: 22, Rmm: 855, revealDuration: 5.6, i: 3, k: 6, outerN: 7, worldW: 7350, label: 'BÀI ĐO B' }
+            };
+            function levelMeasureConfig() { return LEVEL_MEASURE[selectedLevel] || LEVEL_MEASURE.EASY; }
+
+            const add = (name, material, x, y, w, h, extra = {}) => {
+                const c = { id: nextId++, name, material, x, y, w, h, moving: false, dx: 0, dy: 0, ...extra };
+                terrain.push(c);
+                if (c.moving) movingPlatforms.push(c);
+                return c;
+            };
+
+            function clearLevelGeometry() {
+                terrain.length = 0;
+                checkpoints = [];
+                nextId = 1;
+                grayLift = null;
+                hardExitPlatform = null;
+                hardPortal = null;
+                movingPlatforms.length = 0;
+                newtonRails.length = 0;
+                newtonVestibule = null;
+            }
+
+            function addNewtonRail(name, material, targetX, measureIndex, opts) {
+                const w = opts.w, h = opts.h || 24;
+                const lowCenter = opts.lowCenter;
+                const highCenter = opts.highCenter;
+                const y = opts.y;
+                const c = add(name, material, lowCenter - w * .5, y, w, h, {
+                    moving: true,
+                    lowX: lowCenter - w * .5,
+                    highX: highCenter - w * .5,
+                    lowY: y,
+                    highY: y,
+                    period: opts.period,
+                    phase: opts.phase || 0,
+                    newtonRail: true,
+                    measureIndex,
+                    measureLabel: ['K', 'I', "K'"][measureIndex],
+                    targetX,
+                    dockX: opts.dockX,
+                    aimTolerance: opts.aimTolerance || Math.max(14, w * .18)
+                });
+                newtonRails.push(c);
+                return c;
+            }
+
+            function addNewtonOrbitRail(name, material, radius, opts = {}) {
+                const cfg = opts.cfg || levelMeasureConfig();
+                const w = opts.w || 140, h = opts.h || 22;
+                const angle = Number.isFinite(opts.angle) ? opts.angle : Math.PI;
+                const cx = cfg.cx + Math.cos(angle) * radius;
+                const cy = cfg.cy + Math.sin(angle) * radius;
+                const c = add(name, material, cx - w * .5, cy - h * .5, w, h, {
+                    moving: true,
+                    newtonRail: true,
+                    newtonOrbitRail: true,
+                    orbitRole: opts.role || 'K',
+                    orbitRadius: radius,
+                    orbitAngle0: angle,
+                    orbitAngle: angle,
+                    period: opts.period || 9,
+                    orbitDirection: opts.direction || 1,
+                    orbitLabel: opts.label || '',
+                    orbitLevel: opts.level || selectedLevel,
+                    materialCycle: opts.materialCycle || null,
+                    materialStepDuration: opts.materialStepDuration || 0,
+                    materialCyclePhase: opts.materialCyclePhase || 0,
+                    materialChangeIn: 999,
+                    nextMaterial: null,
+                });
+                newtonRails.push(c);
+                return c;
+            }
+
+            function addHardNewtonObstacle(name, cfg, radius, angle, w, h, kind = 'pylon') {
+                const cx = cfg.cx + Math.cos(angle) * radius;
+                const cy = cfg.cy + Math.sin(angle) * radius;
+                return add(name, MAT.BLACK, cx - w * .5, cy - h * .5, w, h, {
+                    alwaysSolid: true, structural: true, newtonObstacle: true, newtonObstacleKind: kind
+                });
+            }
+
+            function setupNewtonRails(level) {
+                newtonRails.length = 0;
+                const cfg = LEVEL_MEASURE[level];
+                const t = newtonTargets(cfg);
+
+                if (level === 'EASY') {
+                    // EASY: readable fixed-color orbits. The same k-platform is used for K and K'.
+                    addNewtonOrbitRail('E_ORBIT_K', MAT.WHITE, t.rk, {
+                        cfg, level: 'EASY', role: 'K', label: `k = ${cfg.k}`, w: 154, h: 22, period: 10.8, angle: Math.PI, direction: 1
+                    });
+                    addNewtonOrbitRail('E_ORBIT_I', MAT.GRAY, t.ri, {
+                        cfg, level: 'EASY', role: 'I', label: `i = ${cfg.i}`, w: 136, h: 20, period: 8.6, angle: Math.PI * 1.30, direction: 1
+                    });
+                    return;
+                }
+
+                if (level === 'HARD') {
+                    // HARD: opposite orbital directions, different angular speeds and deterministic
+                    // material shifts. The bar itself always stays horizontal.
+                    addNewtonOrbitRail('H_ORBIT_K', MAT.WHITE, t.rk, {
+                        cfg, level: 'HARD', role: 'K', label: `k = ${cfg.k}`, w: 142, h: 22,
+                        period: 7.15, angle: Math.PI * 1.02, direction: 1,
+                        materialCycle: [MAT.WHITE, MAT.GRAY, MAT.BLACK], materialStepDuration: 3.05, materialCyclePhase: 0
+                    });
+                    addNewtonOrbitRail('H_ORBIT_I', MAT.GRAY, t.ri, {
+                        cfg, level: 'HARD', role: 'I', label: `i = ${cfg.i}`, w: 126, h: 20,
+                        period: 9.25, angle: Math.PI * 1.42, direction: -1,
+                        materialCycle: [MAT.GRAY, MAT.BLACK, MAT.WHITE], materialStepDuration: 3.55, materialCyclePhase: .46
+                    });
+
+                    // Two fixed hazards with different silhouettes. The third pressure source is
+                    // the animated interference maw, so the chamber stays readable rather than cluttered.
+                    addHardNewtonObstacle('H_NEWTON_PRISM_TOP_LEFT', cfg, t.rk, Math.PI * 1.25, 34, 78, 'prism');
+                    addHardNewtonObstacle('H_NEWTON_FORK_BOTTOM_RIGHT', cfg, (t.rk + t.ri) * .54, Math.PI * .24, 82, 34, 'fork');
+                }
+            }
+
+            function setupEasyLevel() {
+                WORLD.w = LEVEL_MEASURE.EASY.worldW;
+                clearLevelGeometry();
+
+                // Section I — WHITE PASS
+                add('START_BLACK_FLOOR', MAT.BLACK, 0, 780, 650, 100);
+                add('WHITE_WALL_01', MAT.WHITE, 650, 430, 80, 350);
+                add('BLACK_SUPPORT_UNDER_WHITE', MAT.BLACK, 650, 780, 80, 100);
+                add('BLACK_FLOOR_AFTER_WHITE', MAT.BLACK, 730, 780, 570, 100);
+
+                // Section II — GRAY STEP
+                add('BLACK_APPROACH_02', MAT.BLACK, 1250, 780, 300, 100);
+                add('RAISED_BLACK_PLATFORM', MAT.BLACK, 1670, 700, 300, 80);
+                add('GRAY_WALL_02', MAT.GRAY, 1900, 390, 70, 310);
+                add('WHITE_PLATFORM_AFTER_GRAY', MAT.WHITE, 1970, 700, 360, 80);
+
+                // Section III — BLACK PASS
+                add('WHITE_FLOOR_03', MAT.WHITE, 2300, 700, 700, 80);
+                add('BLACK_WALL_03', MAT.BLACK, 2600, 350, 70, 350);
+                add('PRISM_TUNING_BRIDGE', MAT.BLACK, 2820, 700, 180, 80);
+
+                // Section IV — PRISM RUN
+                add('PRISM_BLACK_FLOOR', MAT.BLACK, 3000, 700, 500, 80);
+                add('WHITE_GATE', MAT.WHITE, 3230, 350, 70, 350);
+                add('PRISM_WHITE_FLOOR', MAT.WHITE, 3500, 700, 750, 80);
+                add('GRAY_GATE', MAT.GRAY, 3750, 350, 70, 350);
+                add('PRISM_GRAY_FLOOR', MAT.GRAY, 4250, 700, 450, 80);
+                add('BLACK_GATE', MAT.BLACK, 4450, 350, 70, 350);
+
+                // Section V — END MEASUREMENT APPROACH.
+                // The Newton rings stay in world-space. EASY now uses two horizontal orbit platforms:
+                // one on dark fringe k and one on dark fringe i. The player chooses K on the k orbit.
+                add('E_END_APPROACH_FLOOR', MAT.GRAY, 4520, 700, 980, 100);
+                // One clean final approach ledge. Its right edge stops before the Newton mount instead of entering the rings.
+                newtonVestibule = add('E_MEASURE_VESTIBULE', MAT.BLACK, 5425, 610, 90, 30, { alwaysSolid: true, structural: true });
+                setupNewtonRails('EASY');
+
+                checkpoints = [
+                    { id: 0, x: 150, feet: 780, phase: Math.PI / 2, triggerX: -1 },
+                    { id: 1, x: 1260, feet: 780, phase: Math.PI / 2, triggerX: 1220 },
+                    { id: 2, x: 3020, feet: 700, phase: 0, triggerX: 2960 },
+                    { id: 3, x: 5450, feet: 610, phase: Math.PI / 2, zone: { x: 5400, y: 540, w: 150, h: 120 } },
+                ];
+            }
+
+            function setupHardLevel() {
+                WORLD.w = LEVEL_MEASURE.HARD.worldW;
+                clearLevelGeometry();
+
+                // Original hard prototype preserved as the advanced challenge.
+                add('START_FLOOR', MAT.BLACK, 0, 780, 650, 100);
+                add('WHITE_WALL_01', MAT.WHITE, 650, 440, 80, 340);
+                add('WHITE_FLOOR_01', MAT.WHITE, 730, 780, 450, 70);
+                add('SAFE_FLOOR_AFTER_01', MAT.BLACK, 1180, 780, 330, 100);
+
+                add('APPROACH_FLOOR', MAT.BLACK, 1180, 780, 350, 100);
+                grayLift = add('GRAY_LIFT', MAT.GRAY, 1530, 740, 210, 28, { moving: true, baseY: 740, lowY: 740, highY: 440, period: 6.0, phase: 0 });
+                add('GRAY_PHASE_SLAB', MAT.GRAY, 1450, 320, 440, 48);
+                add('UPPER_APPROACH', MAT.WHITE, 1880, 320, 260, 48);
+
+                add('APPROACH_03', MAT.GRAY, 1900, 620, 200, 55);
+                add('BLACK_SHUTTER_A', MAT.BLACK, 2100, 250, 58, 410);
+                add('BLACK_ISLAND_A', MAT.BLACK, 2158, 650, 260, 55);
+                add('BLACK_SHUTTER_B', MAT.BLACK, 2418, 270, 58, 390);
+                add('BLACK_ISLAND_B', MAT.BLACK, 2476, 650, 260, 55);
+                add('BLACK_SHUTTER_C', MAT.BLACK, 2736, 230, 58, 430);
+                add('EXIT_PLATFORM_03', MAT.GRAY, 2794, 620, 500, 55);
+
+                // Eased further: give the player a clearer ledge after the white membrane.
+                // This lets them stabilize before the next phase change without killing the hard level's core idea.
+                add('CONTRAST_APPROACH', MAT.GRAY, 3230, 620, 560, 55);
+                add('WHITE_MEMBRANE', MAT.WHITE, 3570, 260, 70, 360);
+                add('BLACK_MEMBRANE', MAT.BLACK, 3860, 250, 70, 410);
+                add('BLACK_LANDING', MAT.BLACK, 3930, 660, 630, 70);
+
+                add('BLACK_BASE', MAT.BLACK, 4400, 660, 360, 70);
+                add('GRAY_CLIMB_SLAB', MAT.GRAY, 4620, 470, 370, 45);
+                add('WHITE_UPPER_PLATFORM', MAT.WHITE, 4800, 315, 350, 50);
+                add('BLACK_FINAL_MEMBRANE', MAT.BLACK, 5150, 150, 65, 340);
+                hardExitPlatform = add('EXIT_PLATFORM', MAT.GRAY, 5215, 300, 300, 55);
+                hardPortal = null;
+
+                // After the existing HARD challenge, route the player onto a single clean approach path
+                // that stops before the Newton disc. The rails themselves remain fully outside the fringes.
+                add('H_MEASURE_DESCENT_1', MAT.BLACK, 5515, 360, 190, 26, { alwaysSolid: true, structural: true });
+                add('H_MEASURE_DESCENT_2', MAT.BLACK, 5680, 440, 185, 26, { alwaysSolid: true, structural: true });
+                // Final HARD ledge also stops before the Newton mount, leaving visible air between path and disc.
+                newtonVestibule = add('H_MEASURE_VESTIBULE', MAT.BLACK, 5840, 520, 110, 26, { alwaysSolid: true, structural: true });
+                setupNewtonRails('HARD');
+
+                checkpoints = [
+                    { id: 0, x: 150, feet: 780, phase: Math.PI / 2, triggerX: -1 },
+                    { id: 1, x: 1280, feet: 780, phase: Math.PI / 2, triggerX: 1245 },
+                    { id: 2, x: 3280, feet: 620, phase: 0, triggerX: 3220 },
+                    { id: 3, x: 4440, feet: 660, phase: Math.PI / 2, triggerX: 4410 },
+                    // Điểm lưu ngay trên bậc giữa trước vùng vân Newton (H_MEASURE_DESCENT_2).
+                    // Chỉ cần đi qua đoạn này là chắc chắn lưu; chết trong K → I → K′ sẽ quay lại đây.
+                    { id: 4, x: 5735, feet: 440, phase: Math.PI / 2, triggerX: 5685, resetNewton: true },
+                ];
+            }
+
+            function setupLevel(level) {
+                if (level === 'HARD') setupHardLevel();
+                else setupEasyLevel();
+                activeCheckpoint = 0;
+            }
+
+            // ------------------------------------------------------------
+            // Math / optical state
+            // ------------------------------------------------------------
+            const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+            const lerp = (a, b, t) => a + (b - a) * t;
+            const approach = (v, target, amount) => v < target ? Math.min(target, v + amount) : Math.max(target, v - amount);
+            const smooth = (rate, dt) => 1 - Math.exp(-rate * dt);
+
+            const TAU = Math.PI * 2;
+            function wrapPhase(phi) {
+                phi %= TAU;
+                return phi < 0 ? phi + TAU : phi;
+            }
+            function intensityForPhase(phase) {
+                return clamp((1 + Math.cos(phase)) / 2, 0, 1);
+            }
+            function stateFor(I) {
+                if (I >= 0.78) return 'BRIGHT';
+                if (I <= 0.22) return 'DARK';
+                return 'TUNING';
+            }
+            function matches(material, I = player.intensity) {
+                if (material === MAT.WHITE) return I >= 0.78;
+                if (material === MAT.BLACK) return I <= 0.22;
+                // GRAY is no longer a third stable state. It represents the continuous tuning regions between extrema.
+                return I > 0.22 && I < 0.78;
+            }
+            function reactStrength(material, I = player.intensity) {
+                if (material === MAT.WHITE) return clamp((I - 0.62) / (0.78 - 0.62), 0, 1);
+                if (material === MAT.BLACK) return clamp((0.38 - I) / (0.38 - 0.22), 0, 1);
+                // Gray reacts throughout the in-between tuning band, with a short visual lead-in near each boundary.
+                return clamp(Math.min((I - 0.16) / 0.06, (0.84 - I) / 0.06), 0, 1);
+            }
+            function grayForIntensity(I, alpha = 1, min = 18, max = 245) {
+                const v = Math.round(lerp(min, max, clamp(I, 0, 1)));
+                return `rgba(${v},${v},${v},${alpha})`;
+            }
+            function stateVisual(state = player.state) {
+                if (state === 'BRIGHT') return { label: 'SÁNG', relation: 'CÙNG PHA', fill: '#f4f7f8', text: '#071019', edge: '#ffffff' };
+                if (state === 'DARK') return { label: 'TỐI', relation: 'NGƯỢC PHA', fill: '#0a0e13', text: '#eef3f6', edge: '#b8c2c9' };
+                return { label: 'ĐIỀU PHA', relation: 'ĐANG LỆCH PHA', fill: '#596168', text: '#ffffff', edge: '#d1d8dc' };
+            }
+
+            // ------------------------------------------------------------
+            // Input / console diagnostics
+            // ------------------------------------------------------------
+            const CONSOLE_DEBUG = true;
+            function consoleEvent(type, data = {}) {
+                if (!CONSOLE_DEBUG) return;
+                const snapshot = {
+                    state: gameState,
+                    level: selectedLevel,
+                    testMode: TEST_MOVE.enabled,
+                    player: { x: +player.x.toFixed(1), y: +player.y.toFixed(1), vx: +player.vx.toFixed(1), vy: +player.vy.toFixed(1) },
+                    ...data
+                };
+                console.log(`[CONTRAST][${type}]`, snapshot);
+            }
+            console.info('[CONTRAST] Console diagnostics enabled · filter with: CONTRAST');
+
+            const prevent = new Set(['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Space']);
+            window.addEventListener('keydown', e => {
+                consoleEvent('KEY_DOWN', { code: e.code, key: e.key, repeat: e.repeat, ctrl: e.ctrlKey, alt: e.altKey, shift: e.shiftKey, meta: e.metaKey });
+                if (prevent.has(e.code)) e.preventDefault();
+                if (!keys.has(e.code)) pressed.add(e.code);
+                keys.add(e.code);
+                ensureAudio();
+
+                if (e.code === 'KeyH' && !e.repeat && gameState !== 'LEVEL_SELECT') {
+                    debug = !debug;
+                    consoleEvent('DEBUG_OVERLAY', { enabled: debug });
+                }
+
+                // T toggles mouse-driven test/free-move mode. No physics or collision runs while active.
+                if (e.code === 'KeyT' && !e.repeat && gameState === 'PLAY') {
+                    setTestMode(!TEST_MOVE.enabled);
+                    pressed.delete('KeyT');
+                    keys.delete('KeyT');
+                    return;
+                }
+
+                if (gameState === 'LEVEL_SELECT' && !e.repeat) {
+                    if (e.code === 'ArrowLeft' || e.code === 'KeyA' || e.code === 'ArrowUp' || e.code === 'KeyW') menuIndex = (menuIndex + 1) % 2;
+                    if (e.code === 'ArrowRight' || e.code === 'KeyD' || e.code === 'ArrowDown' || e.code === 'KeyS') menuIndex = (menuIndex + 1) % 2;
+                    if (e.code === 'Enter' || e.code === 'Space') startLevel(menuIndexToLevel(menuIndex));
+                    return;
+                }
+
+                if (e.code === 'Escape' && TEST_MOVE.enabled) {
+                    setTestMode(false);
+                    return;
+                }
+
+                if (e.code === 'Escape' && gameState !== 'LEVEL_SELECT') {
+                    goToLevelSelect();
+                    return;
+                }
+
+                if (gameState === 'COMPLETE' && e.code === 'Enter') restartLevel();
+            }, { passive: false });
+
+            window.addEventListener('keyup', e => {
+                consoleEvent('KEY_UP', { code: e.code, key: e.key });
+                if (prevent.has(e.code)) e.preventDefault();
+                keys.delete(e.code);
+                if (!TEST_MOVE.enabled && gameState === 'PLAY' && (e.code === 'Space' || e.code === 'KeyW') && player.vy < -180) player.vy *= 0.56;
+            }, { passive: false });
+
+            window.addEventListener('blur', () => {
+                consoleEvent('WINDOW_BLUR');
+                keys.clear();
+                TEST_MOVE.dx = 0;
+                TEST_MOVE.dy = 0;
+            });
+
+            function setTestMode(enabled) {
+                const requested = !!enabled;
+                const before = TEST_MOVE.enabled;
+                TEST_MOVE.enabled = requested && gameState === 'PLAY';
+                TEST_MOVE.dx = 0; TEST_MOVE.dy = 0;
+                player.vx = 0; player.vy = 0;
+                player.grounded = false; player.groundedOn = null;
+                player.jumpBuffer = 0; player.coyote = 0;
+                player.ghost.clear();
+                consoleEvent('TEST_MODE_REQUEST', { requested, before, accepted: TEST_MOVE.enabled });
+
+                if (TEST_MOVE.enabled) {
+                    try {
+                        const lock = canvas.requestPointerLock?.();
+                        if (lock && typeof lock.catch === 'function') lock.catch(err => {
+                            consoleEvent('POINTER_LOCK_ERROR', { message: String(err?.message || err) });
+                            TEST_MOVE.enabled = false;
+                        });
+                    } catch (err) {
+                        consoleEvent('POINTER_LOCK_ERROR', { message: String(err?.message || err) });
+                        TEST_MOVE.enabled = false;
+                    }
+                } else if (document.pointerLockElement === canvas) {
+                    document.exitPointerLock?.();
+                }
+            }
+
+            document.addEventListener('mousemove', e => {
+                if (!TEST_MOVE.enabled || document.pointerLockElement !== canvas || gameState !== 'PLAY') return;
+                const mx = e.movementX || 0, my = e.movementY || 0;
+                TEST_MOVE.dx += mx;
+                TEST_MOVE.dy += my;
+                consoleEvent('MOUSE_MOVE', { movementX: mx, movementY: my, queuedDX: +TEST_MOVE.dx.toFixed(1), queuedDY: +TEST_MOVE.dy.toFixed(1) });
+            });
+
+            document.addEventListener('pointerlockchange', () => {
+                consoleEvent('POINTER_LOCK_CHANGE', { lockedToCanvas: document.pointerLockElement === canvas, lockedElement: document.pointerLockElement?.id || null });
+                if (TEST_MOVE.enabled && document.pointerLockElement !== canvas) {
+                    TEST_MOVE.enabled = false;
+                    TEST_MOVE.dx = 0; TEST_MOVE.dy = 0;
+                    player.vx = 0; player.vy = 0;
+                }
+            });
+
+            canvas.addEventListener('pointerdown', e => {
+                ensureAudio();
+                const r = canvas.getBoundingClientRect();
+                const sx = (e.clientX - r.left) * V.w / r.width, sy = (e.clientY - r.top) * V.h / r.height;
+                consoleEvent('POINTER_DOWN', { button: e.button, pointerType: e.pointerType, clientX: e.clientX, clientY: e.clientY, canvasX: +sx.toFixed(1), canvasY: +sy.toFixed(1) });
+
+                // Always-visible back button while inside a level / measurement flow.
+                if (gameState !== 'LEVEL_SELECT' && sx >= V.w - 166 && sx <= V.w - 26 && sy >= 24 && sy <= 68) {
+                    goToLevelSelect();
+                    return;
+                }
+
+                if (gameState === 'LEVEL_SELECT') {
+                    if (sx >= 285 && sx <= 775 && sy >= 350 && sy <= 610) { menuIndex = 0; startLevel('EASY'); return; }
+                    if (sx >= 825 && sx <= 1315 && sy >= 350 && sy <= 610) { menuIndex = 1; startLevel('HARD'); return; }
+                }
+
+                if (gameState === 'COMPLETE') {
+                    if (sx >= 500 && sx <= 785 && sy >= 610 && sy <= 670) { restartLevel(); return; }
+                    if (sx >= 815 && sx <= 1100 && sy >= 610 && sy <= 670) { goToLevelSelect(); return; }
+                }
+            });
+
+            // ------------------------------------------------------------
+            // Minimal WebAudio feedback (starts only after user input)
+            // ------------------------------------------------------------
+            let ac = null, tuneOsc = null, tuneGain = null, filter = null;
+            function ensureAudio() {
+                if (audioReady) { if (ac && ac.state === 'suspended') ac.resume(); return; }
+                try {
+                    ac = new (window.AudioContext || window.webkitAudioContext)();
+                    tuneOsc = ac.createOscillator(); tuneGain = ac.createGain(); filter = ac.createBiquadFilter();
+                    tuneOsc.type = 'sine'; tuneOsc.frequency.value = 220; tuneGain.gain.value = 0;
+                    filter.type = 'lowpass'; filter.frequency.value = 1800;
+                    tuneOsc.connect(filter).connect(tuneGain).connect(ac.destination); tuneOsc.start();
+                    audioReady = true;
+                } catch (_) { }
+            }
+            function updateAudio() {
+                if (!audioReady) return;
+                const now = ac.currentTime;
+                const freq = 145 + player.intensity * 315;
+                tuneOsc.frequency.setTargetAtTime(freq, now, 0.03);
+                const active = (keys.has('ArrowLeft') || keys.has('ArrowRight')) && gameState === 'PLAY';
+                tuneGain.gain.setTargetAtTime(active ? 0.025 : 0.002, now, 0.035);
+                filter.frequency.setTargetAtTime(500 + player.intensity * 2600, now, 0.05);
+            }
+            function ping(freq = 440, dur = .12, gain = .045, type = 'sine') {
+                if (!audioReady) return;
+                const o = ac.createOscillator(), g = ac.createGain();
+                o.type = type; o.frequency.value = freq; g.gain.setValueAtTime(gain, ac.currentTime);
+                g.gain.exponentialRampToValueAtTime(0.0001, ac.currentTime + dur);
+                o.connect(g).connect(ac.destination); o.start(); o.stop(ac.currentTime + dur + .02);
+            }
+            function phaseSound() { ping(540 + player.intensity * 380, .18, .035, 'triangle'); }
+            function landSound(speed) { ping(95 + Math.min(speed, 700) * .08, .08, .025, 'sine'); }
+            function checkpointSound() { ping(392, .18, .035); setTimeout(() => ping(587, .22, .03), 75); }
+            function deathSound() { ping(105, .26, .03, 'sawtooth'); }
+            function measurementPulseSound() { ping(620, .11, .028, 'triangle'); }
+            function measurementLockSound(step) { ping(520 + step * 95, .18, .035, 'sine'); }
+            function measurementMissSound() { ping(128, .07, .018, 'square'); }
+            function measurementCompleteSound() { ping(330, .28, .03); setTimeout(() => ping(495, .34, .028), 90); setTimeout(() => ping(660, .42, .026), 180); }
+
+            // ------------------------------------------------------------
+            // Collision / safe re-solidification
+            // ------------------------------------------------------------
+            function rectsOverlap(a, b) { return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y; }
+            function expandedOverlap(a, b, pad = 0) { return a.x < b.x + b.w + pad && a.x + a.w > b.x - pad && a.y < b.y + b.h + pad && a.y + a.h > b.y - pad; }
+
+            function isPassable(c) {
+                if (c.alwaysSolid) return false;
+                if (matches(c.material)) return true;
+                if (player.ghost.has(c.id)) {
+                    if (rectsOverlap(player, c)) return true;
+                    player.ghost.delete(c.id);
+                }
+                return false;
+            }
+            function rememberGhosts() {
+                for (const c of terrain) {
+                    if (!c.alwaysSolid && matches(c.material) && rectsOverlap(player, c)) player.ghost.add(c.id);
+                }
+            }
+            function solidCandidates() { return terrain; }
+
+            function moveX(dx) {
+                if (!dx) return;
+                player.x += dx;
+                for (const c of solidCandidates()) {
+                    if (isPassable(c) || !rectsOverlap(player, c)) continue;
+                    if (dx > 0) player.x = c.x - player.w;
+                    else player.x = c.x + c.w;
+                    player.vx = 0;
+                }
+            }
+            function moveY(dy) {
+                if (!dy) return;
+                const beforeVy = player.vy;
+                player.y += dy;
+                player.grounded = false;
+                player.groundedOn = null;
+                for (const c of solidCandidates()) {
+                    if (isPassable(c) || !rectsOverlap(player, c)) continue;
+                    if (dy > 0) {
+                        player.y = c.y - player.h;
+                        player.vy = 0;
+                        player.grounded = true;
+                        player.groundedOn = c.id;
+                        if (!lastGrounded && beforeVy > 190) landSound(beforeVy);
+                    } else if (dy < 0) {
+                        player.y = c.y + c.h;
+                        player.vy = 0;
+                    }
+                }
+            }
+
+            function updateMovingPlatforms(dt) {
+                if (!movingPlatforms.length) return;
+                for (const c of movingPlatforms) {
+                    const oldX = c.x, oldY = c.y;
+
+                    if (c.newtonOrbitRail) {
+                        const cfg = LEVEL_MEASURE[c.orbitLevel] || levelMeasureConfig();
+                        const dir = Number.isFinite(c.orbitDirection) ? c.orbitDirection : 1;
+                        const period = Math.max(.1, c.period || 9);
+                        const angle = c.orbitAngle0 + dir * (newtonOrbitClock / period) * TAU;
+                        c.orbitAngle = angle;
+                        const cx = cfg.cx + Math.cos(angle) * c.orbitRadius;
+                        const cy = cfg.cy + Math.sin(angle) * c.orbitRadius;
+                        c.x = cx - c.w * .5;
+                        c.y = cy - c.h * .5;
+
+                        if (Array.isArray(c.materialCycle) && c.materialCycle.length && c.materialStepDuration > 0) {
+                            const n = c.materialCycle.length;
+                            const p = ((newtonOrbitClock / c.materialStepDuration) + c.materialCyclePhase) % n;
+                            const idx = Math.floor(p + n) % n;
+                            const frac = p - Math.floor(p);
+                            c.material = c.materialCycle[idx];
+                            c.nextMaterial = c.materialCycle[(idx + 1) % n];
+                            c.materialChangeIn = (1 - frac) * c.materialStepDuration;
+                        }
+                    } else {
+                        const phase = Number.isFinite(c.phase) ? c.phase : 0;
+                        const t = ((elapsed / c.period) + phase) % 1;
+                        // Deterministic cosine ping-pong: fixed timing, smooth turnaround, no wobble/randomness.
+                        const s = (1 - Math.cos(t * Math.PI * 2)) / 2;
+                        if (Number.isFinite(c.lowX) && Number.isFinite(c.highX)) c.x = lerp(c.lowX, c.highX, s);
+                        if (Number.isFinite(c.lowY) && Number.isFinite(c.highY)) c.y = lerp(c.lowY, c.highY, s);
+                    }
+
+                    c.dx = c.x - oldX;
+                    c.dy = c.y - oldY;
+                    const solidNow = c.alwaysSolid || !matches(c.material);
+                    if (player.groundedOn === c.id && solidNow) {
+                        player.x += c.dx;
+                        player.y += c.dy;
+                    }
+                }
+            }
+
+            // ------------------------------------------------------------
+            // Particles
+            // ------------------------------------------------------------
+            const ambience = Array.from({ length: 80 }, (_, i) => ({
+                x: (i * 337) % WORLD.w, y: 70 + ((i * 191) % 760), r: 0.5 + (i % 4) * 0.35, p: (i * 0.73) % 6.28
+            }));
+            function spawnTrail() {
+                const speed = Math.abs(player.vx) + Math.abs(tuneDir) * 160;
+                if (speed < 40) return;
+                const rate = player.intensity > .78 ? 0.8 : player.intensity < .22 ? 0.22 : 0.45;
+                if (Math.random() > rate) return;
+                player.trail.push({
+                    x: player.x + player.w * .5 - player.facing * 10,
+                    y: player.y + 18 + Math.random() * 38,
+                    vx: -player.vx * .12 + (Math.random() - .5) * 30,
+                    vy: (Math.random() - .5) * 26,
+                    life: .35 + Math.random() * .28,
+                    max: .63,
+                    shade: Math.round(lerp(95, 245, player.intensity)),
+                    size: 2 + Math.random() * 3
+                });
+                if (player.trail.length > 130) player.trail.splice(0, player.trail.length - 130);
+            }
+            function updateParticles(dt) {
+                for (let i = player.trail.length - 1; i >= 0; i--) {
+                    const p = player.trail[i]; p.life -= dt; p.x += p.vx * dt; p.y += p.vy * dt; p.vy += 20 * dt;
+                    if (p.life <= 0) player.trail.splice(i, 1);
+                }
+            }
+
+            // ------------------------------------------------------------
+            // Checkpoints / death / finish
+            // ------------------------------------------------------------
+            function setCheckpoint(index) {
+                if (index <= activeCheckpoint) return;
+                activeCheckpoint = index;
+                consoleEvent('CHECKPOINT', { index });
+                const cp = checkpoints[index];
+                player.respawnX = cp.x; player.respawnFeet = cp.feet; player.respawnPhase = cp.phase;
+                checkpointFlash = 1; screenPulse = .45; checkpointSound();
+            }
+            function updateCheckpoint() {
+                for (let i = activeCheckpoint + 1; i < checkpoints.length; i++) {
+                    const cp = checkpoints[i];
+                    let hit = false;
+                    if (cp.zone) {
+                        hit = expandedOverlap(player, cp.zone, 2);
+                    } else if (Number.isFinite(cp.triggerX)) {
+                        hit = player.x >= cp.triggerX;
+                    }
+                    if (hit) { setCheckpoint(i); break; }
+                }
+            }
+            function die() {
+                if (gameState !== 'PLAY' || TEST_MOVE.enabled) return;
+                consoleEvent('PLAYER_DIE');
+                gameState = 'DYING'; deathTimer = .34; deathSound(); keys.delete('Space'); keys.delete('KeyW');
+            }
+            function resetNewtonChallengeForRetry() {
+                newtonMeasurementStarted = false;
+                newtonMeasurementStep = 0;
+                newtonRevealTimer = 0;
+                newtonFeedbackTimer = 0;
+                newtonFeedbackText = '';
+                newtonMissCount = 0;
+                newtonShotPulse = 0;
+                newtonMarkers.length = 0;
+                easyNewtonAxisAngle = null;
+                easyNewtonAxisLockedAt = 0;
+                hardNewtonAxisLockedAt = 0;
+                newtonOrbitClock = 0;
+            }
+            function respawn() {
+                const cp = checkpoints[activeCheckpoint];
+                consoleEvent('RESPAWN', { checkpoint: activeCheckpoint, x: cp.x, feet: cp.feet });
+                if (cp?.resetNewton) resetNewtonChallengeForRetry();
+                player.x = cp.x; player.y = cp.feet - player.h; player.vx = 0; player.vy = 0; player.phase = wrapPhase(cp.phase);
+                player.intensity = intensityForPhase(player.phase); player.state = stateFor(player.intensity);
+                player.ghost.clear(); player.trail.length = 0; player.grounded = false; player.groundedOn = null;
+                if (cp?.resetNewton) updateMovingPlatforms(0);
+                gameState = 'PLAY'; deathTimer = 0; screenPulse = .25;
+            }
+            function updateHardNewtonBiteCollision() {
+                if (selectedLevel !== 'HARD' || gameState !== 'PLAY' || TEST_MOVE.enabled) return;
+                const s = hardNewtonBiteState();
+                if (!s.lethal || s.depth <= .16) return;
+                const px = player.x + player.w * .5, py = player.y + player.h * .52;
+                const dx = px - s.cfg.cx, dy = py - s.cfg.cy;
+                const radius = Math.hypot(dx, dy);
+                const a = Math.atan2(dy, dx);
+                const angular = Math.abs(angleDelta(a, s.angle));
+                // Slightly narrower collision than the drawn jaws to keep the bite fair.
+                const half = HARD_NEWTON_BITE.halfAngle * .84;
+                if (radius >= s.currentInner + 7 && radius <= s.outer + 34 && angular <= half) {
+                    consoleEvent('NEWTON_MAW_HIT', { index: s.index, angle: +s.angle.toFixed(3) });
+                    newtonFeedbackText = 'NHIỄU ĐỘNG · BỊ ĐỚP';
+                    newtonFeedbackTimer = .7;
+                    screenPulse = Math.max(screenPulse, .65);
+                    die();
+                }
+            }
+
+            function beginLensTransition() {
+                if (gameState !== 'PLAY') return;
+                samplePhase = wrapPhase(player.phase);
+                sampleIntensity = player.intensity;
+                lensTransitionTimer = 0;
+                player.vx = 0; player.vy = 0; player.jumpBuffer = 0; player.coyote = 0;
+                gameState = 'LENS_TRANSITION';
+                keys.clear();
+                screenPulse = .35;
+                ping(360, .32, .025, 'sine');
+            }
+            function darkRingRadius(n) { return MEASURE.ringScale * Math.sqrt(n * SOURCE_LAMBDA / MEASURE.referenceLambda); }
+            function brightRingRadius(n) { return MEASURE.ringScale * Math.sqrt((n + 0.5) * SOURCE_LAMBDA / MEASURE.referenceLambda); }
+            function measurementTargets() {
+                const ri = darkRingRadius(MEASURE.i), rk = darkRingRadius(MEASURE.k);
+                return { ri, rk, K: MEASURE.cx - rk, I: MEASURE.cx + ri, Kp: MEASURE.cx + rk };
+            }
+
+            function darkRingRadiusWorld(n, cfg = levelMeasureConfig()) {
+                return cfg.ringScale * Math.sqrt(n * SOURCE_LAMBDA / MEASURE.referenceLambda);
+            }
+            function brightRingRadiusWorld(n, cfg = levelMeasureConfig()) {
+                return cfg.ringScale * Math.sqrt((n + 0.5) * SOURCE_LAMBDA / MEASURE.referenceLambda);
+            }
+            function newtonTargets(cfg = levelMeasureConfig()) {
+                const ri = darkRingRadiusWorld(cfg.i, cfg), rk = darkRingRadiusWorld(cfg.k, cfg);
+                return {
+                    ri, rk,
+                    K: { x: cfg.cx - rk, y: cfg.cy },
+                    I: { x: cfg.cx + ri, y: cfg.cy },
+                    Kp: { x: cfg.cx + rk, y: cfg.cy }
+                };
+            }
+            function newtonProjectionX() { return player.x + player.w * .5; }
+            function currentNewtonRail() {
+                return newtonRails.find(c => c.id === player.groundedOn) || null;
+            }
+            function expectedNewtonRail() {
+                if (selectedLevel === 'EASY' || selectedLevel === 'HARD') {
+                    const role = newtonMeasurementStep === 1 ? 'I' : 'K';
+                    return newtonRails.find(c => c.newtonOrbitRail && c.orbitRole === role) || null;
+                }
+                return newtonRails.find(c => c.measureIndex === newtonMeasurementStep) || null;
+            }
+            function isInNewtonZone() {
+                if (!(selectedLevel === 'EASY' || selectedLevel === 'HARD') || gameState !== 'PLAY') return false;
+                const cfg = levelMeasureConfig();
+                const cx = player.x + player.w * .5;
+                return cx >= cfg.cx - cfg.ringScale * 3.15 && cx <= cfg.cx + cfg.ringScale * 3.25;
+            }
+            function railMaterialName(rail) {
+                return rail ? rail.material : '—';
+            }
+            function newtonMarker(label) { return newtonMarkers.find(m => m.label === label) || null; }
+            function orbitNewtonGeometry(cfg = levelMeasureConfig()) {
+                const K = newtonMarker('K');
+                if (!K) return null;
+                const theta = Number.isFinite(K.angle) ? K.angle : Math.atan2(K.y - cfg.cy, K.x - cfg.cx);
+                const ux = Math.cos(theta), uy = Math.sin(theta);
+                const ri = darkRingRadiusWorld(cfg.i, cfg), rk = darkRingRadiusWorld(cfg.k, cfg);
+                return {
+                    theta, ux, uy, ri, rk,
+                    K: { x: cfg.cx + ux * rk, y: cfg.cy + uy * rk },
+                    I: { x: cfg.cx - ux * ri, y: cfg.cy - uy * ri },
+                    Kp: { x: cfg.cx - ux * rk, y: cfg.cy - uy * rk },
+                };
+            }
+            function easyNewtonGeometry() { return orbitNewtonGeometry(LEVEL_MEASURE.EASY); }
+            function hardNewtonGeometry() { return orbitNewtonGeometry(LEVEL_MEASURE.HARD); }
+            function railCenterPoint(rail) {
+                return rail ? { x: rail.x + rail.w * .5, y: rail.y + rail.h * .5 } : null;
+            }
+            function pointDistance(a, b) { return Math.hypot(a.x - b.x, a.y - b.y); }
+
+            function newtonMeasurementResult() {
+                if (newtonMarkers.length < 3) return null;
+                const cfg = levelMeasureConfig();
+                const K = newtonMarker('K'), I = newtonMarker('I'), Kp = newtonMarker("K'");
+                if (!K || !I || !Kp) return null;
+                const hasXY = [K, I, Kp].every(m => Number.isFinite(m.x) && Number.isFinite(m.y));
+                const Bpx = hasXY ? Math.hypot(I.x - K.x, I.y - K.y) : Math.abs(I.measuredX - K.measuredX);
+                const bpx = hasXY ? Math.hypot(Kp.x - I.x, Kp.y - I.y) : Math.abs(Kp.measuredX - I.measuredX);
+                const lambdaMm = SOURCE_LAMBDA * 1e-6;
+                const physicalR1 = Math.sqrt(lambdaMm * cfg.Rmm);
+                const mmPerPx = physicalR1 / cfg.ringScale;
+                const Bmm = Bpx * mmPerPx, bmm = bpx * mmPerPx;
+                const lambdaOutMm = (Bmm * bmm) / (Math.abs(cfg.k - cfg.i) * cfg.Rmm);
+                return { Bpx, bpx, Bmm, bmm, lambdaNm: lambdaOutMm * 1e6 };
+            }
+            function beginNewtonReveal() {
+                if (!(selectedLevel === 'EASY' || selectedLevel === 'HARD')) return;
+                consoleEvent('NEWTON_MEASUREMENT_COMPLETE', { marks: newtonMarkers.map(m => m.label) });
+                gameState = 'NEWTON_REVEAL';
+                newtonRevealTimer = 0;
+                player.vx = 0; player.vy = 0;
+                keys.clear(); pressed.clear();
+                screenPulse = Math.max(screenPulse, .35);
+                measurementCompleteSound();
+            }
+
+            function lockOrbitNewtonPoint(label, target, rail, extra = {}) {
+                newtonMarkers.push({
+                    label, x: target.x, y: target.y, measuredX: target.x, targetX: target.x,
+                    rail: rail?.name || null, ...extra
+                });
+                newtonFeedbackText = label === 'K' ? 'K ĐÃ KHÓA · TRỤC K–O ĐƯỢC XÁC LẬP' : `${label} ĐÃ KHÓA`;
+                newtonFeedbackTimer = 1.15;
+                newtonMissCount = 0;
+                measurementLockSound(newtonMeasurementStep);
+                screenPulse = Math.max(screenPulse, label === 'K' ? .24 : .16);
+                consoleEvent('NEWTON_LOCK', { label, x: +target.x.toFixed(1), y: +target.y.toFixed(1), rail: rail?.name || null });
+                newtonMeasurementStep++;
+                if (newtonMeasurementStep >= 3) beginNewtonReveal();
+            }
+
+            function fireEasyNewtonMeasurementPulse() {
+                const cfg = LEVEL_MEASURE.EASY;
+                const current = currentNewtonRail();
+                const expected = expectedNewtonRail();
+                const labels = ['K', 'I', "K'"];
+                const label = labels[newtonMeasurementStep];
+
+                newtonShotPulse = .28;
+                measurementPulseSound();
+                consoleEvent('NEWTON_SHOT', { step: newtonMeasurementStep, label, currentRail: current?.name || null });
+
+                if (!current || current.id !== expected?.id) {
+                    const need = newtonMeasurementStep === 1 ? `thanh i = ${cfg.i}` : `thanh k = ${cfg.k}`;
+                    newtonFeedbackText = `HÃY ĐỨNG TRÊN ${need}`;
+                    newtonFeedbackTimer = 1.0;
+                    newtonMissCount++;
+                    measurementMissSound();
+                    return;
+                }
+
+                // Step 1: K is intentionally NOT predetermined. Wherever the player chooses to press X
+                // on the k-platform becomes K and fixes the diameter K-O-K'.
+                if (newtonMeasurementStep === 0) {
+                    const angle = current.orbitAngle;
+                    const target = {
+                        x: cfg.cx + Math.cos(angle) * current.orbitRadius,
+                        y: cfg.cy + Math.sin(angle) * current.orbitRadius,
+                    };
+                    easyNewtonAxisAngle = angle;
+                    easyNewtonAxisLockedAt = elapsed;
+                    lockOrbitNewtonPoint('K', target, current, { angle });
+                    return;
+                }
+
+                const geo = easyNewtonGeometry();
+                if (!geo) return;
+                const target = newtonMeasurementStep === 1 ? geo.I : geo.Kp;
+                const center = railCenterPoint(current);
+                const error = pointDistance(center, target);
+                // Generous EASY timing window: the skill is reading the orbit + axis, not pixel-perfect aiming.
+                const tolerance = newtonMeasurementStep === 1 ? 48 : 54;
+                if (error <= tolerance) {
+                    const accuracy = Math.max(0, Math.round(100 * (1 - error / tolerance)));
+                    lockOrbitNewtonPoint(label, target, current, { angle: Math.atan2(target.y - cfg.cy, target.x - cfg.cx), accuracy });
+                    newtonFeedbackText = `${label} ĐÃ KHÓA · ${accuracy}%`;
+                } else {
+                    newtonFeedbackText = `CHỜ ${label} THẲNG HÀNG VỚI TRỤC K–O`;
+                    newtonFeedbackTimer = .95;
+                    newtonMissCount++;
+                    measurementMissSound();
+                    consoleEvent('NEWTON_MISS', { label, error: +error.toFixed(1), tolerance });
+                }
+            }
+
+
+            function fireHardNewtonMeasurementPulse() {
+                const cfg = LEVEL_MEASURE.HARD;
+                const current = currentNewtonRail();
+                const expected = expectedNewtonRail();
+                const labels = ['K', 'I', "K'"];
+                const label = labels[newtonMeasurementStep];
+
+                newtonShotPulse = .28;
+                measurementPulseSound();
+                consoleEvent('NEWTON_HARD_SHOT', { step: newtonMeasurementStep, label, currentRail: current?.name || null, material: current?.material || null });
+
+                if (!current || current.id !== expected?.id) {
+                    const need = newtonMeasurementStep === 1 ? `thanh i = ${cfg.i}` : `thanh k = ${cfg.k}`;
+                    newtonFeedbackText = `HÃY ĐỨNG TRÊN ${need}`;
+                    newtonFeedbackTimer = 1.0;
+                    newtonMissCount++;
+                    measurementMissSound();
+                    return;
+                }
+
+                // K is still the player's strategic choice. Once fired, the diameter is permanent.
+                if (newtonMeasurementStep === 0) {
+                    const angle = current.orbitAngle;
+                    const target = { x: cfg.cx + Math.cos(angle) * current.orbitRadius, y: cfg.cy + Math.sin(angle) * current.orbitRadius };
+                    hardNewtonAxisLockedAt = elapsed;
+                    lockOrbitNewtonPoint('K', target, current, { angle });
+                    return;
+                }
+
+                const geo = hardNewtonGeometry();
+                if (!geo) return;
+                const target = newtonMeasurementStep === 1 ? geo.I : geo.Kp;
+                const center = railCenterPoint(current);
+                const error = pointDistance(center, target);
+                // HARD tightens timing, but remains intentionally larger than a tiny hitbox.
+                const tolerance = newtonMeasurementStep === 1 ? 34 : 39;
+                if (error <= tolerance) {
+                    const accuracy = Math.max(0, Math.round(100 * (1 - error / tolerance)));
+                    lockOrbitNewtonPoint(label, target, current, { angle: Math.atan2(target.y - cfg.cy, target.x - cfg.cx), accuracy });
+                    newtonFeedbackText = `${label} ĐÃ KHÓA · ${accuracy}%`;
+                } else {
+                    newtonFeedbackText = `CHƯA THẲNG HÀNG · CHỜ ${label}`;
+                    newtonFeedbackTimer = .9;
+                    newtonMissCount++;
+                    measurementMissSound();
+                    consoleEvent('NEWTON_HARD_MISS', { label, error: +error.toFixed(1), tolerance });
+                }
+            }
+
+            function fireNewtonMeasurementPulse() {
+                if (gameState !== 'PLAY' || newtonMeasurementStep > 2) return;
+                newtonMeasurementStarted = true;
+                if (selectedLevel === 'EASY') {
+                    fireEasyNewtonMeasurementPulse();
+                    return;
+                }
+                if (selectedLevel === 'HARD') {
+                    fireHardNewtonMeasurementPulse();
+                    return;
+                }
+
+                // Legacy fallback.
+                const cfg = levelMeasureConfig();
+                const targets = newtonTargets(cfg);
+                const targetList = [targets.K.x, targets.I.x, targets.Kp.x];
+                const labels = ['K', 'I', "K'"];
+                const rail = expectedNewtonRail();
+                const current = currentNewtonRail();
+                const label = labels[newtonMeasurementStep];
+
+                newtonShotPulse = .28;
+                measurementPulseSound();
+                if (!rail || current?.id !== rail.id) {
+                    newtonFeedbackText = `HÃY DÙNG THANH ${railMaterialName(rail)} ĐỂ ĐÁNH DẤU ${label}`;
+                    newtonFeedbackTimer = 1.05;
+                    newtonMissCount++;
+                    measurementMissSound();
+                    return;
+                }
+                const targetX = targetList[newtonMeasurementStep];
+                const railCenter = rail.x + rail.w * .5;
+                const railStationError = Math.abs(railCenter - rail.dockX);
+                const bodyError = Math.abs(newtonProjectionX() - railCenter);
+                const railDockTolerance = Math.max(14, cfg.tolerance * .72);
+                if (railStationError > railDockTolerance) {
+                    newtonFeedbackText = `CHỜ THANH ${rail.material} VÀO ĐÚNG VỊ TRÍ`;
+                    newtonFeedbackTimer = .9; newtonMissCount++; measurementMissSound(); return;
+                }
+                if (bodyError <= rail.aimTolerance) {
+                    const accuracy = Math.max(0, Math.round(100 * (1 - bodyError / rail.aimTolerance)));
+                    newtonMarkers.push({ label, measuredX: targetX, targetX, rail: rail.name });
+                    newtonFeedbackText = `${label} ĐÃ KHÓA · ${accuracy}%`; newtonFeedbackTimer = 1.0; newtonMissCount = 0;
+                    measurementLockSound(newtonMeasurementStep); screenPulse = Math.max(screenPulse, .16); newtonMeasurementStep++;
+                    if (newtonMeasurementStep >= 3) beginNewtonReveal();
+                } else {
+                    newtonFeedbackText = 'ĐỨNG VÀO GIỮA THANH'; newtonFeedbackTimer = .85; newtonMissCount++; measurementMissSound();
+                }
+            }
+
+            function beginMeasurement() {
+                gameState = 'MEASUREMENT';
+                measurementIntroTimer = 0;
+                measurementResultTimer = 0;
+                measurementStep = 0;
+                reticleX = MEASURE.cx;
+                reticleVX = 0;
+                measurementMarkers.length = 0;
+                missCountForStep = 0;
+                fringeHintTimer = 0;
+                shotPulse = 0;
+                missTimer = 0;
+                lockFeedbackTimer = 0;
+                pressed.clear(); keys.clear();
+                screenPulse = .28;
+                ping(440, .24, .025, 'sine');
+            }
+            function fireMeasurementPulse() {
+                if (gameState !== 'MEASUREMENT' || measurementIntroTimer < 1.05 || measurementStep > 2) return;
+                const t = measurementTargets();
+                const targets = [t.K, t.I, t.Kp];
+                const labels = ['K', 'I', "K'"];
+                const targetX = targets[measurementStep];
+                const error = Math.abs(reticleX - targetX);
+                shotPulse = .24;
+                measurementPulseSound();
+                if (error <= MEASURE.tolerance) {
+                    const accuracy = Math.max(0, Math.round(100 * (1 - error / MEASURE.tolerance)));
+                    measurementMarkers.push({ label: labels[measurementStep], x: targetX, measuredX: reticleX });
+                    lockFeedbackText = `ĐÃ KHÓA · ${accuracy}%`;
+                    lockFeedbackTimer = .9;
+                    measurementLockSound(measurementStep);
+                    screenPulse = Math.max(screenPulse, .18);
+                    measurementStep++;
+                    missCountForStep = 0;
+                    fringeHintTimer = 0;
+                    if (measurementStep >= 3) {
+                        gameState = 'MEASUREMENT_RESULT';
+                        measurementResultTimer = 0;
+                        reticleVX = 0;
+                        measurementCompleteSound();
+                    }
+                } else {
+                    missTimer = .48;
+                    lockFeedbackText = 'CHỈNH LẠI VỊ TRÍ';
+                    lockFeedbackTimer = .65;
+                    missCountForStep++;
+                    measurementMissSound();
+                    if (missCountForStep >= 2) { fringeHintTimer = .8; missCountForStep = 0; }
+                }
+            }
+            function finishComplete() {
+                if (TEST_MOVE.enabled) setTestMode(false);
+                consoleEvent('LEVEL_COMPLETE');
+                gameState = 'COMPLETE'; completeTimer = 0; player.vx = 0; player.vy = 0; screenPulse = 1;
+                keys.clear(); pressed.clear();
+                ping(330, .4, .035); setTimeout(() => ping(495, .55, .03), 120); setTimeout(() => ping(660, .65, .025), 240);
+            }
+
+            function resetTransientState() {
+                TEST_MOVE.enabled = false; TEST_MOVE.dx = 0; TEST_MOVE.dy = 0;
+                if (document.pointerLockElement === canvas) document.exitPointerLock?.();
+                activeCheckpoint = 0;
+                elapsed = 0; completeTimer = 0; deathTimer = 0; hintTimer = 0; screenPulse = .4; checkpointFlash = 0;
+                lensTransitionTimer = 0; samplePhase = Math.PI / 2; sampleIntensity = intensityForPhase(samplePhase);
+                measurementIntroTimer = 0; measurementResultTimer = 0; measurementStep = 0; reticleX = MEASURE.cx; reticleVX = 0;
+                shotPulse = 0; missTimer = 0; missCountForStep = 0; fringeHintTimer = 0; lockFeedbackTimer = 0; lockFeedbackText = ''; measurementMarkers.length = 0;
+                newtonMeasurementStarted = false; newtonMeasurementStep = 0; newtonRevealTimer = 0; newtonFeedbackTimer = 0; newtonFeedbackText = ''; newtonMissCount = 0; newtonShotPulse = 0; newtonMarkers.length = 0;
+                newtonOrbitClock = 0; easyNewtonAxisAngle = null; easyNewtonAxisLockedAt = 0; hardNewtonAxisLockedAt = 0;
+                player.x = 150; player.y = 780 - player.h; player.vx = 0; player.vy = 0; player.phase = Math.PI / 2; player.grounded = false; player.groundedOn = null; player.jumpBuffer = 0; player.coyote = 0;
+                player.respawnX = 150; player.respawnFeet = 780; player.respawnPhase = Math.PI / 2;
+                player.ghost.clear(); player.trail.length = 0;
+                player.intensity = intensityForPhase(player.phase); player.state = stateFor(player.intensity);
+                camera.x = 0; camera.y = 235; camera.zoom = 1; camera.targetZoom = 1;
+                pressed.clear(); keys.clear();
+            }
+
+            function levelToMenuIndex(level) { return level === 'HARD' ? 1 : 0; }
+            function menuIndexToLevel(index) { return index === 1 ? 'HARD' : 'EASY'; }
+
+            function startLevel(level) {
+                if (TEST_MOVE.enabled) setTestMode(false);
+                selectedLevel = level;
+                menuIndex = levelToMenuIndex(level);
+                setupLevel(level);
+                resetTransientState();
+                gameState = 'PLAY';
+                consoleEvent('LEVEL_START', { level });
+            }
+
+            function restartLevel() { consoleEvent('LEVEL_RESTART', { level: selectedLevel }); startLevel(selectedLevel); }
+
+            function goToLevelSelect() {
+                if (TEST_MOVE.enabled) setTestMode(false);
+                consoleEvent('LEVEL_SELECT_RETURN', { fromLevel: selectedLevel });
+                menuIndex = levelToMenuIndex(selectedLevel);
+                gameState = 'LEVEL_SELECT';
+                keys.clear(); pressed.clear();
+                player.vx = 0; player.vy = 0;
+                completeTimer = 0; screenPulse = 0;
+            }
+
+            // ------------------------------------------------------------
+            // Core update
+            // ------------------------------------------------------------
+            function update(dt) {
+                elapsed += dt;
+                hintTimer += dt;
+                screenPulse = Math.max(0, screenPulse - dt * 1.8);
+                checkpointFlash = Math.max(0, checkpointFlash - dt * 1.2);
+                shotPulse = Math.max(0, shotPulse - dt);
+                missTimer = Math.max(0, missTimer - dt);
+                fringeHintTimer = Math.max(0, fringeHintTimer - dt);
+                lockFeedbackTimer = Math.max(0, lockFeedbackTimer - dt);
+                newtonFeedbackTimer = Math.max(0, newtonFeedbackTimer - dt);
+                newtonShotPulse = Math.max(0, newtonShotPulse - dt);
+                const tunerTargetX = isNewtonFramingActive() ? newtonViewLayout().tunerX : (V.w - 500) / 2;
+                tunerPanelX = lerp(tunerPanelX, tunerTargetX, smooth(7.5, dt));
+
+                if (gameState === 'LEVEL_SELECT') { updateAudio(); pressed.clear(); return; }
+
+                // Newton orbit motion wakes up only near the chamber. This keeps the opening
+                // composition deterministic while allowing HARD to use the same physical orbit model.
+                if ((selectedLevel === 'EASY' || selectedLevel === 'HARD') && gameState === 'PLAY') {
+                    const cfg = levelMeasureConfig();
+                    const px = player.x + player.w * .5;
+                    const wakeX = selectedLevel === 'EASY' ? 5250 : (cfg.cx - cfg.ringScale * 4.55);
+                    if (newtonOrbitClock > 0 || px > wakeX) newtonOrbitClock += dt;
+                }
+                updateMovingPlatforms(dt);
+                updateParticles(dt);
+
+                if (gameState === 'DYING') {
+                    deathTimer -= dt;
+                    if (deathTimer <= 0) respawn();
+                    updateCamera(dt); updateAudio(); pressed.clear(); return;
+                }
+                if (gameState === 'LENS_TRANSITION') {
+                    lensTransitionTimer += dt;
+                    updateLensCamera(dt);
+                    updateAudio();
+                    if (lensTransitionTimer >= 2.45) beginMeasurement();
+                    pressed.clear(); return;
+                }
+                if (gameState === 'MEASUREMENT') {
+                    measurementIntroTimer += dt;
+                    const move = ((keys.has('KeyD') || keys.has('ArrowRight')) ? 1 : 0) - ((keys.has('KeyA') || keys.has('ArrowLeft')) ? 1 : 0);
+                    // Constant scanner speed is deliberate: it makes microscope-style positioning precise and accessible.
+                    reticleVX = move * MEASURE.reticleSpeed;
+                    reticleX = clamp(reticleX + reticleVX * dt, MEASURE.axisMin, MEASURE.axisMax);
+                    if (pressed.has('Space')) fireMeasurementPulse();
+                    updateAudio(); pressed.clear(); return;
+                }
+                if (gameState === 'MEASUREMENT_RESULT') {
+                    measurementResultTimer += dt;
+                    if (measurementResultTimer >= 3.0) finishComplete();
+                    updateAudio(); pressed.clear(); return;
+                }
+                if (gameState === 'NEWTON_REVEAL') {
+                    newtonRevealTimer += dt;
+                    updateNewtonRevealCamera(dt);
+                    if (newtonRevealTimer >= levelMeasureConfig().revealDuration) finishComplete();
+                    updateAudio(); pressed.clear(); return;
+                }
+                if (gameState === 'COMPLETE') {
+                    completeTimer += dt; updateAudio(); pressed.clear(); return;
+                }
+
+                // PLAY: relative phase tuning is CYCLIC. There are no endpoints.
+                // Holding either arrow keeps sliding Wave B forever: BRIGHT -> TUNING -> DARK -> TUNING -> BRIGHT -> ...
+                tuneDir = (keys.has('ArrowRight') ? 1 : 0) - (keys.has('ArrowLeft') ? 1 : 0);
+                if (tuneDir) player.phase = wrapPhase(player.phase + tuneDir * CFG.phaseSpeed * dt);
+                player.intensity = intensityForPhase(player.phase);
+                player.state = stateFor(player.intensity);
+
+                // TEST MODE: raw mouse displacement maps directly to world-space player displacement.
+                // Physics, collision, checkpoints, death, measurement triggers, and completion triggers are bypassed.
+                if (TEST_MOVE.enabled) {
+                    const r = canvas.getBoundingClientRect();
+                    const scaleX = (V.w / Math.max(1, r.width)) / Math.max(.001, camera.zoom);
+                    const scaleY = (V.h / Math.max(1, r.height)) / Math.max(.001, camera.zoom);
+                    const dx = TEST_MOVE.dx * scaleX * TEST_MOVE.sensitivity;
+                    const dy = TEST_MOVE.dy * scaleY * TEST_MOVE.sensitivity;
+                    TEST_MOVE.dx = 0; TEST_MOVE.dy = 0;
+                    if (dx !== 0) player.facing = dx > 0 ? 1 : -1;
+                    player.x = clamp(player.x + dx, 0, WORLD.w - player.w);
+                    player.y = clamp(player.y + dy, 0, WORLD.h - player.h);
+                    player.vx = 0; player.vy = 0;
+                    player.grounded = false; player.groundedOn = null;
+                    player.jumpBuffer = 0; player.coyote = 0;
+                    player.trail.length = 0;
+                    updateCamera(dt);
+                    updateAudio();
+                    lastGrounded = false;
+                    pressed.clear();
+                    return;
+                }
+
+                const move = (keys.has('KeyD') ? 1 : 0) - (keys.has('KeyA') ? 1 : 0);
+                if (move) {
+                    player.facing = move;
+                    const accel = (player.grounded ? CFG.groundAccel : CFG.airAccel) * dt;
+                    player.vx = approach(player.vx, move * CFG.maxSpeed, accel);
+                } else {
+                    const decel = (player.grounded ? CFG.groundDecel : CFG.airAccel * .35) * dt;
+                    player.vx = approach(player.vx, 0, decel);
+                }
+
+                if (!newtonMeasurementStarted) {
+                    const px = player.x + player.w * .5;
+                    const cfg = levelMeasureConfig();
+                    const shouldStart = px > cfg.cx - cfg.ringScale * 4.25;
+                    if (shouldStart) {
+                        newtonMeasurementStarted = true;
+                        consoleEvent('NEWTON_ZONE_ENTER', { step: newtonMeasurementStep });
+                    }
+                }
+                if (newtonMeasurementStarted && pressed.has('KeyX') && newtonMeasurementStep < 3) fireNewtonMeasurementPulse();
+                if (gameState === 'NEWTON_REVEAL') { updateAudio(); pressed.clear(); return; }
+
+                // SPACE/W are jump only. X is exclusively the Newton mark/shot input.
+                const wantsJump = pressed.has('KeyW') || pressed.has('Space');
+                if (wantsJump) player.jumpBuffer = CFG.jumpBuffer;
+                else player.jumpBuffer = Math.max(0, player.jumpBuffer - dt);
+                if (player.grounded) player.coyote = CFG.coyote;
+                else player.coyote = Math.max(0, player.coyote - dt);
+
+                if (player.jumpBuffer > 0 && player.coyote > 0) {
+                    player.vy = CFG.jumpVel; player.grounded = false; player.groundedOn = null; player.coyote = 0; player.jumpBuffer = 0; ping(250, .055, .015);
+                }
+
+                if (keys.has('KeyS')) player.vy = Math.min(CFG.maxFall, player.vy + 900 * dt);
+                player.vy = Math.min(CFG.maxFall, player.vy + CFG.gravity * dt);
+
+                moveX(player.vx * dt);
+                moveY(player.vy * dt);
+                rememberGhosts();
+
+                for (const c of terrain) {
+                    if (!c.alwaysSolid && matches(c.material) && rectsOverlap(player, c) && !c._wasOverlap) {
+                        c._wasOverlap = true; screenPulse = Math.max(screenPulse, .18); phaseSound();
+                    } else if (!rectsOverlap(player, c)) c._wasOverlap = false;
+                }
+
+                spawnTrail();
+                updateCheckpoint();
+                updateHardNewtonBiteCollision();
+                if (player.y > WORLD.deathY) die();
+
+                updateCamera(dt);
+                updateAudio();
+                lastGrounded = player.grounded;
+                pressed.clear();
+            }
+
+            function isNewtonFramingActive() {
+                if (TEST_MOVE.enabled || !(selectedLevel === 'EASY' || selectedLevel === 'HARD')) return false;
+                if (gameState === 'NEWTON_REVEAL') return true;
+                if (gameState !== 'PLAY' && gameState !== 'DYING') return false;
+                const cfg = levelMeasureConfig();
+                const centerX = player.x + player.w * .5;
+                return centerX > cfg.cx - cfg.ringScale * 3.7;
+            }
+
+            function newtonViewLayout(cfg = levelMeasureConfig()) {
+                const tunerW = 500, tunerH = 142;
+                const tunerX = 38;
+                const tunerY = V.h - tunerH - 18;
+
+                // Put the Newton system slightly to the right so the player/approach and tuner own the left side.
+                const centerSX = V.w * .625;
+                const centerSY = V.h * .5;
+
+                // Fit against the REAL outer optical system (fringe + mount), not an arbitrary hard-coded zoom.
+                const outerWorld = darkRingRadiusWorld(cfg.outerN + .65, cfg) + 22;
+                const edgePad = 8;
+                let maxRadius = Math.min(
+                    centerSX - edgePad,
+                    V.w - centerSX - edgePad,
+                    centerSY - edgePad,
+                    V.h - centerSY - edgePad
+                );
+
+                // Keep the bottom-left tuner rectangle outside the circle with a small visual gap.
+                const tunerGap = 22;
+                const nearestTunerX = tunerX + tunerW + tunerGap;
+                const nearestTunerY = tunerY;
+                const dx = Math.max(0, centerSX - nearestTunerX);
+                const dy = Math.max(0, nearestTunerY - centerSY);
+                maxRadius = Math.min(maxRadius, Math.hypot(dx, dy));
+
+                const zoom = clamp(maxRadius / outerWorld, .58, .74);
+                return { centerSX, centerSY, zoom, tunerX, tunerY };
+            }
+
+            function cameraForWorldPoint(worldX, worldY, screenX, screenY, zoom) {
+                const ox = (V.w - V.w * zoom) * .5;
+                const oy = (V.h - V.h * zoom) * .5;
+                return {
+                    x: worldX - (screenX - ox) / zoom,
+                    y: worldY - (screenY - oy) / zoom
+                };
+            }
+
+            function updateCamera(dt) {
+                const centerX = player.x + player.w * .5;
+                const centerY = player.y + player.h * .5;
+
+                if (TEST_MOVE.enabled) {
+                    // Pointer-lock test mode: keep the player at the screen center and roll the map underneath.
+                    camera.targetZoom = 1;
+                    camera.zoom = 1;
+                    camera.x = clamp(centerX - V.w * .5, 0, WORLD.w - V.w);
+                    camera.y = clamp(centerY - V.h * .5, 0, WORLD.h - V.h);
+                    return;
+                }
+
+                const cfg = levelMeasureConfig();
+                const inMeasureZone = isNewtonFramingActive();
+                if (inMeasureZone) {
+                    const layout = newtonViewLayout(cfg);
+                    const targetCam = cameraForWorldPoint(cfg.cx, cfg.cy, layout.centerSX, layout.centerSY, layout.zoom);
+                    camera.x = lerp(camera.x, clamp(targetCam.x, 0, WORLD.w - V.w), smooth(4.1, dt));
+                    camera.y = lerp(camera.y, clamp(targetCam.y, 0, WORLD.h - V.h), smooth(4.1, dt));
+                    camera.targetZoom = layout.zoom;
+                } else {
+                    const desiredX = clamp(centerX - V.w * .42, 0, WORLD.w - V.w);
+                    camera.x = lerp(camera.x, desiredX, smooth(6.5, dt));
+
+                    const screenY = player.y + player.h * .5 - camera.y;
+                    let desiredY = camera.y;
+                    if (screenY < 380) desiredY = player.y + player.h * .5 - 380;
+                    if (screenY > 610) desiredY = player.y + player.h * .5 - 610;
+                    desiredY = clamp(desiredY, 0, WORLD.h - V.h);
+                    camera.y = lerp(camera.y, desiredY, smooth(5.5, dt));
+
+                    if (selectedLevel === 'EASY') camera.targetZoom = (player.x > 2950 && player.x < 4650) ? 0.96 : 1;
+                    else camera.targetZoom = (player.x > 3300 && player.x < 4300) ? 0.95 : 1;
+                }
+                camera.zoom = lerp(camera.zoom, camera.targetZoom, smooth(2.8, dt));
+            }
+
+            function updateNewtonRevealCamera(dt) {
+                const cfg = levelMeasureConfig();
+                const layout = newtonViewLayout(cfg);
+                const targetCam = cameraForWorldPoint(cfg.cx, cfg.cy, layout.centerSX, layout.centerSY, layout.zoom);
+                camera.x = lerp(camera.x, clamp(targetCam.x, 0, WORLD.w - V.w), smooth(2.2, dt));
+                camera.y = lerp(camera.y, clamp(targetCam.y, 0, WORLD.h - V.h), smooth(2.2, dt));
+                camera.targetZoom = layout.zoom;
+                camera.zoom = lerp(camera.zoom, camera.targetZoom, smooth(2.0, dt));
+            }
+
+            function updateLensCamera(dt) {
+                // During the handoff the camera is allowed to look slightly beyond the normal world clamp
+                // so the lens can settle at the visual center before the screen-space measurement view takes over.
+                const t = clamp(lensTransitionTimer / 2.0, 0, 1);
+                camera.x = lerp(camera.x, 4400, smooth(2.6 + 2 * t, dt));
+                camera.y = lerp(camera.y, 0, smooth(2.4, dt));
+                camera.zoom = lerp(camera.zoom, .98, smooth(2.2, dt));
+            }
+
+            // ------------------------------------------------------------
+            // Drawing helpers
+            // ------------------------------------------------------------
+            function rr(x, y, w, h, r) {
+                r = Math.min(r, w / 2, h / 2); ctx.beginPath(); ctx.moveTo(x + r, y); ctx.arcTo(x + w, y, x + w, y + h, r); ctx.arcTo(x + w, y + h, x, y + h, r); ctx.arcTo(x, y + h, x, y, r); ctx.arcTo(x, y, x + w, y, r); ctx.closePath();
+            }
+            function worldToScreenX(x) { return (x - camera.x) * camera.zoom + (V.w - V.w * camera.zoom) * .5; }
+            function worldToScreenY(y) { return (y - camera.y) * camera.zoom + (V.h - V.h * camera.zoom) * .5; }
+            function onScreen(c, pad = 120) {
+                const x = worldToScreenX(c.x), y = worldToScreenY(c.y), w = c.w * camera.zoom, h = c.h * camera.zoom;
+                return x + w > -pad && x < V.w + pad && y + h > -pad && y < V.h + pad;
+            }
+            function clipOutsideNewtonDisc(extra = 0) {
+                if (!(selectedLevel === 'EASY' || selectedLevel === 'HARD')) return false;
+                const cfg = levelMeasureConfig();
+                const cx = worldToScreenX(cfg.cx), cy = worldToScreenY(cfg.cy);
+                const outer = (darkRingRadiusWorld(cfg.outerN + .65, cfg) + extra) * camera.zoom;
+                ctx.beginPath();
+                ctx.rect(-8, -8, V.w + 16, V.h + 16);
+                ctx.arc(cx, cy, outer, 0, TAU, true);
+                ctx.clip('evenodd');
+                return true;
+            }
+
+            function drawBackground() {
+                const g = ctx.createLinearGradient(0, 0, 0, V.h); g.addColorStop(0, '#07111e'); g.addColorStop(.58, '#09101d'); g.addColorStop(1, '#050812'); ctx.fillStyle = g; ctx.fillRect(0, 0, V.w, V.h);
+
+                // Quiet optical architecture in the background; fade it out near the real Newton apparatus.
+                const bgMeasureCfg = levelMeasureConfig();
+                if (player.x < bgMeasureCfg.cx - bgMeasureCfg.ringScale * 3.4) {
+                    ctx.save(); ctx.globalAlpha = .13;
+                    for (let i = 0; i < 7; i++) {
+                        const wx = i * 920 + 260; const sx = worldToScreenX(wx) * .55 + 150;
+                        ctx.strokeStyle = i % 2 ? '#54708e' : '#233b55'; ctx.lineWidth = 1;
+                        ctx.beginPath(); ctx.arc(sx, 200 + (i % 3) * 170, 110 + i * 22, 0, Math.PI * 2); ctx.stroke();
+                        ctx.beginPath(); ctx.arc(sx, 200 + (i % 3) * 170, 150 + i * 22, 0, Math.PI * 2); ctx.stroke();
+                    }
+                    ctx.restore();
+                }
+
+                ctx.save();
+                for (const p of ambience) {
+                    const sx = worldToScreenX(p.x * .75), sy = worldToScreenY(p.y * .9);
+                    if (sx < -5 || sx > V.w + 5 || sy < -5 || sy > V.h + 5) continue;
+                    const a = .08 + .08 * (.5 + .5 * Math.sin(elapsed * .45 + p.p));
+                    ctx.fillStyle = `rgba(170,205,235,${a})`; ctx.beginPath(); ctx.arc(sx, sy, p.r, 0, Math.PI * 2); ctx.fill();
+                }
+                ctx.restore();
+
+                // Subtle section names integrated into space.
+                const labels = selectedLevel === 'HARD' ? [
+                    [300, 'I · GÓC TRẮNG'], [1530, 'II · THANG XÁM'], [2190, 'III · CỬA TỐI'], [3300, 'IV · ĐƯỜNG TƯƠNG PHẢN'], [4470, 'V · LEO BA SẮC ĐỘ'], [6000, 'VI · ĐO VÂN NEWTON']
+                ] : [
+                    [300, 'I · QUA VÙNG TRẮNG'], [1450, 'II · BẬC XÁM'], [2350, 'III · QUA VÙNG TỐI'], [3150, 'IV · ĐƯỜNG LĂNG KÍNH'], [4800, 'V · TIẾP CẬN'], [5650, 'VI · ĐO VÂN NEWTON']
+                ];
+                ctx.save(); ctx.font = '600 14px ui-sans-serif,system-ui'; ctx.letterSpacing = '0.2em';
+                for (const [x, t] of labels) { const sx = worldToScreenX(x); if (sx > -300 && sx < V.w + 300) { ctx.fillStyle = 'rgba(180,205,230,.20)'; ctx.fillText(t, sx, 110); } }
+                ctx.restore();
+            }
+
+            function materialBase(c) {
+                if (c.material === MAT.WHITE) return ['#e8f0f4', '#cfdde5'];
+                if (c.material === MAT.GRAY) return ['#7d858f', '#646d78'];
+                return ['#151d28', '#0d141f'];
+            }
+            function drawTerrain(c) {
+                if (!onScreen(c)) return;
+                const x = worldToScreenX(c.x), y = worldToScreenY(c.y), w = c.w * camera.zoom, h = c.h * camera.zoom;
+                if (c.newtonRail && !c.newtonOrbitRail) {
+                    ctx.save();
+                    clipOutsideNewtonDisc(6);
+                }
+                if (c.newtonObstacle) {
+                    ctx.save();
+                    const pulse = .5 + .5 * Math.sin(elapsed * 4.6 + c.id);
+                    const kind = c.newtonObstacleKind || 'pylon';
+                    ctx.translate(x + w * .5, y + h * .5);
+
+                    if (kind === 'prism') {
+                        // Split optical prism: tapered silhouette + bright interference slit.
+                        ctx.fillStyle = 'rgba(13,19,27,.94)';
+                        ctx.beginPath();
+                        ctx.moveTo(-w * .46, h * .48); ctx.lineTo(-w * .30, -h * .38); ctx.lineTo(0, -h * .50);
+                        ctx.lineTo(w * .30, -h * .38); ctx.lineTo(w * .46, h * .48); ctx.closePath(); ctx.fill();
+                        ctx.strokeStyle = `rgba(229,238,242,${.40 + .30 * pulse})`; ctx.lineWidth = 1.5; ctx.stroke();
+                        ctx.globalAlpha = .72; ctx.fillStyle = 'rgba(236,243,246,.86)';
+                        ctx.fillRect(-2.1 * camera.zoom, -h * .28, 4.2 * camera.zoom, h * .60);
+                        ctx.globalAlpha = .24; ctx.strokeStyle = '#dfe8ed'; ctx.lineWidth = 1;
+                        ctx.beginPath(); ctx.moveTo(-w * .28, h * .22); ctx.lineTo(0, -h * .24); ctx.lineTo(w * .28, h * .22); ctx.stroke();
+                    } else {
+                        // Interference fork: two jaws leave a readable central notch instead of another box.
+                        ctx.fillStyle = 'rgba(14,21,30,.95)'; ctx.strokeStyle = `rgba(226,235,240,${.36 + .28 * pulse})`; ctx.lineWidth = 1.4;
+                        const tooth = w * .17;
+                        ctx.beginPath();
+                        ctx.moveTo(-w * .48, h * .42); ctx.lineTo(-w * .48, -h * .38); ctx.lineTo(-tooth, -h * .38);
+                        ctx.lineTo(-tooth * .52, -h * .05); ctx.lineTo(-tooth, h * .38); ctx.closePath(); ctx.fill(); ctx.stroke();
+                        ctx.beginPath();
+                        ctx.moveTo(w * .48, h * .42); ctx.lineTo(w * .48, -h * .38); ctx.lineTo(tooth, -h * .38);
+                        ctx.lineTo(tooth * .52, -h * .05); ctx.lineTo(tooth, h * .38); ctx.closePath(); ctx.fill(); ctx.stroke();
+                        ctx.globalAlpha = .66; ctx.strokeStyle = 'rgba(239,244,247,.86)'; ctx.lineWidth = 1.2;
+                        ctx.beginPath(); ctx.moveTo(-w * .12, 0); ctx.lineTo(w * .12, 0); ctx.stroke();
+                        ctx.globalAlpha = .28; ctx.beginPath(); ctx.arc(0, 0, w * .20, 0, TAU); ctx.stroke();
+                    }
+                    ctx.restore();
+                    return;
+                }
+                if (c.structural) {
+                    ctx.save();
+                    const g = ctx.createLinearGradient(x, y, x, y + h);
+                    g.addColorStop(0, '#28323b'); g.addColorStop(1, '#151c24');
+                    ctx.fillStyle = g; ctx.fillRect(x, y, w, h);
+                    ctx.strokeStyle = 'rgba(213,225,232,.48)'; ctx.lineWidth = 1.2; ctx.strokeRect(x + .6, y + .6, w - 1.2, h - 1.2);
+                    ctx.globalAlpha = .22; ctx.strokeStyle = '#dfe8ed'; ctx.lineWidth = 1;
+                    for (let px = x + 16; px < x + w; px += 42) { ctx.beginPath(); ctx.moveTo(px, y + 4); ctx.lineTo(px + 18, y + h - 4); ctx.stroke(); }
+                    ctx.globalAlpha = .48; ctx.fillStyle = 'rgba(230,238,243,.65)';
+                    for (let px = x + 18; px < x + w; px += 80)ctx.fillRect(px, y + 5, 3, 3);
+                    ctx.restore();
+                    if (c.newtonRail && !c.newtonOrbitRail) ctx.restore();
+                    return;
+                }
+                const distX = Math.abs((player.x + player.w / 2) - (c.x + c.w / 2));
+                const local = clamp(1 - distX / 470, 0, 1);
+                const react = reactStrength(c.material) * local;
+                const full = matches(c.material) && local > 0.02;
+                const [a, b] = materialBase(c);
+
+                ctx.save();
+                // IMPORTANT: matching a material must never dim, tint, or recolor its base surface.
+                // Collision state changes, but WHITE stays white, GRAY stays gray, and BLACK stays black.
+                ctx.globalAlpha = 1;
+                const grad = ctx.createLinearGradient(x, y, x, y + h);
+                grad.addColorStop(0, a); grad.addColorStop(1, b); ctx.fillStyle = grad;
+                ctx.fillRect(x, y, w, h);
+
+                // Keep each material's normal texture completely stable regardless of match state.
+                if (c.material === MAT.WHITE) {
+                    ctx.globalAlpha = .18; ctx.fillStyle = '#fff';
+                    for (let px = x + 12; px < x + w; px += 34) { const py = y + 8 + ((px * .37) % Math.max(12, h - 12)); ctx.fillRect(px, py, 1.5, 1.5); }
+                    ctx.globalAlpha = .65; ctx.strokeStyle = '#f8ffff'; ctx.lineWidth = 1.5; ctx.strokeRect(x + .75, y + .75, w - 1.5, h - 1.5);
+                } else if (c.material === MAT.GRAY) {
+                    ctx.globalAlpha = .14; ctx.strokeStyle = '#d9e0e7'; ctx.lineWidth = 1;
+                    const step = 24; for (let d = -h; d < w; d += step) { ctx.beginPath(); ctx.moveTo(x + d, y + h); ctx.lineTo(x + d + h, y); ctx.stroke(); }
+                    ctx.globalAlpha = .4; ctx.strokeStyle = '#c4ccd5'; ctx.strokeRect(x + .5, y + .5, w - 1, h - 1);
+                } else {
+                    ctx.globalAlpha = .22; ctx.strokeStyle = '#526173'; ctx.lineWidth = 1.2; ctx.strokeRect(x + 1, y + 1, w - 2, h - 2);
+                    ctx.globalAlpha = .11; ctx.fillStyle = '#8fa0b2';
+                    for (let px = x + 15; px < x + w; px += 43) ctx.fillRect(px, y + Math.abs(Math.sin(px * .13)) * Math.max(2, h - 3), 7, 1);
+                }
+
+                // Match feedback is now an additive outline/ripple overlay only.
+                // It never changes the material's fill alpha, hue, or brightness.
+                if (react > 0) {
+                    const pulse = .5 + .5 * Math.sin(elapsed * 7 + c.id);
+                    ctx.globalAlpha = (.10 + .16 * react) * (.72 + .28 * pulse);
+                    ctx.strokeStyle = 'rgba(238,244,247,1)';
+                    ctx.lineWidth = .8 + 1.4 * react;
+                    const inset = 3 + 2 * pulse * react;
+                    ctx.strokeRect(x + inset, y + inset, Math.max(0, w - inset * 2), Math.max(0, h - inset * 2));
+                }
+                ctx.restore();
+
+                if (c.newtonOrbitRail) {
+                    ctx.save();
+                    ctx.textAlign = 'center';
+                    ctx.font = '800 11px ui-sans-serif,system-ui';
+                    ctx.fillStyle = 'rgba(239,245,248,.92)';
+                    ctx.shadowBlur = 8; ctx.shadowColor = 'rgba(0,0,0,.8)';
+                    ctx.fillText(c.orbitLabel, x + w * .5, y - 9);
+                    ctx.shadowBlur = 0;
+                    if (selectedLevel === 'HARD' && c.materialChangeIn < .55) {
+                        const p = .5 + .5 * Math.sin(elapsed * 18);
+                        ctx.globalAlpha = .45 + .45 * p; ctx.strokeStyle = '#f1f5f7'; ctx.lineWidth = 2;
+                        ctx.strokeRect(x - 4, y - 4, w + 8, h + 8);
+                        ctx.globalAlpha = .82; ctx.font = '800 9px ui-sans-serif,system-ui'; ctx.fillStyle = '#edf3f6';
+                        ctx.fillText('ĐỔI PHA', x + w * .5, y - 22);
+                    }
+                    ctx.restore();
+                }
+                if (c.newtonRail && !c.newtonOrbitRail) ctx.restore();
+            }
+
+            function drawLensChamber() {
+                const cx = worldToScreenX(5200), cy = worldToScreenY(410), r = 125 * camera.zoom;
+                if (cx + r < 0 || cx - r > V.w) return;
+                ctx.save();
+                // Quiet chamber framing.
+                const floorY = worldToScreenY(700);
+                ctx.globalAlpha = .16; ctx.strokeStyle = '#b9c7d1'; ctx.lineWidth = 1;
+                ctx.beginPath(); ctx.moveTo(cx - 360 * camera.zoom, floorY - 310 * camera.zoom); ctx.lineTo(cx - 360 * camera.zoom, floorY); ctx.stroke();
+                ctx.beginPath(); ctx.moveTo(cx + 360 * camera.zoom, floorY - 310 * camera.zoom); ctx.lineTo(cx + 360 * camera.zoom, floorY); ctx.stroke();
+                ctx.beginPath(); ctx.moveTo(cx, floorY - 420 * camera.zoom); ctx.lineTo(cx, floorY + 15); ctx.stroke();
+
+                // Optical mount.
+                ctx.globalAlpha = .55; ctx.strokeStyle = '#8d9aa4'; ctx.lineWidth = 4 * camera.zoom;
+                ctx.beginPath(); ctx.arc(cx, cy, r + 24 * camera.zoom, 0, Math.PI * 2); ctx.stroke();
+                ctx.globalAlpha = .32; ctx.lineWidth = 2 * camera.zoom;
+                ctx.beginPath(); ctx.arc(cx, cy, r + 10 * camera.zoom, 0, Math.PI * 2); ctx.stroke();
+
+                // Glass disc and concentric optical structure.
+                const g = ctx.createRadialGradient(cx - r * .22, cy - r * .25, r * .08, cx, cy, r);
+                g.addColorStop(0, 'rgba(238,245,248,.18)'); g.addColorStop(.55, 'rgba(142,158,169,.09)'); g.addColorStop(1, 'rgba(20,27,35,.24)');
+                ctx.globalAlpha = 1; ctx.fillStyle = g; ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.fill();
+                ctx.shadowBlur = 24; ctx.shadowColor = 'rgba(230,240,245,.22)';
+                for (let q = .28; q <= 1; q += .18) { ctx.globalAlpha = .18; ctx.strokeStyle = '#e8eef1'; ctx.lineWidth = 1.1; ctx.beginPath(); ctx.arc(cx, cy, r * q, 0, Math.PI * 2); ctx.stroke(); }
+                ctx.shadowBlur = 0;
+
+                // Decorative sample pedestal around world x=5050.
+                const px = worldToScreenX(5050), py = worldToScreenY(700);
+                ctx.globalAlpha = .72; ctx.fillStyle = '#25303a'; ctx.fillRect(px - 34 * camera.zoom, py - 38 * camera.zoom, 68 * camera.zoom, 38 * camera.zoom);
+                ctx.strokeStyle = '#aebbc4'; ctx.lineWidth = 1; ctx.strokeRect(px - 34 * camera.zoom, py - 38 * camera.zoom, 68 * camera.zoom, 38 * camera.zoom);
+                ctx.globalAlpha = .62; ctx.fillStyle = '#d9e1e5'; ctx.fillRect(px - 16 * camera.zoom, py - 44 * camera.zoom, 32 * camera.zoom, 5 * camera.zoom);
+                ctx.restore();
+            }
+
+            function drawNewtonApparatus() {
+                if (!(selectedLevel === 'EASY' || selectedLevel === 'HARD')) return;
+                const cfg = levelMeasureConfig();
+                const cx = worldToScreenX(cfg.cx), cy = worldToScreenY(cfg.cy);
+                const maxN = cfg.outerN;
+                const outerWorld = darkRingRadiusWorld(maxN + .65, cfg);
+                const outer = outerWorld * camera.zoom;
+                if (cx + outer < 0 || cx - outer > V.w || cy + outer < 0 || cy - outer > V.h) return;
+
+                ctx.save();
+
+                // Circular glass / microscope field. The rings are rendered as a CONTINUOUS
+                // interference intensity field instead of a stack of outline circles.
+                ctx.globalAlpha = .98;
+                const fringe = ctx.createRadialGradient(cx, cy, 0, cx, cy, outer);
+                const samples = 300;
+                for (let j = 0; j <= samples; j++) {
+                    const t = j / samples;
+                    const r = t * outerWorld;
+                    const order = (r / cfg.ringScale) * (r / cfg.ringScale) * (MEASURE.referenceLambda / SOURCE_LAMBDA);
+                    // Reflected Newton rings: dark at integer order, bright halfway between.
+                    let I = (1 - Math.cos(TAU * order)) / 2;
+                    // Slightly compress highlights so it looks optical rather than like white contour lines.
+                    I = Math.pow(I, .72);
+                    const edgeFade = Math.pow(Math.max(0, 1 - Math.pow(t, 5)), .22);
+                    const v = Math.round(7 + I * 224 * edgeFade);
+                    fringe.addColorStop(t, `rgb(${v},${v},${Math.min(255, v + 3)})`);
+                }
+                ctx.fillStyle = fringe;
+                ctx.beginPath(); ctx.arc(cx, cy, outer, 0, TAU); ctx.fill();
+
+                // Glass vignette + faint lens reflection, preserving the monochrome language.
+                const glass = ctx.createRadialGradient(cx - outer * .24, cy - outer * .28, outer * .03, cx, cy, outer);
+                glass.addColorStop(0, 'rgba(255,255,255,.11)');
+                glass.addColorStop(.38, 'rgba(205,222,232,.025)');
+                glass.addColorStop(.82, 'rgba(7,12,18,.03)');
+                glass.addColorStop(1, 'rgba(0,0,0,.36)');
+                ctx.fillStyle = glass; ctx.beginPath(); ctx.arc(cx, cy, outer, 0, TAU); ctx.fill();
+
+                // Thin physical rim only; no numbered rings, no target highlighting.
+                ctx.strokeStyle = 'rgba(205,219,227,.28)'; ctx.lineWidth = Math.max(1, 1.5 * camera.zoom);
+                ctx.beginPath(); ctx.arc(cx, cy, outer, 0, TAU); ctx.stroke();
+                ctx.strokeStyle = 'rgba(240,247,250,.10)'; ctx.lineWidth = Math.max(1, 4 * camera.zoom);
+                ctx.beginPath(); ctx.arc(cx, cy, outer - 5 * camera.zoom, 0, TAU); ctx.stroke();
+
+                // The central reflected fringe is dark in a Newton-ring pattern. O is the only
+                // pre-existing measurement reference and stays deliberately tiny.
+                ctx.fillStyle = 'rgba(0,0,0,.72)'; ctx.beginPath(); ctx.arc(cx, cy, Math.max(5, 7 * camera.zoom), 0, TAU); ctx.fill();
+                ctx.fillStyle = 'rgba(240,246,248,.86)'; ctx.beginPath(); ctx.arc(cx, cy, 2.4, 0, TAU); ctx.fill();
+                ctx.font = '700 10px ui-sans-serif,system-ui'; ctx.textAlign = 'center'; ctx.fillStyle = 'rgba(235,242,245,.68)'; ctx.fillText('O', cx, cy - 14);
+
+                // Sparse mount behind the disc to make it read as a real optical apparatus.
+                ctx.globalAlpha = .20; ctx.strokeStyle = '#aebdC7'; ctx.lineWidth = 2;
+                const mount = outer + 20 * camera.zoom; ctx.beginPath(); ctx.arc(cx, cy, mount, 0, TAU); ctx.stroke();
+                ctx.restore();
+            }
+
+            function drawEasyNewtonTarget(target, label, active, locked) {
+                const x = worldToScreenX(target.x), y = worldToScreenY(target.y);
+                ctx.save();
+                const pulse = .5 + .5 * Math.sin(elapsed * 5.2);
+                ctx.globalAlpha = locked ? .95 : (active ? .58 + .26 * pulse : .28);
+                ctx.strokeStyle = '#f0f5f7'; ctx.lineWidth = active ? 1.8 : 1.1;
+                if (!locked) ctx.setLineDash([5, 5]);
+                ctx.beginPath(); ctx.arc(x, y, (active ? 12 : 9) + pulse * 2, 0, TAU); ctx.stroke(); ctx.setLineDash([]);
+                ctx.beginPath(); ctx.moveTo(x - 16, y); ctx.lineTo(x + 16, y); ctx.moveTo(x, y - 16); ctx.lineTo(x, y + 16); ctx.stroke();
+                ctx.fillStyle = 'rgba(242,247,249,.94)'; ctx.font = '850 12px ui-sans-serif,system-ui'; ctx.textAlign = 'center'; ctx.fillText(label, x, y - 22);
+                ctx.restore();
+            }
+
+            function drawHardNewtonBiteHazard() {
+                if (selectedLevel !== 'HARD' || TEST_MOVE.enabled) return;
+                if (gameState !== 'PLAY' && gameState !== 'DYING') return;
+                const s = hardNewtonBiteState();
+                const cx = worldToScreenX(s.cfg.cx), cy = worldToScreenY(s.cfg.cy);
+                const z = camera.zoom;
+                const angle = s.angle;
+                const ux = Math.cos(angle), uy = Math.sin(angle);
+                const tx = -uy, ty = ux;
+                const outer = s.outer * z;
+                const inner = s.currentInner * z;
+                const half = HARD_NEWTON_BITE.halfAngle;
+
+                ctx.save();
+
+                // Warning: a pulsing arc shows exactly which slice is about to be bitten.
+                if (s.stage === 'WARNING') {
+                    const p = .5 + .5 * Math.sin(elapsed * 13);
+                    ctx.globalAlpha = .28 + .34 * p;
+                    ctx.strokeStyle = 'rgba(245,247,248,.92)'; ctx.lineWidth = 2;
+                    ctx.setLineDash([8, 8]);
+                    ctx.beginPath(); ctx.arc(cx, cy, (s.outer - 22) * z, angle - half, angle + half); ctx.stroke();
+                    ctx.setLineDash([]);
+                    const warnR = (s.outer + 10) * z;
+                    const wx = cx + ux * warnR, wy = cy + uy * warnR;
+                    ctx.translate(wx, wy); ctx.rotate(angle);
+                    ctx.globalAlpha = .34 + .28 * p; ctx.fillStyle = 'rgba(8,12,18,.90)';
+                    ctx.beginPath(); ctx.moveTo(18 * z, -34 * z); ctx.lineTo(-18 * z, 0); ctx.lineTo(18 * z, 34 * z); ctx.closePath(); ctx.fill();
+                    ctx.fillStyle = 'rgba(238,243,246,.88)'; ctx.beginPath(); ctx.arc(5 * z, -9 * z, 2.8 * z, 0, TAU); ctx.fill();
+                    ctx.restore();
+                    return;
+                }
+
+                if (s.depth <= .01) { ctx.restore(); return; }
+
+                // The maw comes from outside the rings and closes over a wedge like taking a bite from a cake.
+                const jawBase = (s.outer + 78) * z;
+                const jawTip = inner;
+                const mouthHalf = Math.max(24 * z, Math.tan(half) * jawTip);
+                const baseHalf = Math.max(48 * z, Math.tan(half) * jawBase * 1.02);
+                const tipX = cx + ux * jawTip, tipY = cy + uy * jawTip;
+                const baseX = cx + ux * jawBase, baseY = cy + uy * jawBase;
+
+                ctx.shadowBlur = 18 * z; ctx.shadowColor = 'rgba(0,0,0,.70)';
+                const jawAlpha = .78 + .18 * s.depth;
+                ctx.fillStyle = `rgba(5,9,14,${jawAlpha})`;
+                ctx.strokeStyle = 'rgba(218,229,235,.42)'; ctx.lineWidth = 1.5;
+
+                // Upper jaw.
+                ctx.beginPath();
+                ctx.moveTo(baseX + tx * baseHalf, baseY + ty * baseHalf);
+                ctx.lineTo(baseX - tx * 4 * z, baseY - ty * 4 * z);
+                ctx.lineTo(tipX - tx * 7 * z, tipY - ty * 7 * z);
+                ctx.lineTo(tipX + tx * mouthHalf, tipY + ty * mouthHalf);
+                ctx.closePath(); ctx.fill(); ctx.stroke();
+                // Lower jaw.
+                ctx.beginPath();
+                ctx.moveTo(baseX - tx * baseHalf, baseY - ty * baseHalf);
+                ctx.lineTo(baseX + tx * 4 * z, baseY + ty * 4 * z);
+                ctx.lineTo(tipX + tx * 7 * z, tipY + ty * 7 * z);
+                ctx.lineTo(tipX - tx * mouthHalf, tipY - ty * mouthHalf);
+                ctx.closePath(); ctx.fill(); ctx.stroke();
+
+                // Small teeth make the silhouette read as a mouth without turning it into a cartoon character.
+                ctx.shadowBlur = 0; ctx.fillStyle = 'rgba(226,235,240,.82)';
+                for (let i = -2; i <= 2; i++) {
+                    const f = (i + 2) / 4;
+                    const rr = lerp(jawTip + 18 * z, jawBase - 30 * z, f);
+                    const midX = cx + ux * rr, midY = cy + uy * rr;
+                    const spread = lerp(mouthHalf * .68, baseHalf * .46, f);
+                    const tooth = 7 * z;
+                    for (const sign of [-1, 1]) {
+                        const qx = midX + tx * spread * sign, qy = midY + ty * spread * sign;
+                        ctx.beginPath();
+                        ctx.moveTo(qx, qy); ctx.lineTo(qx - ux * tooth + tx * 4 * z * sign, qy - uy * tooth + ty * 4 * z * sign);
+                        ctx.lineTo(qx - ux * tooth - tx * 4 * z * sign, qy - uy * tooth - ty * 4 * z * sign); ctx.closePath(); ctx.fill();
+                    }
+                }
+
+                if (s.stage === 'BITE') {
+                    const flash = .45 + .45 * Math.sin(elapsed * 24);
+                    ctx.globalAlpha = .22 * flash; ctx.fillStyle = '#eef4f7';
+                    ctx.beginPath(); ctx.arc(cx, cy, (s.inner + 18) * z, angle - half * .82, angle + half * .82); ctx.lineTo(cx, cy); ctx.closePath(); ctx.fill();
+                }
+                ctx.restore();
+            }
+
+            function drawNewtonMeasurementLayer() {
+                if (!(selectedLevel === 'EASY' || selectedLevel === 'HARD')) return;
+                const cfg = levelMeasureConfig();
+                ctx.save();
+
+                const hasOrbit = newtonRails.some(c => c.newtonOrbitRail);
+                if (hasOrbit) {
+                    const K = newtonMarker('K');
+                    const I = newtonMarker('I');
+                    const Kp = newtonMarker("K'");
+                    const geo = selectedLevel === 'HARD' ? hardNewtonGeometry() : easyNewtonGeometry();
+
+                    if (geo) {
+                        // K fixes one diameter through O. I and K' are fixed geometric intersections;
+                        // only the platforms continue to move.
+                        const outer = darkRingRadiusWorld(cfg.outerN + .65, cfg) + 10;
+                        const ax1 = { x: cfg.cx + geo.ux * outer, y: cfg.cy + geo.uy * outer };
+                        const ax2 = { x: cfg.cx - geo.ux * outer, y: cfg.cy - geo.uy * outer };
+                        const p1 = { x: worldToScreenX(ax1.x), y: worldToScreenY(ax1.y) };
+                        const p2 = { x: worldToScreenX(ax2.x), y: worldToScreenY(ax2.y) };
+                        const lockedAt = selectedLevel === 'HARD' ? hardNewtonAxisLockedAt : easyNewtonAxisLockedAt;
+                        const lockAge = Math.max(0, elapsed - lockedAt);
+                        const sweep = clamp(lockAge / (selectedLevel === 'HARD' ? .34 : .42), 0, 1);
+                        const sx = lerp(worldToScreenX(cfg.cx), p2.x, sweep), sy = lerp(worldToScreenY(cfg.cy), p2.y, sweep);
+                        ctx.strokeStyle = selectedLevel === 'HARD' ? 'rgba(244,248,250,.70)' : 'rgba(239,245,248,.55)';
+                        ctx.lineWidth = selectedLevel === 'HARD' ? 1.7 : 1.35; ctx.setLineDash([8, 7]);
+                        ctx.beginPath(); ctx.moveTo(p1.x, p1.y); ctx.lineTo(sx, sy); ctx.stroke(); ctx.setLineDash([]);
+
+                        drawEasyNewtonTarget(geo.I, 'I', newtonMeasurementStep === 1, !!I);
+                        drawEasyNewtonTarget(geo.Kp, "K′", newtonMeasurementStep === 2, !!Kp);
+                    }
+
+                    for (const m of newtonMarkers) {
+                        if (!Number.isFinite(m.x) || !Number.isFinite(m.y)) continue;
+                        const x = worldToScreenX(m.x), y = worldToScreenY(m.y);
+                        ctx.shadowBlur = selectedLevel === 'HARD' ? 20 : 15; ctx.shadowColor = 'rgba(244,248,250,.52)'; ctx.fillStyle = '#f5f8fa';
+                        ctx.beginPath(); ctx.arc(x, y, 5, 0, TAU); ctx.fill(); ctx.shadowBlur = 0;
+                        ctx.strokeStyle = 'rgba(242,247,249,.88)'; ctx.lineWidth = 1.4;
+                        ctx.beginPath(); ctx.arc(x, y, 10, 0, TAU); ctx.stroke();
+                        ctx.fillStyle = '#f4f7f9'; ctx.font = '900 12px ui-sans-serif,system-ui'; ctx.textAlign = 'center'; ctx.fillText(m.label.replace("'", "′"), x, y - 18);
+                    }
+
+                    ctx.restore();
+                    return;
+                }
+
+                ctx.restore();
+            }
+
+            function newtonObjective() {
+                const cfg = levelMeasureConfig();
+                if (selectedLevel === 'EASY') {
+                    if (newtonMeasurementStep === 0) return [`CHỌN K TRÊN VÂN k = ${cfg.k}`, 'Đứng trên thanh k · X để khóa K'];
+                    if (newtonMeasurementStep === 1) return [`TÌM I TRÊN VÂN i = ${cfg.i}`, 'Nhảy sang thanh i · canh đúng trục K–O · X'];
+                    if (newtonMeasurementStep === 2) return [`TÌM K′ TRÊN VÂN k = ${cfg.k}`, 'Trở lại thanh k · canh phía đối diện K · X'];
+                    return ['ĐÃ ĐỦ K · I · K′', 'Đang tính B, b và bước sóng λ'];
+                }
+                const bite = hardNewtonBiteState();
+                const hazard = bite.stage === 'WARNING' ? ' · CẢNH BÁO: MÕM NHIỄU SẮP ĐỚP' : '';
+                if (newtonMeasurementStep === 0) return [`CHỌN K TRÊN VÂN k = ${cfg.k}`, `Thanh k đổi pha · chọn hướng đo rồi X${hazard}`];
+                if (newtonMeasurementStep === 1) return [`ĐẾN I TRÊN VÂN i = ${cfg.i}`, `Thanh i chạy ngược chiều · canh trục K–O · X${hazard}`];
+                if (newtonMeasurementStep === 2) return [`ĐẾN K′ TRÊN VÂN k = ${cfg.k}`, `Quay lại thanh k · canh phía đối diện K · X${hazard}`];
+                return ['ĐÃ ĐỦ K · I · K′', 'Đang dựng B, b và tính bước sóng λ'];
+            }
+
+            function drawNewtonMeasurementHUD() {
+                if (!(selectedLevel === 'EASY' || selectedLevel === 'HARD') || !newtonMeasurementStarted || TEST_MOVE.enabled || gameState === 'NEWTON_REVEAL' || gameState === 'COMPLETE') return;
+                const cfg = levelMeasureConfig();
+                const [title, sub] = newtonObjective();
+                ctx.save();
+                const cardW = selectedLevel === 'EASY' ? 330 : 360;
+                ctx.fillStyle = 'rgba(4,8,14,.82)'; rr(28, 28, cardW, 116, 14); ctx.fill(); ctx.strokeStyle = 'rgba(205,220,230,.18)'; ctx.lineWidth = 1; ctx.stroke();
+                ctx.fillStyle = '#e7eff3'; ctx.font = '800 11px ui-sans-serif,system-ui'; ctx.fillText(selectedLevel === 'EASY' ? 'NHIỆM VỤ · ĐO VÂN NEWTON' : 'NHIỆM VỤ KHÓ · ĐO VÂN NEWTON', 46, 53);
+                ctx.fillStyle = 'rgba(220,231,237,.68)'; ctx.font = '700 12px ui-monospace,monospace'; ctx.fillText(`ĐỀ BÀI   i = ${cfg.i}    k = ${cfg.k}`, 46, 78);
+                ctx.fillStyle = '#f1f6f8'; ctx.font = '850 16px ui-sans-serif,system-ui'; ctx.fillText(title, 46, 106);
+                ctx.fillStyle = 'rgba(218,230,236,.62)'; ctx.font = '650 10px ui-sans-serif,system-ui'; ctx.fillText(sub, 46, 128);
+
+                ctx.fillStyle = 'rgba(4,8,14,.70)'; rr(470, V.h - 244, 660, 42, 12); ctx.fill(); ctx.strokeStyle = 'rgba(205,220,230,.14)'; ctx.stroke();
+                ctx.textAlign = 'center'; ctx.fillStyle = 'rgba(232,239,243,.80)'; ctx.font = '650 11px ui-sans-serif,system-ui'; ctx.fillText('A / D  DI CHUYỂN   ·   SPACE / W  NHẢY   ·   ← / →  ĐỔI PHA   ·   X  ĐÁNH DẤU', 800, V.h - 218);
+
+                if (newtonFeedbackTimer > 0) {
+                    ctx.globalAlpha = clamp(newtonFeedbackTimer / .35, 0, 1); ctx.fillStyle = 'rgba(239,244,247,.94)'; ctx.font = '800 13px ui-sans-serif,system-ui'; ctx.fillText(newtonFeedbackText, 800, 166);
+                }
+                ctx.restore();
+            }
+
+            function drawNewtonRevealResult() {
+                if (!(selectedLevel === 'EASY' || selectedLevel === 'HARD') || (gameState !== 'NEWTON_REVEAL' && gameState !== 'COMPLETE') || newtonMarkers.length < 3) return;
+                const cfg = levelMeasureConfig();
+                const tm = gameState === 'COMPLETE' ? cfg.revealDuration : newtonRevealTimer;
+                const K = newtonMarker('K'), I = newtonMarker('I'), Kp = newtonMarker("K'");
+                if (!K || !I || !Kp) return;
+                const result = newtonMeasurementResult();
+                ctx.save();
+
+                if ([K, I, Kp].every(m => Number.isFinite(m.x) && Number.isFinite(m.y))) {
+                    const ps = {
+                        K: { x: worldToScreenX(K.x), y: worldToScreenY(K.y) },
+                        I: { x: worldToScreenX(I.x), y: worldToScreenY(I.y) },
+                        Kp: { x: worldToScreenX(Kp.x), y: worldToScreenY(Kp.y) },
+                    };
+                    const geo = selectedLevel === 'HARD' ? hardNewtonGeometry() : easyNewtonGeometry();
+                    const nx = geo ? -geo.uy : 0, ny = geo ? geo.ux : 1;
+
+                    function animatedSegment(a, b, start, dur, label, dashed = false, offset = 18) {
+                        if (tm <= start) return;
+                        const p = clamp((tm - start) / dur, 0, 1);
+                        const ex = lerp(a.x, b.x, p), ey = lerp(a.y, b.y, p);
+                        ctx.strokeStyle = 'rgba(243,247,249,.94)'; ctx.lineWidth = dashed ? 2 : 2.8;
+                        if (dashed) ctx.setLineDash([8, 6]);
+                        ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(ex, ey); ctx.stroke(); ctx.setLineDash([]);
+                        if (p > .80) {
+                            ctx.textAlign = 'center'; ctx.fillStyle = '#f2f6f8'; ctx.font = '900 14px ui-sans-serif,system-ui';
+                            ctx.fillText(label, (a.x + b.x) / 2 + nx * offset, (a.y + b.y) / 2 + ny * offset);
+                        }
+                    }
+                    animatedSegment(ps.K, ps.I, .35, .82, 'B = KI', false, 20);
+                    animatedSegment(ps.I, ps.Kp, 1.15, .72, "b = IK′", true, -22);
+
+                    if (tm > 2.0) {
+                        const a = clamp((tm - 2.0) / .55, 0, 1); ctx.globalAlpha = a;
+                        ctx.fillStyle = 'rgba(4,8,14,.84)'; rr(455, 665, 690, 126, 16); ctx.fill(); ctx.strokeStyle = 'rgba(215,229,237,.20)'; ctx.stroke();
+                        ctx.textAlign = 'center'; ctx.fillStyle = '#edf4f7'; ctx.font = '800 16px ui-sans-serif,system-ui'; ctx.fillText('B = KI = rₖ + rᵢ        b = IK′ = rₖ − rᵢ', 800, 698);
+                        if (result) {
+                            ctx.fillStyle = 'rgba(220,231,237,.72)'; ctx.font = '650 12px ui-monospace,monospace'; ctx.fillText(`B = ${result.Bmm.toFixed(3)} mm     b = ${result.bmm.toFixed(3)} mm     R = ${cfg.Rmm} mm`, 800, 726);
+                            ctx.fillStyle = '#f4f8fa'; ctx.font = '900 18px ui-sans-serif,system-ui'; ctx.fillText('λ = Bb / [(k − i)R]', 800, 752);
+                            ctx.font = '950 24px ui-sans-serif,system-ui'; ctx.fillText(`λ ≈ ${result.lambdaNm.toFixed(1)} nm`, 800, 781);
+                        }
+                    }
+                    if (selectedLevel === 'HARD' && tm > 2.55) {
+                        const c = { x: worldToScreenX(cfg.cx), y: worldToScreenY(cfg.cy) };
+                        const base = darkRingRadiusWorld(cfg.k, cfg) * camera.zoom;
+                        for (let q = 0; q < 3; q++) {
+                            const p = clamp((tm - 2.55 - q * .16) / 1.05, 0, 1);
+                            if (p <= 0) continue;
+                            ctx.globalAlpha = (1 - p) * .38; ctx.strokeStyle = '#f0f5f7'; ctx.lineWidth = 1.5;
+                            ctx.beginPath(); ctx.arc(c.x, c.y, base * (.38 + .72 * p), 0, TAU); ctx.stroke();
+                        }
+                    }
+                    ctx.restore();
+                    return;
+                }
+
+                // Legacy horizontal reveal fallback.
+                const y1 = worldToScreenY(cfg.cy + 92), y2 = worldToScreenY(cfg.cy + 138);
+                const kx = worldToScreenX(K.measuredX), ix = worldToScreenX(I.measuredX), kpx = worldToScreenX(Kp.measuredX);
+                if (tm > .45) {
+                    const p = clamp((tm - .45) / .75, 0, 1), x2 = lerp(kx, ix, p); ctx.strokeStyle = 'rgba(242,247,249,.90)'; ctx.lineWidth = 2.5; ctx.beginPath(); ctx.moveTo(kx, y1); ctx.lineTo(x2, y1); ctx.stroke();
+                    if (p > .78) { ctx.textAlign = 'center'; ctx.fillStyle = '#eef5f8'; ctx.font = '800 13px ui-sans-serif,system-ui'; ctx.fillText('B = KI', (kx + ix) / 2, y1 - 9); }
+                }
+                if (tm > 1.15) {
+                    const p = clamp((tm - 1.15) / .75, 0, 1), x2 = lerp(ix, kpx, p); ctx.strokeStyle = 'rgba(194,208,216,.88)'; ctx.lineWidth = 2; ctx.setLineDash([7, 5]); ctx.beginPath(); ctx.moveTo(ix, y2); ctx.lineTo(x2, y2); ctx.stroke(); ctx.setLineDash([]);
+                    if (p > .78) { ctx.textAlign = 'center'; ctx.fillStyle = 'rgba(232,239,243,.90)'; ctx.font = '800 13px ui-sans-serif,system-ui'; ctx.fillText("b = IK'", (ix + kpx) / 2, y2 - 9); }
+                }
+                if (tm > 2.0) {
+                    const a = clamp((tm - 2.0) / .5, 0, 1); ctx.globalAlpha = a; ctx.fillStyle = 'rgba(4,8,14,.78)'; rr(520, 660, 560, 126, 16); ctx.fill(); ctx.strokeStyle = 'rgba(215,229,237,.18)'; ctx.stroke();
+                    ctx.textAlign = 'center'; ctx.fillStyle = '#edf4f7'; ctx.font = '750 16px ui-sans-serif,system-ui'; ctx.fillText('B = rₖ + rᵢ        b = rₖ − rᵢ', 800, 695);
+                    if (result) { ctx.fillStyle = 'rgba(220,231,237,.68)'; ctx.font = '600 12px ui-monospace,monospace'; ctx.fillText(`B ${result.Bmm.toFixed(3)} mm     b ${result.bmm.toFixed(3)} mm`, 800, 724); ctx.fillStyle = '#f3f7f9'; ctx.font = '850 22px ui-sans-serif,system-ui'; ctx.fillText(`λ ≈ ${result.lambdaNm.toFixed(1)} nm`, 800, 758); }
+                }
+                ctx.restore();
+            }
+
+            function drawHardPortal() {
+                if (selectedLevel !== 'HARD' || !hardPortal) return;
+                const x = worldToScreenX(hardPortal.x), y = worldToScreenY(hardPortal.y), w = hardPortal.w * camera.zoom, h = hardPortal.h * camera.zoom;
+                if (x + w < 0 || x > V.w) return;
+                ctx.save(); ctx.translate(x + w / 2, y + h / 2);
+                for (let i = 0; i < 5; i++) {
+                    ctx.globalAlpha = .24 - i * .026; ctx.strokeStyle = i % 2 === 0 ? 'rgba(242,246,248,.92)' : 'rgba(120,132,142,.78)'; ctx.lineWidth = 2;
+                    ctx.beginPath(); ctx.ellipse(0, 0, 18 + i * 10 + Math.sin(elapsed * 2 + i) * 2, 33 + i * 8, 0, 0, Math.PI * 2); ctx.stroke();
+                }
+                ctx.globalAlpha = .65; ctx.fillStyle = 'rgba(215,240,255,.14)'; ctx.beginPath(); ctx.ellipse(0, 0, 17, 42, 0, 0, Math.PI * 2); ctx.fill();
+                ctx.restore();
+            }
+
+            function drawTrail() {
+                ctx.save();
+                for (const p of player.trail) {
+                    const x = worldToScreenX(p.x), y = worldToScreenY(p.y), a = clamp(p.life / p.max, 0, 1);
+                    ctx.globalAlpha = a * (.18 + .58 * player.intensity); const q = p.shade || 180; ctx.fillStyle = `rgb(${q},${q},${q})`;
+                    ctx.beginPath(); ctx.arc(x, y, p.size * a, 0, Math.PI * 2); ctx.fill();
+                }
+                ctx.restore();
+            }
+
+            function drawPlayer() {
+                const x = worldToScreenX(player.x), y = worldToScreenY(player.y), w = player.w * camera.zoom, h = player.h * camera.zoom;
+                const cx = x + w / 2, state = player.state;
+                const visual = state === 'BRIGHT'
+                    ? { body: '#f3f6f8', stroke: '#ffffff', glow: 32, glowAlpha: .82, core: true }
+                    : state === 'DARK'
+                        ? { body: '#0c1014', stroke: '#d9e1e6', glow: 6, glowAlpha: .18, core: false }
+                        : { body: '#707980', stroke: '#d5dde2', glow: 14, glowAlpha: .36, core: false };
+                ctx.save();
+                ctx.shadowBlur = visual.glow; ctx.shadowColor = `rgba(255,255,255,${visual.glowAlpha})`;
+
+                // State color snaps cleanly at the band boundary: bright / tuning / dark.
+                ctx.globalAlpha = state === 'DARK' ? .10 : state === 'BRIGHT' ? .34 : .18;
+                const radius = state === 'BRIGHT' ? 54 : state === 'DARK' ? 32 : 42;
+                const rg = ctx.createRadialGradient(cx, y + h * .48, 2, cx, y + h * .48, radius);
+                rg.addColorStop(0, state === 'BRIGHT' ? 'rgba(255,255,255,.82)' : state === 'DARK' ? 'rgba(255,255,255,.12)' : 'rgba(255,255,255,.38)');
+                rg.addColorStop(1, 'rgba(255,255,255,0)');
+                ctx.fillStyle = rg; ctx.beginPath(); ctx.arc(cx, y + h * .48, radius, 0, Math.PI * 2); ctx.fill();
+
+                ctx.globalAlpha = 1; ctx.fillStyle = visual.body;
+                ctx.strokeStyle = visual.stroke;
+                ctx.lineWidth = state === 'DARK' ? 2.3 : state === 'BRIGHT' ? 1.4 : 1.7;
+
+                // abstract humanoid/light-being silhouette
+                ctx.beginPath(); ctx.arc(cx, y + 12, 9, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+                rr(cx - 9, y + 22, 18, 25, 8); ctx.fill(); ctx.stroke();
+                ctx.lineCap = 'round'; ctx.lineWidth = 6;
+                ctx.beginPath(); ctx.moveTo(cx - 5, y + 29); ctx.lineTo(cx - 14, y + 43); ctx.moveTo(cx + 5, y + 29); ctx.lineTo(cx + 14, y + 43); ctx.stroke();
+                ctx.lineWidth = 7;
+                ctx.beginPath(); ctx.moveTo(cx - 5, y + 45); ctx.lineTo(cx - 10, y + 61); ctx.moveTo(cx + 5, y + 45); ctx.lineTo(cx + 10, y + 61); ctx.stroke();
+
+                if (visual.core) {
+                    ctx.globalAlpha = .86; ctx.fillStyle = '#fff'; ctx.shadowBlur = 24; ctx.shadowColor = '#fff';
+                    ctx.beginPath(); ctx.arc(cx, y + 12, 4.2, 0, Math.PI * 2); ctx.fill();
+                }
+                ctx.restore();
+            }
+
+            function drawDebug() {
+                if (!debug) return;
+                ctx.save(); ctx.lineWidth = 1;
+                const worldDebug = gameState === 'PLAY' || gameState === 'DYING' || gameState === 'NEWTON_REVEAL';
+                if (worldDebug) {
+                    for (const c of terrain) {
+                        if (!onScreen(c, 20)) continue;
+                        const x = worldToScreenX(c.x), y = worldToScreenY(c.y), w = c.w * camera.zoom, h = c.h * camera.zoom;
+                        ctx.strokeStyle = c.structural ? '#7ff' : c.material === MAT.WHITE ? '#fff' : c.material === MAT.GRAY ? '#bbb' : '#ff6';
+                        ctx.strokeRect(x, y, w, h); ctx.fillStyle = 'rgba(0,0,0,.72)'; ctx.fillRect(x, y - 17, Math.min(210, 8 + c.name.length * 7), 16); ctx.fillStyle = '#fff'; ctx.font = '11px monospace'; ctx.fillText(c.name, x + 4, y - 5);
+                    }
+                    const px = worldToScreenX(player.x), py = worldToScreenY(player.y); ctx.strokeStyle = '#00ffff'; ctx.strokeRect(px, py, player.w * camera.zoom, player.h * camera.zoom);
+                    let lines = [`DEBUG [H]`, `level: ${selectedLevel}`, `mode: ${gameState}`, `phase: ${(wrapPhase(player.phase) * 180 / Math.PI).toFixed(1)}°`, `I: ${player.intensity.toFixed(4)}`, `state: ${player.state}`, `pos: ${player.x.toFixed(1)}, ${player.y.toFixed(1)}`, `vel: ${player.vx.toFixed(1)}, ${player.vy.toFixed(1)}`, `grounded: ${player.grounded} on ${player.groundedOn ?? '-'}`, `checkpoint: ${activeCheckpoint}`, `samplePhase: ${(samplePhase * 180 / Math.PI).toFixed(1)}°`];
+                    if (selectedLevel === 'EASY' || selectedLevel === 'HARD') {
+                        const cfg = levelMeasureConfig(), nt = newtonTargets(cfg), rail = currentNewtonRail(), expected = expectedNewtonRail();
+                        lines = lines.concat([`testMode: ${TEST_MOVE.enabled ? 'ON' : 'OFF'}`, `measure step: ${newtonMeasurementStep}`, `rail: ${rail?.measureLabel || '-'} ${rail?.material || ''}`, `expected rail: ${expected?.measureLabel || '-'} ${expected?.material || ''}`, `O: ${cfg.cx}, ${cfg.cy}`, `i/k: ${cfg.i} / ${cfg.k}`, `ri/rk: ${nt.ri.toFixed(1)} / ${nt.rk.toFixed(1)}`, `K/I/K': ${nt.K.x.toFixed(1)} / ${nt.I.x.toFixed(1)} / ${nt.Kp.x.toFixed(1)}`, `projectionX: ${newtonProjectionX().toFixed(1)}`]);
+                    }
+                    const boxH = 32 + lines.length * 16; ctx.fillStyle = 'rgba(0,0,0,.82)'; ctx.fillRect(18, 132, 520, boxH); ctx.fillStyle = '#9ff'; ctx.font = '14px monospace';
+                    lines.forEach((t, i) => ctx.fillText(t, 30, 155 + i * 16));
+                } else {
+                    const t = measurementTargets();
+                    ctx.fillStyle = 'rgba(0,0,0,.82)'; ctx.fillRect(18, 132, 420, 210); ctx.fillStyle = '#9ff'; ctx.font = '14px monospace';
+                    const lines = [`DEBUG [H]`, `level: ${selectedLevel}`, `mode: ${gameState}`, `source lambda: ${SOURCE_LAMBDA} nm`, `sample phase: ${(samplePhase * 180 / Math.PI).toFixed(1)}°`, `sampleI: ${sampleIntensity.toFixed(4)}`, `ri: ${t.ri.toFixed(2)} px`, `rk: ${t.rk.toFixed(2)} px`, `K x: ${t.K.toFixed(2)}`, `I x: ${t.I.toFixed(2)}`, `K' x: ${t.Kp.toFixed(2)}`, `reticleX: ${reticleX.toFixed(2)}`, `step: ${measurementStep}`, `tolerance: ±${MEASURE.tolerance} px`];
+                    lines.forEach((v, i) => ctx.fillText(v, 30, 155 + i * 16));
+                }
+                ctx.restore();
+            }
+
+            function drawControlHint() {
+                const age = hintTimer; const alpha = TEST_MOVE.enabled ? 1 : (age < 8 ? 1 : age < 11 ? 1 - (age - 8) / 3 : .12);
+                ctx.save(); ctx.globalAlpha = alpha; ctx.fillStyle = 'rgba(5,9,16,.62)'; rr(28, 28, 350, 150, 14); ctx.fill(); ctx.strokeStyle = 'rgba(190,220,245,.18)'; ctx.stroke();
+                ctx.fillStyle = '#dce9f3'; ctx.font = '600 13px ui-sans-serif,system-ui';
+                if (TEST_MOVE.enabled) {
+                    ctx.fillText('CHẾ ĐỘ THỬ · DI CHUYỂN TỰ DO', 48, 58);
+                    ctx.fillText('CHUỘT      DI CHUYỂN / KÉO BẢN ĐỒ', 48, 83);
+                    ctx.fillText('VẬT LÝ     TẮT · VA CHẠM TẮT', 48, 108);
+                    ctx.fillText('T           THOÁT CHẾ ĐỘ THỬ', 48, 133);
+                    ctx.fillStyle = 'rgba(220,233,243,.55)'; ctx.font = '600 10px ui-sans-serif,system-ui'; ctx.fillText('ESC cũng nhả khóa chuột', 48, 157);
+                } else {
+                    ctx.fillText('A / D      DI CHUYỂN', 48, 58);
+                    ctx.fillText('SPACE / W  NHẢY', 48, 83);
+                    ctx.fillText('← / →      ĐỔI PHA', 48, 108);
+                    ctx.fillText('X          ĐÁNH DẤU ĐIỂM NEWTON', 48, 133);
+                    ctx.fillText('T          THỬ / DI CHUYỂN TỰ DO', 48, 158);
+                }
+                ctx.restore();
+            }
+
+            function drawTuner() {
+                // Wave-first cyclic phase tuner. In the Newton framing it slides left so it never covers the rings.
+                const W = 500, H = 142, x = tunerPanelX, y = V.h - H - 18;
+                ctx.save();
+                ctx.fillStyle = 'rgba(5,9,17,.88)'; rr(x, y, W, H, 17); ctx.fill();
+                ctx.strokeStyle = 'rgba(205,220,230,.18)'; ctx.lineWidth = 1; ctx.stroke();
+
+                ctx.fillStyle = 'rgba(225,234,239,.56)'; ctx.font = '700 9px ui-sans-serif,system-ui'; ctx.textAlign = 'left';
+                ctx.fillText('GIAO THOA · VÒNG PHA', x + 20, y + 19);
+
+                const wx = x + 64, ww = 292;
+                const yA = y + 48, yB = y + 84;
+                const spatial = .082;
+                const phase = wrapPhase(player.phase);
+
+                // Faint alignment guides help the eye compare crests/troughs directly.
+                ctx.strokeStyle = 'rgba(190,205,215,.07)'; ctx.lineWidth = 1;
+                for (let gx = wx; gx <= wx + ww; gx += 49) { ctx.beginPath(); ctx.moveTo(gx, y + 30); ctx.lineTo(gx, y + 101); ctx.stroke(); }
+
+                function waveRow(baseY, offset, stroke, width = 2) {
+                    ctx.strokeStyle = stroke; ctx.lineWidth = width; ctx.beginPath();
+                    for (let i = 0; i <= ww; i += 2) { const xx = wx + i, yy = baseY + Math.sin(i * spatial + offset) * 12; if (i === 0) ctx.moveTo(xx, yy); else ctx.lineTo(xx, yy); } ctx.stroke();
+                }
+
+                ctx.fillStyle = 'rgba(225,234,239,.52)'; ctx.font = '700 9px ui-sans-serif,system-ui'; ctx.textAlign = 'right';
+                ctx.fillText('A', wx - 18, yA + 3); ctx.fillText('B', wx - 18, yB + 3);
+                ctx.font = '600 8px ui-sans-serif,system-ui'; ctx.fillStyle = 'rgba(225,234,239,.30)'; ctx.fillText('CỐ ĐỊNH', wx - 18, yA + 15); ctx.fillText('DỊCH PHA', wx - 18, yB + 15);
+
+                waveRow(yA, 0, 'rgba(246,249,250,.94)', 2.1);
+                waveRow(yB, phase, 'rgba(157,171,181,.98)', 2.1);
+
+                // Compact status only; the waveform alignment remains the primary readout.
+                const sv = stateVisual();
+                const sx = x + 378, sy = y + 34, sw = 100, sh = 62;
+                ctx.shadowBlur = player.state === 'BRIGHT' ? 14 : player.state === 'DARK' ? 3 : 7; ctx.shadowColor = 'rgba(255,255,255,.30)';
+                ctx.fillStyle = sv.fill; rr(sx, sy, sw, sh, 14); ctx.fill(); ctx.shadowBlur = 0;
+                ctx.strokeStyle = sv.edge; ctx.globalAlpha = .66; ctx.stroke(); ctx.globalAlpha = 1;
+                ctx.fillStyle = sv.text; ctx.textAlign = 'center'; ctx.font = '800 14px ui-sans-serif,system-ui'; ctx.fillText(sv.label, sx + sw / 2, sy + 27);
+                ctx.font = '700 7.5px ui-sans-serif,system-ui'; ctx.globalAlpha = .68; ctx.fillText(sv.relation, sx + sw / 2, sy + 45); ctx.globalAlpha = 1;
+
+                // Tiny cyclic strip with a continuous ombre that still makes the next dark/bright zone readable.
+                // It is derived from the SAME phase->intensity->state logic as gameplay,
+                // so the tone under the marker always matches the actual player state.
+                const bx = x + 112, by = y + 114, bw = 210, bh = 12;
+                const marker = bx + bw / 2;
+                const pxPerCycle = 112;
+                function stripColorForPhase(localPhase) {
+                    const I = intensityForPhase(localPhase);
+                    const s = stateFor(I);
+                    // Ombre brightness from interference intensity.
+                    let v = Math.round(18 + I * 226);
+                    let r = v, g = v, b = v;
+                    // Make the tuning band read more clearly by tinting it slightly blue-gray and lifting it a bit.
+                    if (s === 'TUNING') {
+                        r = Math.round(v * 0.92 + 8);
+                        g = Math.round(v * 0.95 + 10);
+                        b = Math.round(v * 1.02 + 18);
+                    }
+                    // Give the extreme bands a cleaner feel.
+                    if (s === 'BRIGHT') { r = Math.min(245, r + 6); g = Math.min(247, g + 6); b = Math.min(248, b + 6); }
+                    if (s === 'DARK') { r = Math.max(10, r - 6); g = Math.max(12, g - 6); b = Math.max(14, b - 6); }
+                    return `rgb(${r},${g},${b})`;
+                }
+                for (let ix = 0; ix < bw; ix++) {
+                    const localPhase = wrapPhase(player.phase + ((ix + 0.5 - bw / 2) / pxPerCycle) * TAU);
+                    ctx.fillStyle = stripColorForPhase(localPhase);
+                    ctx.fillRect(bx + ix, by, 1, bh);
+                }
+                // Keep soft state boundaries so it is easy to read what zone is about to turn dark or bright.
+                let prevState = null;
+                for (let ix = 0; ix <= bw; ix++) {
+                    const probePhase = wrapPhase(player.phase + ((ix - bw / 2) / pxPerCycle) * TAU);
+                    const s = stateFor(intensityForPhase(probePhase));
+                    if (ix > 0 && s !== prevState) {
+                        const lx = bx + ix;
+                        ctx.strokeStyle = 'rgba(245,248,250,.22)'; ctx.lineWidth = 1;
+                        ctx.beginPath(); ctx.moveTo(lx + .5, by - 1); ctx.lineTo(lx + .5, by + bh + 1); ctx.stroke();
+                    }
+                    prevState = s;
+                }
+                // A faint top sheen helps the ombre read as a strip instead of separate blocks.
+                const sheen = ctx.createLinearGradient(bx, by, bx, by + bh);
+                sheen.addColorStop(0, 'rgba(255,255,255,.10)');
+                sheen.addColorStop(.55, 'rgba(255,255,255,.02)');
+                sheen.addColorStop(1, 'rgba(0,0,0,.12)');
+                ctx.fillStyle = sheen; ctx.fillRect(bx, by, bw, bh);
+
+                ctx.strokeStyle = 'rgba(235,241,244,.18)'; ctx.lineWidth = 1; ctx.strokeRect(bx, by, bw, bh);
+                ctx.strokeStyle = '#f7fafb'; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.moveTo(marker, by - 4); ctx.lineTo(marker, by + bh + 4); ctx.stroke();
+                ctx.fillStyle = 'rgba(225,234,239,.42)'; ctx.font = '600 8px ui-sans-serif,system-ui'; ctx.textAlign = 'center'; ctx.fillText('SÁNG  ·  ĐIỀU PHA  ·  TỐI  ·  ĐIỀU PHA  ·  LẶP', bx + bw / 2, by + 24);
+
+                ctx.textAlign = 'left'; ctx.fillStyle = 'rgba(225,234,239,.40)'; ctx.font = '650 9px ui-sans-serif,system-ui'; ctx.fillText('← / →  DỊCH SÓNG B  ·  PHA TUẦN HOÀN', x + 338, y + 122);
+                ctx.restore();
+            }
+
+            function drawWorldHint() {
+                const items = selectedLevel === 'HARD' ? [
+                    [520, 690, 'CÙNG TRẠNG THÁI = XUYÊN QUA'],
+                    [1575, 705, 'KHÁC PHA ĐỂ ĐỨNG LÊN'],
+                    [3275, 565, 'TIẾP TỤC ĐỔI PHA'],
+                ] : [
+                    [500, 690, 'CÙNG TRẠNG THÁI = XUYÊN QUA'],
+                    [1800, 620, 'ĐỔI PHA THEO VẬT LIỆU'],
+                    [3070, 625, 'TIẾP TỤC ĐỔI PHA'],
+                ];
+                ctx.save(); ctx.font = '600 12px ui-sans-serif,system-ui'; ctx.letterSpacing = '0.15em';
+                for (const [wx, wy, text] of items) { const sx = worldToScreenX(wx), sy = worldToScreenY(wy); if (sx < -200 || sx > V.w + 200) continue; ctx.fillStyle = 'rgba(200,225,245,.33)'; ctx.fillText(text, sx, sy); }
+                ctx.restore();
+            }
+
+            function drawLensTransitionOverlay() {
+                if (gameState !== 'LENS_TRANSITION') return;
+                const t = lensTransitionTimer;
+                const lensX = worldToScreenX(5200), lensY = worldToScreenY(410);
+                ctx.save();
+                // Early lock acknowledgement.
+                const lockA = clamp(1 - Math.max(0, t - .55) / .35, 0, 1);
+                if (t < .9) { ctx.globalAlpha = .9 * lockA; ctx.textAlign = 'center'; ctx.fillStyle = '#edf4f7'; ctx.font = '700 15px ui-sans-serif,system-ui'; ctx.fillText('ĐÃ KHÓA MẪU ÁNH SÁNG', 800, 165); ctx.font = '500 11px ui-monospace,monospace'; ctx.globalAlpha = .58 * lockA; ctx.fillText(`φ ${(samplePhase * 180 / Math.PI).toFixed(0)}°  ·  I ${sampleIntensity.toFixed(2)}  ·  λ ${SOURCE_LAMBDA} nm`, 800, 187); }
+
+                // Two coherent waveform traces leave the tuner and converge on the lens.
+                if (t > .35 && t < 1.35) {
+                    const a = clamp((t - .35) / .22, 0, 1) * clamp((1.35 - t) / .3, 0, 1);
+                    ctx.globalAlpha = .52 * a; ctx.lineWidth = 1.7;
+                    const startX = 800, startY = 785;
+                    const phase = samplePhase;
+                    for (let wv = 0; wv < 2; wv++) {
+                        ctx.strokeStyle = wv === 0 ? '#f1f5f6' : '#9da8af'; ctx.setLineDash(wv ? [7, 5] : []); ctx.beginPath();
+                        for (let j = 0; j <= 70; j++) {
+                            const u = j / 70, bx = lerp(startX, lensX, u), by = lerp(startY, lensY, u);
+                            const nx = -(lensY - startY), ny = (lensX - startX), len = Math.hypot(nx, ny) || 1;
+                            const amp = 8 * (1 - u), off = Math.sin(u * 34 + (wv ? phase : 0)) * amp;
+                            const xx = bx + nx / len * off, yy = by + ny / len * off;
+                            if (j === 0) ctx.moveTo(xx, yy); else ctx.lineTo(xx, yy);
+                        } ctx.stroke();
+                    } ctx.setLineDash([]);
+                    ctx.globalAlpha = .24 * a; ctx.strokeStyle = '#fff'; ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(lensX, lensY - 185); ctx.lineTo(lensX, lensY + 185); ctx.stroke();
+                }
+
+                // Fade platform world while the front-facing ring view grows in.
+                const dark = clamp((t - 1.0) / .78, 0, .82);
+                ctx.globalAlpha = dark; ctx.fillStyle = '#03060b'; ctx.fillRect(0, 0, V.w, V.h);
+                ctx.restore();
+                if (t > 1.55) {
+                    const ringA = clamp((t - 1.55) / .72, 0, 1);
+                    drawMeasurementBackdrop(ringA, true);
+                }
+            }
+
+            function drawMeasurementBackdrop(alpha = 1, transitionOnly = false) {
+                const cx = MEASURE.cx, cy = MEASURE.cy;
+                ctx.save(); ctx.globalAlpha = alpha;
+                const bg = ctx.createRadialGradient(cx, cy, 40, cx, cy, 650); bg.addColorStop(0, '#111923'); bg.addColorStop(.52, '#080d15'); bg.addColorStop(1, '#03060b'); ctx.fillStyle = bg; ctx.fillRect(0, 0, V.w, V.h);
+
+                // Glass disc.
+                const discR = 390;
+                const glass = ctx.createRadialGradient(cx - 75, cy - 90, 25, cx, cy, discR); glass.addColorStop(0, 'rgba(235,242,245,.11)'); glass.addColorStop(.52, 'rgba(145,158,167,.07)'); glass.addColorStop(1, 'rgba(200,215,225,.025)');
+                ctx.fillStyle = glass; ctx.beginPath(); ctx.arc(cx, cy, discR, 0, Math.PI * 2); ctx.fill();
+                ctx.strokeStyle = 'rgba(205,218,226,.18)'; ctx.lineWidth = 1.4; ctx.beginPath(); ctx.arc(cx, cy, discR, 0, Math.PI * 2); ctx.stroke();
+
+                // Alternating bright and dark Newton fringes. Dark targets are the measurement references.
+                ctx.shadowBlur = 14; ctx.shadowColor = 'rgba(235,243,247,.16)';
+                for (let n = 0; n < 6; n++) {
+                    const rb = brightRingRadius(n);
+                    ctx.strokeStyle = 'rgba(230,237,241,.48)'; ctx.lineWidth = 4.5; ctx.beginPath(); ctx.arc(cx, cy, rb, 0, Math.PI * 2); ctx.stroke();
+                }
+                ctx.shadowBlur = 0;
+                for (let n = 1; n <= 6; n++) {
+                    const rd = darkRingRadius(n);
+                    ctx.strokeStyle = 'rgba(0,0,0,.88)'; ctx.lineWidth = 8; ctx.beginPath(); ctx.arc(cx, cy, rd, 0, Math.PI * 2); ctx.stroke();
+                    ctx.strokeStyle = 'rgba(185,198,207,.17)'; ctx.lineWidth = 1; ctx.beginPath(); ctx.arc(cx, cy, rd, 0, Math.PI * 2); ctx.stroke();
+                }
+                ctx.fillStyle = 'rgba(1,3,6,.88)'; ctx.beginPath(); ctx.arc(cx, cy, 28, 0, Math.PI * 2); ctx.fill();
+
+                if (!transitionOnly) {
+                    const introPulse = measurementIntroTimer < 1.25 ? 1 - measurementIntroTimer / 1.25 : 0;
+                    const hintPulse = fringeHintTimer > 0 ? .5 + .5 * Math.sin(elapsed * 14) : 0;
+                    const p = Math.max(introPulse * .7, hintPulse * .8);
+                    if (p > 0) {
+                        ctx.shadowBlur = 20; ctx.shadowColor = 'rgba(245,248,250,.55)'; ctx.strokeStyle = `rgba(245,248,250,${.28 + .55 * p})`; ctx.lineWidth = 2.8;
+                        for (const n of [MEASURE.i, MEASURE.k]) { ctx.beginPath(); ctx.arc(cx, cy, darkRingRadius(n), 0, Math.PI * 2); ctx.stroke(); }
+                        ctx.shadowBlur = 0;
+                    }
+                }
+                ctx.restore();
+            }
+
+            function measurementObjective() {
+                if (measurementStep === 0) return ['XÁC ĐỊNH K', 'GIAO ĐIỂM BÊN TRÁI CỦA VÂN k'];
+                if (measurementStep === 1) return ['XÁC ĐỊNH I', 'GIAO ĐIỂM BÊN PHẢI CỦA VÂN i'];
+                if (measurementStep === 2) return ["LOCATE K'", 'RIGHT CROSSING OF FRINGE k'];
+                return ['ĐÃ KHÓA PHÉP ĐO', "K · I · K′"];
+            }
+
+            function drawMeasurementMarkers() {
+                ctx.save(); ctx.textAlign = 'center';
+                for (const m of measurementMarkers) {
+                    ctx.strokeStyle = 'rgba(238,244,247,.82)'; ctx.lineWidth = 1.4; ctx.beginPath(); ctx.moveTo(m.x, MEASURE.cy - 18); ctx.lineTo(m.x, MEASURE.cy + 18); ctx.stroke();
+                    ctx.fillStyle = '#f1f5f7'; ctx.beginPath(); ctx.arc(m.x, MEASURE.cy, 4, 0, Math.PI * 2); ctx.fill();
+                    ctx.fillStyle = 'rgba(238,244,247,.92)'; ctx.font = '800 13px ui-sans-serif,system-ui'; ctx.fillText(m.label, m.x, MEASURE.cy - 28);
+                }
+                ctx.restore();
+            }
+
+            function drawReticle() {
+                const y = MEASURE.cy, shake = missTimer > 0 ? Math.sin(elapsed * 70) * 3 : 0, x = reticleX + shake;
+                ctx.save(); ctx.translate(x, y); ctx.shadowBlur = 9; ctx.shadowColor = 'rgba(235,244,248,.34)'; ctx.strokeStyle = missTimer > 0 ? 'rgba(180,145,145,.9)' : 'rgba(235,243,247,.86)'; ctx.lineWidth = 1.2;
+                ctx.beginPath(); ctx.moveTo(-18, 0); ctx.lineTo(-5, 0); ctx.moveTo(5, 0); ctx.lineTo(18, 0); ctx.moveTo(0, -18); ctx.lineTo(0, -5); ctx.moveTo(0, 5); ctx.lineTo(0, 18); ctx.stroke();
+                ctx.rotate(Math.PI / 4); ctx.strokeRect(-3, -3, 6, 6); ctx.shadowBlur = 0; ctx.restore();
+                if (shotPulse > 0) { ctx.save(); ctx.globalAlpha = shotPulse / .24; ctx.strokeStyle = '#f5f8fa'; ctx.lineWidth = 1.7; ctx.beginPath(); ctx.arc(reticleX, y, (.24 - shotPulse) * 150, 0, Math.PI * 2); ctx.stroke(); ctx.restore(); }
+            }
+
+            function drawMeasurementHUD() {
+                const [title, sub] = measurementObjective();
+                ctx.save();
+                ctx.fillStyle = 'rgba(4,8,14,.72)'; rr(30, 28, 230, 88, 14); ctx.fill(); ctx.strokeStyle = 'rgba(205,220,230,.18)'; ctx.stroke();
+                ctx.fillStyle = '#e5edf1'; ctx.font = '700 12px ui-sans-serif,system-ui'; ctx.fillText('ĐO VÂN NEWTON', 48, 54); ctx.font = '600 12px ui-monospace,monospace'; ctx.fillStyle = 'rgba(220,230,235,.70)'; ctx.fillText('i = 2', 48, 80); ctx.fillText('k = 4', 112, 80);
+                ctx.textAlign = 'center'; ctx.fillStyle = '#f0f5f7'; ctx.font = '800 22px ui-sans-serif,system-ui'; ctx.fillText(title, 800, 98); ctx.font = '600 11px ui-sans-serif,system-ui'; ctx.fillStyle = 'rgba(215,225,231,.62)'; ctx.fillText(sub, 800, 119);
+                if (measurementIntroTimer < 1.25) { ctx.globalAlpha = clamp(1 - measurementIntroTimer / 1.25, 0, 1); ctx.font = '700 15px ui-sans-serif,system-ui'; ctx.fillStyle = '#eef4f6'; ctx.fillText('i = 2      k = 4', 800, 154); ctx.globalAlpha = 1; }
+                if (lockFeedbackTimer > 0) { ctx.globalAlpha = clamp(lockFeedbackTimer / .35, 0, 1); ctx.fillStyle = missTimer > 0 ? 'rgba(205,175,175,.85)' : 'rgba(225,235,240,.86)'; ctx.font = '700 12px ui-sans-serif,system-ui'; ctx.fillText(lockFeedbackText, 800, 690); ctx.globalAlpha = 1; }
+                ctx.fillStyle = 'rgba(4,8,14,.68)'; rr(585, 812, 430, 48, 13); ctx.fill(); ctx.strokeStyle = 'rgba(205,220,230,.15)'; ctx.stroke(); ctx.fillStyle = 'rgba(229,237,241,.78)'; ctx.font = '650 12px ui-sans-serif,system-ui'; ctx.fillText('A / D   DI CHUYỂN TÂM NGẮM      SPACE   ĐO', 800, 842);
+                ctx.restore();
+            }
+
+            function drawMeasurementResult() {
+                if (gameState !== 'MEASUREMENT_RESULT') return;
+                const t = measurementTargets(), tm = measurementResultTimer, y = MEASURE.cy + 74;
+                ctx.save();
+                // B = K -> I
+                if (tm > .2) { const p = clamp((tm - .2) / .6, 0, 1), x2 = lerp(t.K, t.I, p); ctx.strokeStyle = 'rgba(240,245,247,.88)'; ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(t.K, y); ctx.lineTo(x2, y); ctx.stroke(); if (p > .75) { ctx.textAlign = 'center'; ctx.fillStyle = '#eef4f6'; ctx.font = '700 13px ui-sans-serif,system-ui'; ctx.fillText('B = KI', lerp(t.K, t.I, .5), y - 10); } }
+                // b = I -> K'
+                if (tm > .8) { const p = clamp((tm - .8) / .6, 0, 1), x2 = lerp(t.I, t.Kp, p); ctx.strokeStyle = 'rgba(190,202,210,.80)'; ctx.lineWidth = 2; ctx.setLineDash([7, 6]); ctx.beginPath(); ctx.moveTo(t.I, y + 35); ctx.lineTo(x2, y + 35); ctx.stroke(); ctx.setLineDash([]); if (p > .75) { ctx.textAlign = 'center'; ctx.fillStyle = 'rgba(224,232,236,.86)'; ctx.font = '700 13px ui-sans-serif,system-ui'; ctx.fillText("b = IK'", lerp(t.I, t.Kp, .5), y + 27); } }
+                if (tm > 1.4) { const a = clamp((tm - 1.4) / .3, 0, 1); ctx.globalAlpha = a; ctx.textAlign = 'center'; ctx.fillStyle = 'rgba(220,230,235,.74)'; ctx.font = '600 14px ui-sans-serif,system-ui'; ctx.fillText('B = rₖ + rᵢ      b = rₖ − rᵢ', 800, 615); ctx.font = '750 20px ui-sans-serif,system-ui'; ctx.fillStyle = '#eff4f6'; ctx.fillText('B × b = rₖ² − rᵢ²', 800, 651); }
+                if (tm > 2.1) { const a = clamp((tm - 2.1) / .35, 0, 1); ctx.globalAlpha = a; ctx.textAlign = 'center'; ctx.fillStyle = '#f2f6f8'; ctx.font = '800 25px ui-sans-serif,system-ui'; ctx.fillText('ĐO HOÀN TẤT', 800, 728); }
+                ctx.restore();
+            }
+
+            function drawMeasurementScene() {
+                drawMeasurementBackdrop(1, false);
+                ctx.save(); ctx.strokeStyle = 'rgba(210,222,229,.32)'; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(MEASURE.axisMin, MEASURE.cy); ctx.lineTo(MEASURE.axisMax, MEASURE.cy); ctx.stroke();
+                for (let x = MEASURE.axisMin; x <= MEASURE.axisMax; x += 47) { ctx.globalAlpha = .28; ctx.beginPath(); ctx.moveTo(x, MEASURE.cy - 4); ctx.lineTo(x, MEASURE.cy + 4); ctx.stroke(); } ctx.restore();
+                drawMeasurementMarkers();
+                if (gameState === 'MEASUREMENT') drawReticle();
+                drawMeasurementHUD();
+                drawMeasurementResult();
+                if (missTimer > 0) { ctx.save(); ctx.globalAlpha = missTimer * .12 / .48; ctx.fillStyle = '#6d3d42'; ctx.fillRect(0, 0, V.w, V.h); ctx.restore(); }
+            }
+
+            function drawCompletion() {
+                if (gameState !== 'COMPLETE') return;
+                const a = clamp(completeTimer * 2.5, 0, 1);
+                ctx.save(); ctx.globalAlpha = .72 * a; ctx.fillStyle = '#03060c'; ctx.fillRect(0, 0, V.w, V.h);
+                ctx.globalAlpha = a; ctx.textAlign = 'center'; ctx.shadowBlur = 28; ctx.shadowColor = 'rgba(255,255,255,.45)'; ctx.fillStyle = '#f1f7fb'; ctx.font = '700 46px ui-sans-serif,system-ui'; ctx.fillText('HOÀN THÀNH PHÉP ĐO', 800, 445); ctx.shadowBlur = 0;
+                ctx.fillStyle = 'rgba(220,235,245,.72)'; ctx.font = '500 18px ui-sans-serif,system-ui';
+                const completionSub = selectedLevel === 'EASY' ? 'Điều pha · Chọn điểm · Đo bước sóng.' : 'Vượt thử thách · Chọn K · Hoàn tất phép đo.';
+                ctx.fillText(completionSub, 800, 485);
+
+                ctx.fillStyle = 'rgba(20,30,42,.92)'; rr(500, 610, 285, 60, 14); ctx.fill(); ctx.strokeStyle = 'rgba(220,240,255,.30)'; ctx.stroke(); ctx.fillStyle = '#eaf4fb'; ctx.font = '650 14px ui-sans-serif,system-ui'; ctx.fillText('CHƠI LẠI  ·  ENTER', 642, 647);
+                ctx.fillStyle = 'rgba(20,30,42,.92)'; rr(815, 610, 285, 60, 14); ctx.fill(); ctx.strokeStyle = 'rgba(220,240,255,.30)'; ctx.stroke(); ctx.fillStyle = '#eaf4fb'; ctx.fillText('CHỌN MÀN  ·  ESC', 958, 647);
+                ctx.restore();
+            }
+
+            function drawBackToMenu() {
+                if (gameState === 'LEVEL_SELECT') return;
+                // Keep the back button away from the top-left control hint so they never overlap.
+                const x = V.w - 166, y = 24, w = 140, h = 44;
+                ctx.save();
+                ctx.fillStyle = 'rgba(5,9,17,.76)'; rr(x, y, w, h, 12); ctx.fill();
+                ctx.strokeStyle = 'rgba(214,229,239,.24)'; ctx.lineWidth = 1; ctx.stroke();
+                ctx.fillStyle = 'rgba(236,244,249,.86)'; ctx.textAlign = 'center';
+                ctx.font = '700 12px ui-sans-serif,system-ui'; ctx.fillText('←  TRÌNH ĐƠN', x + w / 2, y + 20);
+                ctx.fillStyle = 'rgba(214,229,239,.38)'; ctx.font = '600 9px ui-sans-serif,system-ui'; ctx.fillText('ESC', x + w / 2, y + 34);
+                ctx.restore();
+            }
+
+            function drawLevelSelect() {
+                ctx.save();
+                const g = ctx.createLinearGradient(0, 0, 0, V.h); g.addColorStop(0, '#07111e'); g.addColorStop(1, '#04070d'); ctx.fillStyle = g; ctx.fillRect(0, 0, V.w, V.h);
+
+                ctx.translate(800, 420);
+                for (let i = 0; i < 7; i++) { ctx.globalAlpha = .035 + i * .008; ctx.strokeStyle = '#d9e7ef'; ctx.lineWidth = 1; ctx.beginPath(); ctx.arc(0, 0, 120 + i * 64, 0, Math.PI * 2); ctx.stroke(); }
+                ctx.translate(-800, -420); ctx.globalAlpha = 1;
+
+                ctx.textAlign = 'center'; ctx.fillStyle = '#f1f6f9'; ctx.font = '800 50px ui-sans-serif,system-ui'; ctx.fillText('CONTRAST', 800, 170);
+                ctx.fillStyle = 'rgba(220,232,240,.55)'; ctx.font = '600 13px ui-sans-serif,system-ui'; ctx.fillText('CHỌN MÀN CHƠI', 800, 205);
+
+                const cards = [
+                    { x: 285, y: 350, w: 490, h: 260, title: 'DỄ / VỪA', sub: 'Làm quen cơ chế + đo vân Newton', details: ['Đường đi dễ đọc', 'Sáng · Điều pha · Tối', 'Chọn K · đi theo quỹ đạo tới I và K′'] },
+                    { x: 825, y: 350, w: 490, h: 260, title: 'KHÓ', sub: 'Thử thách nâng cao + đo vân Newton', details: ['Thanh di chuyển đổi màu và chạy ngược chiều', 'Có chướng ngại và mõm nhiễu', 'Chọn K hợp lý để đo I và K′'] }
+                ];
+                cards.forEach((c, i) => {
+                    const sel = i === menuIndex;
+                    ctx.fillStyle = sel ? 'rgba(28,39,51,.94)' : 'rgba(13,20,29,.83)'; rr(c.x, c.y, c.w, c.h, 22); ctx.fill();
+                    ctx.strokeStyle = sel ? 'rgba(238,245,249,.72)' : 'rgba(190,210,224,.18)'; ctx.lineWidth = sel ? 2 : 1; ctx.stroke();
+                    if (sel) { ctx.shadowBlur = 28; ctx.shadowColor = 'rgba(225,240,250,.14)'; ctx.strokeStyle = 'rgba(240,247,250,.28)'; ctx.stroke(); ctx.shadowBlur = 0; }
+                    ctx.textAlign = 'left'; ctx.fillStyle = '#eff5f8'; ctx.font = '800 27px ui-sans-serif,system-ui'; ctx.fillText(c.title, c.x + 34, c.y + 52);
+                    ctx.fillStyle = 'rgba(222,233,240,.58)'; ctx.font = '600 13px ui-sans-serif,system-ui'; ctx.fillText(c.sub, c.x + 34, c.y + 80);
+                    ctx.font = '500 13px ui-sans-serif,system-ui'; ctx.fillStyle = 'rgba(220,232,240,.45)'; c.details.forEach((t, j) => ctx.fillText('— ' + t, c.x + 34, c.y + 126 + j * 32));
+                    if (sel) { ctx.textAlign = 'right'; ctx.fillStyle = 'rgba(242,247,250,.82)'; ctx.font = '800 11px ui-sans-serif,system-ui'; ctx.fillText('ĐANG CHỌN', c.x + c.w - 28, c.y + 48); }
+                });
+
+                ctx.textAlign = 'center'; ctx.fillStyle = 'rgba(220,232,240,.55)'; ctx.font = '650 12px ui-sans-serif,system-ui'; ctx.fillText('A / D HOẶC ← / →  CHỌN      ENTER / SPACE  BẮT ĐẦU', 800, 700);
+                ctx.fillStyle = 'rgba(220,232,240,.30)'; ctx.font = '500 11px ui-sans-serif,system-ui'; ctx.fillText('Trong game: A / D di chuyển · Space/W nhảy · X đánh dấu · ← / → đổi pha · T chế độ thử', 800, 735);
+                ctx.restore();
+            }
+
+            function draw() {
+                if (gameState === 'LEVEL_SELECT') {
+                    drawLevelSelect();
+                    return;
+                }
+
+                // Legacy screen-space measurement states are retained only for compatibility;
+                // current EASY and HARD endings use the integrated world-space apparatus.
+                if (gameState === 'MEASUREMENT' || gameState === 'MEASUREMENT_RESULT') {
+                    drawMeasurementScene();
+                    drawDebug();
+                    drawBackToMenu();
+                    return;
+                }
+
+                drawBackground();
+                drawNewtonApparatus();
+                drawTrail();
+                for (const c of terrain) drawTerrain(c);
+                drawWorldHint();
+                drawPlayer();
+                drawHardNewtonBiteHazard();
+                drawNewtonMeasurementLayer();
+                drawNewtonRevealResult();
+                drawDebug();
+
+                if (gameState === 'PLAY' && (!newtonMeasurementStarted || TEST_MOVE.enabled)) drawControlHint();
+                if (gameState === 'PLAY' && !TEST_MOVE.enabled) drawTuner();
+                drawNewtonMeasurementHUD();
+
+                if (checkpointFlash > 0) { ctx.save(); ctx.globalAlpha = checkpointFlash * .7; ctx.textAlign = 'center'; ctx.fillStyle = '#e9f7ff'; ctx.font = '650 13px ui-sans-serif,system-ui'; ctx.fillText('ĐÃ LƯU ĐIỂM HỒI SINH', 800, 154); ctx.restore(); }
+                if (gameState === 'DYING') { const a = clamp(1 - deathTimer / .34, 0, 1); ctx.save(); ctx.globalAlpha = .18 + a * .42; ctx.fillStyle = '#02040a'; ctx.fillRect(0, 0, V.w, V.h); ctx.restore(); }
+                if (screenPulse > 0) { ctx.save(); ctx.globalAlpha = screenPulse * .11; ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, V.w, V.h); ctx.restore(); }
+                drawCompletion();
+                drawBackToMenu();
+            }
+
+            // ------------------------------------------------------------
+            // Fixed-step loop for stable collision behavior.
+            // ------------------------------------------------------------
+            let acc = 0; const STEP = 1 / 120;
+            function frame(now) {
+                const dt = Math.min(.05, (now - last) / 1000); last = now; acc += dt;
+                let guard = 0;
+                while (acc >= STEP && guard++ < 8) { update(STEP); acc -= STEP; }
+                draw(); requestAnimationFrame(frame);
+            }
+            player.intensity = intensityForPhase(player.phase); player.state = stateFor(player.intensity);
+            requestAnimationFrame(frame);
+
+        })();
+    </script>
+</body>
+
+</html>

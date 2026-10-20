@@ -34,6 +34,13 @@ namespace Contrast.UI
         private bool pendingDeleteConfirm;
         private float deleteConfirmExpiry;
 
+        // ── Reset button with 2-step confirmation ─────────────────
+        private Button resetButton;
+        private Text resetButtonLabel;
+        private Image resetButtonImage;
+        private bool pendingResetConfirm;
+        private float resetConfirmExpiry;
+
         private ScrollRect inspectorScrollRect;
         private RectTransform contentRt;
 
@@ -78,8 +85,13 @@ namespace Contrast.UI
         private InputField trajBoundsYMin;
         private InputField trajBoundsYMax;
 
+        private InputField exportFilenameInput;
+
         private bool suppressTraj;
         private float trajStartY;
+
+        public string GetExportFileName() => exportFilenameInput != null ? exportFilenameInput.text : null;
+        public void SetExportFileName(string name) { if (exportFilenameInput != null) exportFilenameInput.text = name; }
 
         private void Update()
         {
@@ -88,6 +100,13 @@ namespace Contrast.UI
                 pendingDeleteConfirm = false;
                 UpdateDeleteButtonVisual();
             }
+
+            if (pendingResetConfirm && Time.realtimeSinceStartup > resetConfirmExpiry)
+            {
+                pendingResetConfirm = false;
+                UpdateResetButtonVisual();
+                SetStatus("Reset cancelled. Level content preserved.");
+            }
         }
 
         public void Show(bool visible)
@@ -95,9 +114,20 @@ namespace Contrast.UI
             if (root == null)
                 BuildUI();
             root.SetActive(visible);
-            if (visible && statusText != null && string.IsNullOrEmpty(statusText.text))
+            if (visible)
             {
-                SetStatus("Level Editor Ready. Drag objects from Palette. Click platform to edit.");
+                pendingResetConfirm = false;
+                UpdateResetButtonVisual();
+
+                if (statusText != null && string.IsNullOrEmpty(statusText.text))
+                {
+                    SetStatus("Level Editor Ready. Drag objects from Palette. Click platform to edit.");
+                }
+
+                if (exportFilenameInput != null && string.IsNullOrEmpty(exportFilenameInput.text))
+                {
+                    exportFilenameInput.text = Contrast.Data.LevelRepository.GenerateUniqueFileName();
+                }
             }
         }
 
@@ -122,10 +152,10 @@ namespace Contrast.UI
             }
 
             suppressFields = true;
-            posX.text = platform.Position.x.ToString("F3");
-            posY.text = platform.Position.y.ToString("F3");
-            sizeX.text = platform.Size.x.ToString("F3");
-            sizeY.text = platform.Size.y.ToString("F3");
+            posX.text = platform.Position.x.ToString("F3", System.Globalization.CultureInfo.InvariantCulture);
+            posY.text = platform.Position.y.ToString("F3", System.Globalization.CultureInfo.InvariantCulture);
+            sizeX.text = platform.Size.x.ToString("F3", System.Globalization.CultureInfo.InvariantCulture);
+            sizeY.text = platform.Size.y.ToString("F3", System.Globalization.CultureInfo.InvariantCulture);
             colorSubComponent?.SetRawColor(platform.RawGrayscaleColor);
             suppressFields = false;
 
@@ -226,15 +256,49 @@ namespace Contrast.UI
             topRt.sizeDelta = new Vector2(0f, 76f);
             topRt.anchoredPosition = Vector2.zero;
 
-            CreateTopBarButton(top.transform, "IMPORT", new Vector2(75f, -38f), new Vector2(110f, 48f), new UnityEngine.Color(0.85f, 0.85f, 0.85f, 1f), UnityEngine.Color.black, () => controller?.RequestImport());
-            CreateTopBarButton(top.transform, "EXPORT", new Vector2(195f, -38f), new Vector2(110f, 48f), new UnityEngine.Color(0.85f, 0.85f, 0.85f, 1f), UnityEngine.Color.black, () => controller?.RequestExport());
-            CreateTopBarButton(top.transform, "TEST PLAY", new Vector2(335f, -38f), new Vector2(145f, 48f), new UnityEngine.Color(0.18f, 0.72f, 0.38f, 1f), UnityEngine.Color.white, () => controller?.RequestPlayLevel());
-            CreateTopBarButton(top.transform, "BACK", new Vector2(470f, -38f), new Vector2(100f, 48f), new UnityEngine.Color(0.35f, 0.35f, 0.38f, 1f), UnityEngine.Color.white, () => GameManager.Instance?.ReturnToMainMenu());
+            CreateTopBarButton(top.transform, "IMPORT", new Vector2(65f, -38f), new Vector2(95f, 46f), new UnityEngine.Color(0.85f, 0.85f, 0.85f, 1f), UnityEngine.Color.black, () => controller?.RequestImport());
+            CreateTopBarButton(top.transform, "EXPORT", new Vector2(170f, -38f), new Vector2(95f, 46f), new UnityEngine.Color(0.85f, 0.85f, 0.85f, 1f), UnityEngine.Color.black, () => controller?.RequestExport(exportFilenameInput != null ? exportFilenameInput.text : null));
+
+            // Export filename InputField
+            GameObject exportInputGo = NewUI("ExportFilenameInput", top.transform);
+            Image exportInputBg = exportInputGo.AddComponent<Image>();
+            exportInputBg.color = new UnityEngine.Color(0.10f, 0.14f, 0.20f, 0.95f);
+
+            Outline exportInputOutline = exportInputGo.AddComponent<Outline>();
+            exportInputOutline.effectColor = new UnityEngine.Color(0.75f, 0.88f, 0.98f, 0.35f);
+            exportInputOutline.effectDistance = new Vector2(1f, -1f);
+
+            RectTransform exportInputRt = exportInputGo.GetComponent<RectTransform>();
+            exportInputRt.sizeDelta = new Vector2(240f, 44f);
+            exportInputRt.anchoredPosition = new Vector2(345f, -38f);
+
+            GameObject exportTextGo = NewUI("Text", exportInputGo.transform);
+            Text exportText = exportTextGo.AddComponent<Text>();
+            exportText.font = GetFont();
+            exportText.fontSize = 14;
+            exportText.fontStyle = FontStyle.Normal;
+            exportText.color = new UnityEngine.Color(0.92f, 0.96f, 1f, 1f);
+            exportText.alignment = TextAnchor.MiddleLeft;
+            RectTransform exportTextRt = exportTextGo.GetComponent<RectTransform>();
+            exportTextRt.anchorMin = Vector2.zero;
+            exportTextRt.anchorMax = Vector2.one;
+            exportTextRt.offsetMin = new Vector2(10f, 0f);
+            exportTextRt.offsetMax = new Vector2(-10f, 0f);
+
+            exportFilenameInput = exportInputGo.AddComponent<InputField>();
+            exportFilenameInput.textComponent = exportText;
+            exportFilenameInput.contentType = InputField.ContentType.Standard;
+            exportFilenameInput.text = Contrast.Data.LevelRepository.GenerateUniqueFileName();
+
+            CreateTopBarButton(top.transform, "TEST PLAY", new Vector2(520f, -38f), new Vector2(125f, 46f), new UnityEngine.Color(0.18f, 0.72f, 0.38f, 1f), UnityEngine.Color.white, () => controller?.RequestPlayLevel());
+            CreateTopBarButton(top.transform, "BACK", new Vector2(645f, -38f), new Vector2(95f, 46f), new UnityEngine.Color(0.35f, 0.35f, 0.38f, 1f), UnityEngine.Color.white, () => GameManager.Instance?.ReturnToMainMenu());
+            CreateTopBarButton(top.transform, "FIT MAP", new Vector2(755f, -38f), new Vector2(100f, 46f), new UnityEngine.Color(0.24f, 0.52f, 0.88f, 1f), UnityEngine.Color.white, () => controller?.FitMap());
+            BuildResetButton(top.transform, new Vector2(875f, -38f), new Vector2(115f, 46f));
 
             GameObject status = NewUI("Status", top.transform);
             statusText = status.AddComponent<Text>();
             statusText.font = GetFont();
-            statusText.fontSize = 20;
+            statusText.fontSize = 18;
             statusText.alignment = TextAnchor.MiddleLeft;
             statusText.color = new UnityEngine.Color(0.9f, 0.9f, 0.95f, 1f);
             statusText.text = "Level Editor Ready. Drag objects from Palette. Click platform to edit.";
@@ -242,7 +306,7 @@ namespace Contrast.UI
             statusRt.anchorMin = new Vector2(0f, 0.5f);
             statusRt.anchorMax = new Vector2(1f, 0.5f);
             statusRt.pivot = new Vector2(0f, 0.5f);
-            statusRt.offsetMin = new Vector2(540f, -25f);
+            statusRt.offsetMin = new Vector2(945f, -25f);
             statusRt.offsetMax = new Vector2(-20f, 25f);
 
             // ── Bottom Help Banner ──────────────────────────────────────
@@ -262,7 +326,7 @@ namespace Contrast.UI
             helpText.fontSize = 15;
             helpText.alignment = TextAnchor.MiddleCenter;
             helpText.color = new UnityEngine.Color(0.85f, 0.85f, 0.85f, 1f);
-            helpText.text = "CONTROLS:  Left-Click/Drag: Select & Move Platform  |  White Handles: Resize  |  Colored Handles: Trajectory  |  Mid-Mouse: Pan Camera  |  Del: Delete Selected  |  TEST PLAY: Instant Run";
+            helpText.text = "CONTROLS:  Left-Click/Drag: Move  |  Handles: Resize/Trajectory  |  Mid-Mouse: Pan  |  Scroll: Zoom  |  FIT MAP (F): Frame All  |  Del: Delete  |  TEST PLAY: Run";
             Stretch(helpTextGo.GetComponent<RectTransform>());
 
             BuildInspector(root.transform);
@@ -538,6 +602,99 @@ namespace Contrast.UI
             {
                 if (deleteButtonLabel != null) deleteButtonLabel.text = "DELETE PLATFORM";
                 if (deleteButtonImage != null) deleteButtonImage.color = new UnityEngine.Color(0.85f, 0.2f, 0.2f, 1f);
+            }
+        }
+
+        // ── Safe Reset Button Handling ─────────────────────────────
+
+        private void BuildResetButton(Transform parent, Vector2 position, Vector2 size)
+        {
+            GameObject go = NewUI("ResetTopButton", parent);
+            resetButtonImage = go.AddComponent<Image>();
+            resetButtonImage.color = new UnityEngine.Color(0.85f, 0.25f, 0.25f, 1f);
+            resetButton = go.AddComponent<Button>();
+            resetButton.targetGraphic = resetButtonImage;
+            resetButton.onClick.AddListener(OnResetButtonClicked);
+
+            RectTransform rt = go.GetComponent<RectTransform>();
+            rt.anchorMin = new Vector2(0f, 0.5f);
+            rt.anchorMax = new Vector2(0f, 0.5f);
+            rt.pivot = new Vector2(0.5f, 0.5f);
+            rt.sizeDelta = size;
+            rt.anchoredPosition = position;
+
+            GameObject textGo = NewUI("Label", go.transform);
+            resetButtonLabel = textGo.AddComponent<Text>();
+            resetButtonLabel.font = GetFont();
+            resetButtonLabel.text = "RESET";
+            resetButtonLabel.fontSize = 19;
+            resetButtonLabel.fontStyle = FontStyle.Bold;
+            resetButtonLabel.alignment = TextAnchor.MiddleCenter;
+            resetButtonLabel.color = UnityEngine.Color.white;
+            resetButtonLabel.raycastTarget = false;
+            Stretch(textGo.GetComponent<RectTransform>());
+        }
+
+        private void OnResetButtonClicked()
+        {
+            if (!pendingResetConfirm)
+            {
+                pendingResetConfirm = true;
+                resetConfirmExpiry = Time.realtimeSinceStartup + 3.5f;
+                UpdateResetButtonVisual();
+                SetStatus("Confirm Reset: Click CONFIRM RESET within 3.5s to clear all editable level content.");
+            }
+            else
+            {
+                pendingResetConfirm = false;
+                UpdateResetButtonVisual();
+                controller?.ResetLevel();
+            }
+        }
+
+        public void CancelResetConfirm()
+        {
+            if (pendingResetConfirm)
+            {
+                pendingResetConfirm = false;
+                UpdateResetButtonVisual();
+                SetStatus("Reset cancelled. Level content preserved.");
+            }
+        }
+
+        private void UpdateResetButtonVisual()
+        {
+            if (resetButton == null)
+                return;
+
+            if (resetButtonLabel == null)
+                resetButtonLabel = resetButton.GetComponentInChildren<Text>();
+            if (resetButtonImage == null)
+                resetButtonImage = resetButton.GetComponent<Image>();
+
+            if (pendingResetConfirm)
+            {
+                if (resetButtonLabel != null)
+                {
+                    resetButtonLabel.text = "CONFIRM RESET";
+                    resetButtonLabel.fontSize = 13;
+                }
+                if (resetButtonImage != null)
+                {
+                    resetButtonImage.color = new UnityEngine.Color(0.95f, 0.45f, 0.15f, 1f);
+                }
+            }
+            else
+            {
+                if (resetButtonLabel != null)
+                {
+                    resetButtonLabel.text = "RESET";
+                    resetButtonLabel.fontSize = 19;
+                }
+                if (resetButtonImage != null)
+                {
+                    resetButtonImage.color = new UnityEngine.Color(0.85f, 0.25f, 0.25f, 1f);
+                }
             }
         }
 
@@ -1354,18 +1511,49 @@ namespace Contrast.UI
             field.onEndEdit.AddListener(_ => ApplyFields());
         }
 
+        public void SetController(LevelEditorController ctrl)
+        {
+            controller = ctrl;
+        }
+
+        public static bool TryParseFloat(string text, float fallback, out float result)
+        {
+            if (string.IsNullOrWhiteSpace(text))
+            {
+                result = fallback;
+                return false;
+            }
+
+            text = text.Trim();
+
+            if (float.TryParse(text, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out result))
+                return true;
+
+            if (float.TryParse(text, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.CurrentCulture, out result))
+                return true;
+
+            if (float.TryParse(text.Replace(',', '.'), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out result))
+                return true;
+
+            result = fallback;
+            return false;
+        }
+
         private void ApplyFields()
         {
-            if (suppressFields || selectedPlatform == null || controller == null)
+            if (suppressFields || selectedPlatform == null)
                 return;
 
-            if (!float.TryParse(posX.text, out float x) ||
-                !float.TryParse(posY.text, out float y) ||
-                !float.TryParse(sizeX.text, out float sx) ||
-                !float.TryParse(sizeY.text, out float sy))
+            controller ??= FindAnyObjectByType<LevelEditorController>(FindObjectsInactive.Include);
+            if (controller == null)
                 return;
 
-            float raw = colorSubComponent != null ? colorSubComponent.CurrentRawColor : 255f;
+            float x = TryParseFloat(posX != null ? posX.text : null, selectedPlatform.Position.x, out float px) ? px : selectedPlatform.Position.x;
+            float y = TryParseFloat(posY != null ? posY.text : null, selectedPlatform.Position.y, out float py) ? py : selectedPlatform.Position.y;
+            float sx = TryParseFloat(sizeX != null ? sizeX.text : null, selectedPlatform.Size.x, out float psx) ? psx : selectedPlatform.Size.x;
+            float sy = TryParseFloat(sizeY != null ? sizeY.text : null, selectedPlatform.Size.y, out float psy) ? psy : selectedPlatform.Size.y;
+
+            float raw = colorSubComponent != null ? colorSubComponent.CurrentRawColor : selectedPlatform.RawGrayscaleColor;
 
             controller.ApplySelectedPlatformFromUI(
                 new Vector2(x, y),

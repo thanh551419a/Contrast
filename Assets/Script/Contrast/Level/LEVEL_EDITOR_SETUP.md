@@ -46,10 +46,19 @@
 - **Rider-carry & gameplay**:
   - Trajectory movement runs only while in the `Playing` state (never in Editor or Main Menu).
   - When the player stands on top of a moving platform, its frame displacement is passed into the predictive AABB movement resolver, preserving full collision slide along walls and logical-color blocking rules.
-- **Camera panning**:
-  - Hold the middle mouse button over the map to pan the editor camera. Panning is editor-only and does not modify level object coordinates.
-- **UI input guarding**:
-  - If the pointer enters an editor UI panel while dragging, the map drag is canceled so objects cannot follow the cursor over UI controls.
+- **Camera panning, zoom, and Fit Map**:
+  - Hold the middle mouse button over the map to pan the editor camera.
+  - Scroll mouse wheel over the viewport to smoothly zoom in/out around cursor position (clamped between 2.5 and 250).
+  - Click the **FIT MAP** button in the TopBar (or press `F` shortcut when no text field is focused) to instantly frame all platforms, active trajectories, and markers inside the usable viewport between UI panels with margins.
+- **Platform visual presentation & White platform visibility**:
+  - White platforms feature a crisp slate perimeter border (`#2e4059`) with sliced 9-slice rendering, ensuring crystal-clear boundary definition and zero glare or blending against backgrounds, bloom, or grid lines.
+  - When selected, platforms are framed by a high-contrast electric-cyan selection box and 4 resize handles with dark borders and bright cores, remaining unmistakable on White, Gray, Black, and Universal platforms.
+  - Authoritative color semantics (`rawGrayscaleColor <= 84f`, `LogicalColor.White`), collision rules, and JSON persistence are strictly preserved.
+- **UI input guarding & pointer capture**:
+  - Initiating an interaction requires the pointer to start over the viewport (`!IsPointerOverUi()`).
+  - Once dragging starts, pointer capture ensures the drag is not interrupted if the cursor temporarily moves over UI panels.
+  - Releasing the mouse button commits the preview state to authoritative platform and trajectory data.
+  - Pressing `Escape` or cancelling the drag performs an immediate transactional rollback, restoring the pre-drag platform position and trajectory configuration.
 
 ## Runtime build
 - File import picker uses `UnityEditor.OpenFilePanel` when running inside the Unity Editor.

@@ -47,6 +47,7 @@ namespace Contrast.Player
 
         private void Awake()
         {
+            transform.localScale = new Vector3(0.3f, 0.3f, 1f);
             inputReader = GetComponent<PlayerInput>();
             movementResolver = GetComponent<PlayerMovementResolver>();
             jumpMotion = GetComponent<PlayerJumpMotion>();
@@ -60,6 +61,13 @@ namespace Contrast.Player
             }
 
             ApplyColorVisual();
+        }
+
+        private void Reset()
+        {
+            transform.localScale = new Vector3(0.3f, 0.3f, 1f);
+            playerSize = Vector2.one;
+            playerOffset = Vector2.zero;
         }
 
         /// <summary>
@@ -273,6 +281,7 @@ namespace Contrast.Player
             State = PlayerState.Dead;
             isGrounded = false;
             jumpMotion?.ResetMotion();
+            Contrast.Presentation.VisualPresentationManager.Instance?.NotifyPlayerDied();
             GameManager.Instance?.OnPlayerDied();
         }
 

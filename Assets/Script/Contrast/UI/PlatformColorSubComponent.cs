@@ -200,7 +200,7 @@ namespace Contrast.UI
             suppressCallbacks = true;
 
             if (rawValueField != null)
-                rawValueField.text = currentRawColor.ToString("F1");
+                rawValueField.text = currentRawColor.ToString("F1", System.Globalization.CultureInfo.InvariantCulture);
 
             if (typeDropdown != null)
                 typeDropdown.value = (int)logical;
@@ -238,14 +238,14 @@ namespace Contrast.UI
             if (suppressCallbacks)
                 return;
 
-            if (float.TryParse(text, out float val))
+            if (LevelEditorUI.TryParseFloat(text, currentRawColor, out float val))
             {
                 SetRawColor(val, true);
             }
             else
             {
                 if (rawValueField != null)
-                    rawValueField.text = currentRawColor.ToString("F1");
+                    rawValueField.text = currentRawColor.ToString("F1", System.Globalization.CultureInfo.InvariantCulture);
             }
         }
 

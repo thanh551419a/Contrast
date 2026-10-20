@@ -119,10 +119,14 @@ namespace Contrast.Level
             spriteRenderer.sortingOrder = 0;
 
             spriteRenderer.color = ColorClassifier.GetPlatformVisualColor(rawColor);
+
+            var pres = GetComponent<Contrast.Presentation.PlatformVisualPresentation>();
+            if (pres != null)
+                pres.RefreshVisuals();
         }
 
 
-        internal void SetEditorData(
+        public void SetEditorData(
             Vector2 position,
             Vector2 platformSize,
             float rawColor)
@@ -158,6 +162,10 @@ namespace Contrast.Level
             spriteRenderer.sortingOrder = 0;
 
             spriteRenderer.color = ColorClassifier.GetPlatformVisualColor(rawColor);
+
+            var pres = GetComponent<Contrast.Presentation.PlatformVisualPresentation>();
+            if (pres != null)
+                pres.RefreshVisuals();
         }
 
         /// <summary>

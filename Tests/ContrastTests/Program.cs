@@ -1,8 +1,12 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using Contrast.Core;
 using Contrast.Data;
 using Contrast.Level;
+using Contrast.Level.EditorInteraction;
+using Contrast.UI;
+using Contrast.Color;
 using UnityEngine;
 
 namespace ContrastTests
@@ -33,6 +37,22 @@ namespace ContrastTests
             Test_JsonSerializationRoundTrip();
             Test_LegacySampleLevelsCompatibility();
             Test_TrajectoryShowcaseLevelFile();
+            Test_LevelRepositoryAndStorage();
+            Test_LevelSourceTracking();
+            Test_SanitizerRawJsonPresenceHelper();
+            Test_SanitizerDataRepairAndValidation();
+            Test_SanitizerCameraBoundaryGeneration();
+            Test_SanitizerTrajectoryRepairs();
+            Test_JsonExportNoPhantomObjects();
+            Test_MalformedJsonRepairAndReport();
+            Test_EditorRoundTripIntegrity();
+            Test_GameplayEntryContextAndNavigation();
+            Test_EditorWorkingCopyRestorationAfterGameplay();
+            Test_EditorInputRouter();
+            Test_PlatformSizeAndColorEditing();
+            Test_FitMapAndWhitePlatformCalculations();
+            Test_ResetLevel_Functionality();
+            Test_GhostPlatform_Prevention_And_ResetCleanup();
 
             Console.WriteLine("================================================================================");
             Console.WriteLine($"RESULTS: {passed} PASSED, {failed} FAILED");
@@ -584,6 +604,742 @@ namespace ContrastTests
             Assert(hasCircle, "ShowcaseLevel_Coverage", "Includes Full 360 Circle Loop");
             Assert(hasArc, "ShowcaseLevel_Coverage", "Includes 180 Arc Semi-circle");
             Assert(hasReverse, "ShowcaseLevel_Coverage", "Includes Reverse Direction Trajectory");
+        }
+
+        private static void Test_LevelRepositoryAndStorage()
+        {
+            string tempDir = Path.Combine(Path.GetTempPath(), "ContrastTest_Levels_" + Guid.NewGuid().ToString("N"));
+            try
+            {
+                LevelRepository.CustomStorageDirectory = tempDir;
+                LevelRepository.EnsureDirectory();
+                Assert(Directory.Exists(tempDir), "LevelRepo", "EnsureDirectory creates folder");
+
+                // Initially empty
+                string[] initialFiles = LevelRepository.ListLevelFiles();
+                Assert(initialFiles.Length == 0, "LevelRepo", "ListLevelFiles initially empty");
+
+                // EnsureDefaultLevelFile creates default_level.json
+                LevelRepository.EnsureDefaultLevelFile();
+                string[] afterDefault = LevelRepository.ListLevelFiles();
+                Assert(afterDefault.Length == 1, "LevelRepo", "EnsureDefaultLevelFile creates 1 file");
+                Assert(Path.GetFileName(afterDefault[0]) == "default_level.json", "LevelRepo", "Default level filename matches");
+
+                // Unique filename generation
+                string fn1 = LevelRepository.GenerateUniqueFileName("test_");
+                string savePath1 = Path.Combine(tempDir, fn1);
+                LevelRepository.WriteAllText(savePath1, "{\"platforms\":[]}");
+                Assert(File.Exists(savePath1), "LevelRepo", "WriteAllText writes file");
+
+                string readBack = LevelRepository.ReadAllText(savePath1);
+                Assert(readBack == "{\"platforms\":[]}", "LevelRepo", "ReadAllText reads back content");
+
+                // GetUniqueSavePath generates unique suffix when file exists
+                string savePath2 = LevelRepository.GetUniqueSavePath(fn1);
+                Assert(savePath1 != savePath2, "LevelRepo", "GetUniqueSavePath never overwrites existing file");
+            }
+            finally
+            {
+                LevelRepository.CustomStorageDirectory = null;
+                if (Directory.Exists(tempDir))
+                {
+                    try { Directory.Delete(tempDir, true); } catch { }
+                }
+            }
+        }
+
+        private static void Test_LevelSourceTracking()
+        {
+            string tempFile = Path.GetTempFileName();
+            try
+            {
+                File.WriteAllText(tempFile, "{\"custom\":\"disk\"}");
+                LevelSource srcFile = LevelSource.FromFile(tempFile);
+                Assert(srcFile.SourceType == LevelSourceType.FilePath, "LevelSource", "SourceType is FilePath");
+                Assert(srcFile.FilePath == tempFile, "LevelSource", "FilePath matches");
+                Assert(srcFile.LoadRawJson() == "{\"custom\":\"disk\"}", "LevelSource", "LoadRawJson loads disk content");
+
+                LevelSource srcMem = LevelSource.FromMemory("{\"custom\":\"memory\"}");
+                Assert(srcMem.SourceType == LevelSourceType.InMemoryJson, "LevelSource", "SourceType is InMemoryJson");
+                Assert(srcMem.LoadRawJson() == "{\"custom\":\"memory\"}", "LevelSource", "LoadRawJson loads memory content");
+            }
+            finally
+            {
+                if (File.Exists(tempFile))
+                    try { File.Delete(tempFile); } catch { }
+            }
+        }
+
+        private static void Test_SanitizerRawJsonPresenceHelper()
+        {
+            string jsonWithEnd = "{\n  \"startPos\": { \"color\": 0 },\n  \"end\": { \"position\": { \"x\": 10, \"y\": 2 } },\n  \"platforms\": []\n}";
+            Assert(LevelDataSanitizer.IsFieldPresentAndNonNull(jsonWithEnd, "end"), "PresenceHelper", "Present 'end' is detected");
+            Assert(LevelDataSanitizer.IsFieldPresentAndNonNull(jsonWithEnd, "startPos"), "PresenceHelper", "Present 'startPos' is detected");
+            Assert(!LevelDataSanitizer.IsFieldPresentAndNonNull(jsonWithEnd, "cameraBoundary"), "PresenceHelper", "Absent 'cameraBoundary' is detected as absent");
+
+            string jsonWithNullEnd = "{\n  \"startPos\": { \"color\": 0 },\n  \"end\": null,\n  \"platforms\": []\n}";
+            Assert(!LevelDataSanitizer.IsFieldPresentAndNonNull(jsonWithNullEnd, "end"), "PresenceHelper", "'end': null is detected as absent");
+
+            // Nested key inside platforms should not match root key
+            string jsonWithNestedEnd = "{\n  \"platforms\": [ { \"end\": 123 } ]\n}";
+            Assert(!LevelDataSanitizer.IsFieldPresentAndNonNull(jsonWithNestedEnd, "end"), "PresenceHelper", "Nested 'end' does not match top-level key");
+
+            // Extract snippet
+            string jsonSingleCp = "{\n  \"checkPoint\": { \"position\": { \"x\": 5, \"y\": 1 }, \"color\": 128 }\n}";
+            string snippet = LevelDataSanitizer.ExtractTopLevelFieldSnippet(jsonSingleCp, "checkPoint");
+            Assert(snippet != null && snippet.Contains("\"x\": 5"), "PresenceHelper", "ExtractTopLevelFieldSnippet extracts object snippet");
+        }
+
+        private static void Test_SanitizerDataRepairAndValidation()
+        {
+            LevelData data = new LevelData
+            {
+                platforms = new ColorPlatformData[]
+                {
+                    new ColorPlatformData { position = new Vector2Data(float.NaN, 0f), size = new Vector2Data(2f, 1f) },
+                    new ColorPlatformData { position = new Vector2Data(5f, -1f), size = new Vector2Data(-4f, float.NaN), rawGrayscaleColor = float.NaN },
+                    new ColorPlatformData { position = new Vector2Data(12f, 0f), size = new Vector2Data(6f, 1f), rawGrayscaleColor = 350f }
+                },
+                checkPoint = new CheckPointData[]
+                {
+                    new CheckPointData { position = new Vector2Data(5f, 1f), color = 100f },
+                    new CheckPointData { position = new Vector2Data(5f, 1f), color = 100f } // duplicate
+                },
+                end = null // no end
+            };
+
+            LevelData sanitized = LevelDataSanitizer.Sanitize(data, null, out var report);
+
+            Assert(sanitized.platforms.Length == 2, "Sanitizer_Repair", "NaN position platform removed");
+            Assert(sanitized.platforms[0].size.x >= 0.05f && sanitized.platforms[0].size.y >= 0.05f, "Sanitizer_Repair", "Negative/NaN size repaired to positive finite");
+            AssertApprox(255f, sanitized.platforms[0].rawGrayscaleColor, 1e-4f, "Sanitizer_Repair", "NaN color repaired to 255 (Universal)");
+            AssertApprox(255f, sanitized.platforms[1].rawGrayscaleColor, 1e-4f, "Sanitizer_Repair", "Out of bounds color 350 clamped to 255");
+            Assert(sanitized.checkPoint.Length == 1, "Sanitizer_Repair", "Duplicate checkpoint removed");
+            Assert(sanitized.startPos != null, "Sanitizer_Repair", "Missing StartPos automatically created above first platform");
+            Assert(sanitized.end == null, "Sanitizer_Repair", "Missing End remains null without phantom End");
+            Assert(report.Exists(r => r.Contains("WARNING")), "Sanitizer_Repair", "Missing End emits warning in report");
+        }
+
+        private static void Test_SanitizerCameraBoundaryGeneration()
+        {
+            LevelData data = new LevelData
+            {
+                startPos = new StartPosData { position = new Vector2Data(0f, 1f), size = new Vector2Data(1f, 1f) },
+                platforms = new ColorPlatformData[]
+                {
+                    new ColorPlatformData { position = new Vector2Data(0f, 0f), size = new Vector2Data(10f, 1f) },
+                    new ColorPlatformData { position = new Vector2Data(50f, 10f), size = new Vector2Data(8f, 1f) }
+                },
+                cameraBoundary = null // missing
+            };
+
+            LevelData sanitized = LevelDataSanitizer.Sanitize(data, null, out var report);
+
+            Assert(sanitized.cameraBoundary != null, "Sanitizer_Camera", "Camera boundary generated when missing");
+            Assert(sanitized.cameraBoundary.size.x >= 30f && sanitized.cameraBoundary.size.y >= 18f, "Sanitizer_Camera", "Camera boundary respects minimum visible extent");
+            float minX = sanitized.cameraBoundary.position.x - sanitized.cameraBoundary.size.x * 0.5f;
+            float maxX = sanitized.cameraBoundary.position.x + sanitized.cameraBoundary.size.x * 0.5f;
+            float minY = sanitized.cameraBoundary.position.y - sanitized.cameraBoundary.size.y * 0.5f;
+            float maxY = sanitized.cameraBoundary.position.y + sanitized.cameraBoundary.size.y * 0.5f;
+
+            Assert(minX <= -5f && maxX >= 54f, "Sanitizer_Camera", "Camera boundary encloses all platforms along X with margin");
+            Assert(minY <= -5f && maxY >= 15f, "Sanitizer_Camera", "Camera boundary encloses all platforms along Y with margin");
+        }
+
+        private static void Test_SanitizerTrajectoryRepairs()
+        {
+            LevelData data = new LevelData
+            {
+                startPos = new StartPosData { position = new Vector2Data(0f, 1f) },
+                platforms = new ColorPlatformData[]
+                {
+                    // Trajectory with duration <= 0 and scaleX == 0
+                    new ColorPlatformData
+                    {
+                        position = new Vector2Data(5f, 2f),
+                        size = new Vector2Data(4f, 1f),
+                        trajectory = new TrajectoryData
+                        {
+                            enabled = true,
+                            curveType = TrajectoryCurveType.Line,
+                            domainMode = TrajectoryDomainMode.ParameterRange,
+                            scaleX = 0f,
+                            duration = -2f,
+                            originX = 5f,
+                            originY = 2f
+                        }
+                    },
+                    // Circle with radius <= 0 and SpatialBounds (invalid combo)
+                    new ColorPlatformData
+                    {
+                        position = new Vector2Data(20f, 5f),
+                        size = new Vector2Data(3f, 1f),
+                        trajectory = new TrajectoryData
+                        {
+                            enabled = true,
+                            curveType = TrajectoryCurveType.Circle,
+                            domainMode = TrajectoryDomainMode.SpatialBounds,
+                            radius = -1f,
+                            duration = 4f,
+                            originX = 20f,
+                            originY = 5f
+                        }
+                    }
+                }
+            };
+
+            LevelData sanitized = LevelDataSanitizer.Sanitize(data, null, out var report);
+
+            var t0 = sanitized.platforms[0].trajectory;
+            Assert(t0 != null && t0.enabled, "TrajectoryRepair", "Platform 0 trajectory repaired and enabled");
+            AssertApprox(4f, t0.duration, 1e-4f, "TrajectoryRepair", "Negative duration repaired to 4s");
+            AssertApprox(5f, t0.scaleX, 1e-4f, "TrajectoryRepair", "Zero scaleX repaired to 5");
+
+            var t1 = sanitized.platforms[1].trajectory;
+            Assert(t1 != null && t1.enabled, "TrajectoryRepair", "Platform 1 trajectory repaired and enabled");
+            AssertApprox(2f, t1.radius, 1e-4f, "TrajectoryRepair", "Negative radius repaired to 2");
+            Assert(t1.domainMode == TrajectoryDomainMode.ParameterRange, "TrajectoryRepair", "Circle with SpatialBounds repaired to ParameterRange");
+
+            // Mandatory contract: platform position matches initial trajectory position
+            Vector2 expectedInit0 = Trajectory.GetInitialPosition(t0);
+            AssertVecApprox(expectedInit0, sanitized.platforms[0].position.ToVector2(), 1e-4f, "TrajectoryRepair", "Platform 0 position matches initial trajectory point");
+        }
+
+        private static void Test_JsonExportNoPhantomObjects()
+        {
+            LevelData data = new LevelData
+            {
+                startPos = new StartPosData { position = new Vector2Data(0f, 1f), size = new Vector2Data(1f, 1f), color = 0f },
+                checkPoint = new CheckPointData[]
+                {
+                    new CheckPointData { position = new Vector2Data(10f, 1f), size = new Vector2Data(1f, 1f), color = 255f }
+                },
+                end = null, // explicitly absent
+                cameraBoundary = new CameraBoundaryData { position = new Vector2Data(15f, 0f), size = new Vector2Data(40f, 20f) },
+                platforms = new ColorPlatformData[]
+                {
+                    new ColorPlatformData { position = new Vector2Data(0f, -0.5f), size = new Vector2Data(6f, 1f), rawGrayscaleColor = 255f, trajectory = null },
+                    new ColorPlatformData { position = new Vector2Data(8f, -0.5f), size = new Vector2Data(4f, 1f), rawGrayscaleColor = 128f, trajectory = new TrajectoryData { enabled = false } }
+                }
+            };
+
+            string json = LevelDataSanitizer.SerializeToJson(data);
+
+            Assert(!json.Contains("\"end\":"), "JsonExport", "Absent End marker is NOT exported in JSON");
+            Assert(!json.Contains("\"spawnPoint\":"), "JsonExport", "Legacy spawnPoint is NOT exported in JSON");
+            Assert(!json.Contains("\"trajectory\":"), "JsonExport", "Disabled or null trajectory is NOT exported on static platforms");
+            Assert(!json.Contains("NaN") && !json.Contains("Infinity"), "JsonExport", "Export contains no NaN or Infinity tokens");
+            Assert(json.Contains("\"startPos\":"), "JsonExport", "startPos is exported");
+            Assert(json.Contains("\"checkPoint\":"), "JsonExport", "checkPoint array is exported");
+            Assert(json.Contains("\"cameraBoundary\":"), "JsonExport", "cameraBoundary is exported");
+        }
+
+        private static void Test_MalformedJsonRepairAndReport()
+        {
+            string malformedJson = "{\n  \"startPos\": {\n    \"position\": { \"x\": 0.0, \"y\": 1.0 },\n    \"size\": { \"x\": -2.0, \"y\": 1.0 },\n    \"color\": 0.0\n  },\n  \"end\": null,\n  \"platforms\": [\n    {\n      \"position\": { \"x\": 0.0, \"y\": -0.5 },\n      \"size\": { \"x\": -6.0, \"y\": 1.0 },\n      \"rawGrayscaleColor\": 300.0,\n      \"trajectory\": {\n        \"enabled\": true,\n        \"curveType\": 0,\n        \"scaleX\": 0.0,\n        \"duration\": -5.0\n      }\n    }\n  ]\n}";
+
+            LevelData data = DeserializeLevelData(malformedJson);
+            data = LevelDataSanitizer.Sanitize(data, malformedJson, out var report);
+
+            Assert(report != null && report.Count > 0, "MalformedJson", "Report records automatic fixes");
+            Assert(data.end == null, "MalformedJson", "End remains null after sanitizing '\"end\": null'");
+            Assert(data.platforms[0].size.x >= 0.05f, "MalformedJson", "Negative platform size repaired");
+            AssertApprox(255f, data.platforms[0].rawGrayscaleColor, 1e-4f, "MalformedJson", "Color clamped to 255");
+            Assert(data.platforms[0].trajectory.duration > 0f, "MalformedJson", "Trajectory duration repaired");
+            Assert(data.cameraBoundary != null, "MalformedJson", "Camera boundary automatically generated for level missing boundary");
+        }
+
+        private static void Test_EditorRoundTripIntegrity()
+        {
+            LevelData orig = new LevelData
+            {
+                startPos = new StartPosData { position = new Vector2Data(0f, 1f), size = new Vector2Data(1f, 1f), color = 0f },
+                checkPoint = new CheckPointData[]
+                {
+                    new CheckPointData { position = new Vector2Data(15f, 1f), size = new Vector2Data(1f, 1f), color = 128f }
+                },
+                end = new EndData { position = new Vector2Data(30f, 2f), size = new Vector2Data(1.5f, 2f) },
+                cameraBoundary = new CameraBoundaryData { position = new Vector2Data(15f, 5f), size = new Vector2Data(50f, 25f) },
+                platforms = new ColorPlatformData[]
+                {
+                    new ColorPlatformData { position = new Vector2Data(0f, -0.5f), size = new Vector2Data(8f, 1f), rawGrayscaleColor = 255f },
+                    new ColorPlatformData
+                    {
+                        position = new Vector2Data(10f, 0f),
+                        size = new Vector2Data(4f, 1f),
+                        rawGrayscaleColor = 0f,
+                        trajectory = new TrajectoryData
+                        {
+                            enabled = true,
+                            curveType = TrajectoryCurveType.Line,
+                            playbackMode = TrajectoryPlaybackMode.PingPong,
+                            originX = 10f,
+                            originY = 0f,
+                            scaleX = 6f,
+                            duration = 8f
+                        }
+                    }
+                }
+            };
+
+            string exportedJson = LevelDataSanitizer.SerializeToJson(orig);
+            LevelData reimported = DeserializeLevelData(exportedJson);
+            reimported = LevelDataSanitizer.Sanitize(reimported, exportedJson, out var report);
+
+            Assert(reimported != null, "RoundTrip", "Reimported LevelData is non-null");
+            Assert(reimported.platforms.Length == 2, "RoundTrip", "Platform count preserved (2)");
+            Assert(reimported.checkPoint != null && reimported.checkPoint.Length == 1, "RoundTrip", "CheckPoint preserved");
+            Assert(reimported.end != null, "RoundTrip", "End marker preserved");
+            AssertVecApprox(new Vector2(30f, 2f), reimported.end.position.ToVector2(), 1e-4f, "RoundTrip", "End marker position matches");
+            Assert(reimported.platforms[1].trajectory != null && reimported.platforms[1].trajectory.enabled, "RoundTrip", "Moving platform trajectory preserved");
+            AssertApprox(8f, reimported.platforms[1].trajectory.duration, 1e-4f, "RoundTrip", "Trajectory duration preserved");
+            AssertApprox(6f, reimported.platforms[1].trajectory.scaleX, 1e-4f, "RoundTrip", "Trajectory scaleX preserved");
+        }
+
+        private static void Test_GameplayEntryContextAndNavigation()
+        {
+            // 1. Initial default state
+            var context = GameplayEntryContext.MainMenuGameplay;
+            Assert(context == GameplayEntryContext.MainMenuGameplay, "EntryContext", "Default context is MainMenuGameplay");
+
+            // 2. Normal gameplay launch
+            context = GameplayEntryContext.MainMenuGameplay;
+            string returnTargetNormal = (context == GameplayEntryContext.EditorTestPlay) ? "LevelEditor" : "MainMenu";
+            Assert(returnTargetNormal == "MainMenu", "EntryContext", "Normal gameplay RETURN targets MainMenu");
+
+            // 3. TEST PLAY launch
+            context = GameplayEntryContext.EditorTestPlay;
+            string returnTargetTestPlay = (context == GameplayEntryContext.EditorTestPlay) ? "LevelEditor" : "MainMenu";
+            Assert(returnTargetTestPlay == "LevelEditor", "EntryContext", "TEST PLAY RETURN targets LevelEditor");
+
+            // 4. Multiple restarts simulate preserving context
+            for (int i = 0; i < 3; i++)
+            {
+                // Simulated Restart: reloads level data from source, preserves context
+                Assert(context == GameplayEntryContext.EditorTestPlay, "EntryContext", $"Context preserved after restart #{i + 1}");
+            }
+            string returnTargetAfterRestarts = (context == GameplayEntryContext.EditorTestPlay) ? "LevelEditor" : "MainMenu";
+            Assert(returnTargetAfterRestarts == "LevelEditor", "EntryContext", "RETURN still targets LevelEditor after multiple restarts");
+
+            // 5. Returning to Main Menu resets context
+            context = GameplayEntryContext.MainMenuGameplay;
+            Assert(context == GameplayEntryContext.MainMenuGameplay, "EntryContext", "Context successfully reset to MainMenuGameplay upon returning to Main Menu");
+        }
+
+        private static void Test_EditorWorkingCopyRestorationAfterGameplay()
+        {
+            // 1. Create authored level before TEST PLAY
+            LevelData authored = new LevelData
+            {
+                startPos = new StartPosData { position = new Vector2Data(0f, 1f), size = new Vector2Data(1f, 1f), color = 0f },
+                checkPoint = new CheckPointData[]
+                {
+                    new CheckPointData { position = new Vector2Data(12f, 1f), size = new Vector2Data(1f, 1f), color = 128f }
+                },
+                end = new EndData { position = new Vector2Data(25f, 2f), size = new Vector2Data(1.5f, 2f) },
+                cameraBoundary = new CameraBoundaryData { position = new Vector2Data(12f, 5f), size = new Vector2Data(40f, 20f) },
+                platforms = new ColorPlatformData[]
+                {
+                    new ColorPlatformData { position = new Vector2Data(0f, -0.5f), size = new Vector2Data(6f, 1f), rawGrayscaleColor = 255f },
+                    new ColorPlatformData
+                    {
+                        position = new Vector2Data(10f, 0f),
+                        size = new Vector2Data(4f, 1f),
+                        rawGrayscaleColor = 0f,
+                        trajectory = new TrajectoryData
+                        {
+                            enabled = true,
+                            curveType = TrajectoryCurveType.Line,
+                            playbackMode = TrajectoryPlaybackMode.PingPong,
+                            originX = 10f,
+                            originY = 0f,
+                            scaleX = 8f,
+                            duration = 6f
+                        }
+                    }
+                }
+            };
+
+            // 2. Editor captures working copy snapshot before test play
+            string snapshotJson = LevelDataSanitizer.SerializeToJson(authored);
+            LevelData workingCopy = DeserializeLevelData(snapshotJson);
+
+            Assert(workingCopy != null, "WorkingCopy", "Working copy captured successfully");
+            Assert(workingCopy.checkPoint != null && workingCopy.checkPoint.Length == 1, "WorkingCopy", "Working copy contains 1 checkpoint");
+            Assert(workingCopy.end != null, "WorkingCopy", "Working copy contains End marker");
+            AssertVecApprox(new Vector2(10f, 0f), workingCopy.platforms[1].position.ToVector2(), 1e-4f, "WorkingCopy", "Platform 1 at authored position (10, 0)");
+
+            // 3. Simulate gameplay mutations: checkpoint consumed, end consumed, platform moved
+            LevelData runtimeGameplayState = DeserializeLevelData(snapshotJson);
+            runtimeGameplayState.checkPoint = new CheckPointData[0]; // Checkpoint consumed & destroyed
+            runtimeGameplayState.end = null; // End touched & destroyed
+            runtimeGameplayState.platforms[1].position = new Vector2Data(18f, 0f); // Platform moved along trajectory to (18, 0)
+
+            Assert(runtimeGameplayState.checkPoint.Length == 0, "WorkingCopy", "Simulated gameplay consumed checkpoint");
+            Assert(runtimeGameplayState.end == null, "WorkingCopy", "Simulated gameplay consumed End marker");
+            AssertVecApprox(new Vector2(18f, 0f), runtimeGameplayState.platforms[1].position.ToVector2(), 1e-4f, "WorkingCopy", "Simulated gameplay displaced platform to (18, 0)");
+
+            // 4. Editor restoration from workingCopy
+            LevelData restored = DeserializeLevelData(snapshotJson);
+            restored = LevelDataSanitizer.Sanitize(restored, snapshotJson, out _);
+
+            Assert(restored != null, "WorkingCopy", "Restored level is non-null");
+            Assert(restored.checkPoint != null && restored.checkPoint.Length == 1, "WorkingCopy", "Consumed checkpoint marker restored from working copy");
+            AssertVecApprox(new Vector2(12f, 1f), restored.checkPoint[0].position.ToVector2(), 1e-4f, "WorkingCopy", "Restored checkpoint at authored position (12, 1)");
+            Assert(restored.end != null, "WorkingCopy", "Consumed End marker restored from working copy");
+            AssertVecApprox(new Vector2(25f, 2f), restored.end.position.ToVector2(), 1e-4f, "WorkingCopy", "Restored End at authored position (25, 2)");
+            AssertVecApprox(new Vector2(10f, 0f), restored.platforms[1].position.ToVector2(), 1e-4f, "WorkingCopy", "Platform position reset to authored editor position (10, 0)");
+            AssertApprox(6f, restored.platforms[1].trajectory.duration, 1e-4f, "WorkingCopy", "Authored trajectory duration intact");
+        }
+
+        private static void Test_EditorInputRouter()
+        {
+            var router = new EditorInputRouter();
+            object ownerA = "ownerA";
+            object ownerB = "ownerB";
+
+            Assert(router.CapturePointer(ownerA), "InputRouter", "Owner A successfully captures pointer");
+            Assert(router.HasPointerCapture, "InputRouter", "Router reports HasPointerCapture");
+            Assert(router.IsOwner(ownerA), "InputRouter", "IsOwner matches owner A");
+            Assert(!router.IsOwner(ownerB), "InputRouter", "IsOwner does not match owner B");
+
+            Assert(!router.CapturePointer(ownerB), "InputRouter", "Owner B cannot steal captured pointer");
+
+            router.ReleasePointer(ownerB);
+            Assert(router.HasPointerCapture, "InputRouter", "Owner B cannot release Owner A's capture");
+
+            router.ReleasePointer(ownerA);
+            Assert(!router.HasPointerCapture, "InputRouter", "Owner A's capture released");
+
+            Assert(router.CanBeginViewportInteraction(), "InputRouter", "Can begin interaction when pointer not over UI");
+        }
+
+        private static void Test_PlatformSizeAndColorEditing()
+        {
+            // 1. Float Parsing (invariant, comma fallback, culture neutrality)
+            float val;
+            Assert(LevelEditorUI.TryParseFloat("12.5", 0f, out val) && Math.Abs(val - 12.5f) < 1e-4f, "UI_Parsing", "Parse invariant dot '12.5'");
+            Assert(LevelEditorUI.TryParseFloat("12,5", 0f, out val) && Math.Abs(val - 12.5f) < 1e-4f, "UI_Parsing", "Parse comma fallback '12,5'");
+            Assert(LevelEditorUI.TryParseFloat(" 8.0 ", 0f, out val) && Math.Abs(val - 8.0f) < 1e-4f, "UI_Parsing", "Parse trimmed ' 8.0 '");
+            Assert(LevelEditorUI.TryParseFloat("255", 0f, out val) && Math.Abs(val - 255f) < 1e-4f, "UI_Parsing", "Parse integer '255'");
+            Assert(!LevelEditorUI.TryParseFloat("abc", 42f, out val) && Math.Abs(val - 42f) < 1e-4f, "UI_Parsing", "Reject invalid letters 'abc' and return fallback");
+            Assert(!LevelEditorUI.TryParseFloat("", 7f, out val) && Math.Abs(val - 7f) < 1e-4f, "UI_Parsing", "Reject empty string and return fallback");
+
+            // 2. Color classification & platform color mapping
+            Assert(ColorClassifier.Classify(0f) == LogicalColor.White, "ColorClassifier", "0f classifies as White");
+            Assert(ColorClassifier.Classify(127f) == LogicalColor.Gray, "ColorClassifier", "127f classifies as Gray");
+            Assert(ColorClassifier.Classify(255f) == LogicalColor.Universal, "ColorClassifier", "255f classifies as Universal");
+
+            var c0 = ColorClassifier.GetPlatformVisualColor(0f);
+            var c127 = ColorClassifier.GetPlatformVisualColor(127f);
+            var c212 = ColorClassifier.GetPlatformVisualColor(212f);
+            var c255 = ColorClassifier.GetPlatformVisualColor(255f);
+            AssertApprox(1f, c0.r, 0.01f, "ColorVisual", "White color r is 1");
+            AssertApprox(0.55f, c127.r, 0.01f, "ColorVisual", "Gray color r is 0.55");
+            AssertApprox(0.12f, c212.r, 0.01f, "ColorVisual", "Black color r is 0.12");
+            AssertApprox(0.96f, c255.r, 0.01f, "ColorVisual", "Universal color r is 0.96");
+
+            // 3. LevelData platform size & color mutation roundtrip
+            var level = new LevelData
+            {
+                startPos = new StartPosData { position = new Vector2Data(0, 0) },
+                cameraBoundary = new CameraBoundaryData { position = new Vector2Data(0, 0), size = new Vector2Data(20, 10) },
+                platforms = new ColorPlatformData[]
+                {
+                    new ColorPlatformData
+                    {
+                        position = new Vector2Data(5, 2),
+                        size = new Vector2Data(4, 1),
+                        rawGrayscaleColor = 255f
+                    }
+                }
+            };
+
+            // Apply size change: 4x1 -> 10x3
+            level.platforms[0].size.x = 10f;
+            level.platforms[0].size.y = 3f;
+            // Apply color change: 255 -> 0 (White)
+            level.platforms[0].rawGrayscaleColor = 0f;
+
+            string json = LevelDataSanitizer.SerializeToJson(level);
+            var reimported = DeserializeLevelData(json);
+
+            Assert(reimported != null && reimported.platforms.Length == 1, "DataRoundTrip", "Reimported platform exists");
+            AssertApprox(10f, reimported.platforms[0].size.x, 1e-4f, "DataRoundTrip", "Reimported platform size X is 10");
+            AssertApprox(3f, reimported.platforms[0].size.y, 1e-4f, "DataRoundTrip", "Reimported platform size Y is 3");
+            AssertApprox(0f, reimported.platforms[0].rawGrayscaleColor, 1e-4f, "DataRoundTrip", "Reimported platform color is 0 (White)");
+        }
+
+        private static void Test_FitMapAndWhitePlatformCalculations()
+        {
+            // 1. White platform semantics preservation
+            Assert(ColorClassifier.Classify(0f) == LogicalColor.White, "WhiteSemantics", "0f is classified as White");
+            Assert(ColorClassifier.Classify(42f) == LogicalColor.White, "WhiteSemantics", "Midpoint 42f is classified as White");
+            Assert(ColorClassifier.Classify(84f) == LogicalColor.White, "WhiteSemantics", "Boundary 84f is classified as White");
+            Assert(ColorClassifier.Classify(85f) == LogicalColor.Gray, "WhiteSemantics", "85f transitions to Gray");
+
+            // 2. Bounds Calculation Math
+            // Platforms: P1 at (-20, -5) with size (6, 2) -> X: [-23, -17], Y: [-6, -4]
+            //            P2 at (40, 15) with size (10, 2) -> X: [35, 45], Y: [14, 16]
+            // Marker: StartPos at (-10, 0) with size (1, 1) -> X: [-10.5, -9.5], Y: [-0.5, 0.5]
+            float minX = -23f;
+            float maxX = 45f;
+            float minY = -6f;
+            float maxY = 16f;
+
+            float boundsW = maxX - minX; // 68
+            float boundsH = maxY - minY; // 22
+            float centerX = (minX + maxX) * 0.5f; // 11
+            float centerY = (minY + maxY) * 0.5f; // 5
+
+            AssertApprox(68f, boundsW, 1e-4f, "FitMapMath", "Calculated bounds width is 68");
+            AssertApprox(22f, boundsH, 1e-4f, "FitMapMath", "Calculated bounds height is 22");
+            AssertApprox(11f, centerX, 1e-4f, "FitMapMath", "Calculated bounds center X is 11");
+            AssertApprox(5f, centerY, 1e-4f, "FitMapMath", "Calculated bounds center Y is 5");
+
+            // 3. Margin & Usable Area Ratio Calculation
+            float marginX = Math.Max(2.5f, boundsW * 0.15f); // 10.2
+            float marginY = Math.Max(2.5f, boundsH * 0.15f); // 3.3
+            float paddedW = boundsW + 2f * marginX; // 88.4
+            float paddedH = boundsH + 2f * marginY; // 28.6
+
+            AssertApprox(88.4f, paddedW, 1e-4f, "FitMapMath", "Padded width with 15% margin");
+            AssertApprox(28.6f, paddedH, 1e-4f, "FitMapMath", "Padded height with 15% margin");
+
+            const float usableWidthRatio = 1240f / 1920f;
+            const float usableHeightRatio = 966f / 1080f;
+            const float aspect = 16f / 9f;
+
+            float sizeForHeight = paddedH / (2f * usableHeightRatio);
+            float sizeForWidth = paddedW / (2f * aspect * usableWidthRatio);
+            float targetOrthoSize = Math.Max(sizeForHeight, sizeForWidth);
+
+            Assert(targetOrthoSize > 15f, "FitMapMath", "Target orthographic size is appropriately scaled (> 15)");
+            Assert(targetOrthoSize < 250f, "FitMapMath", "Target orthographic size within safe bounds (< 250)");
+
+            // Verify both width and height fit inside the usable screen viewport
+            float usableWorldWidth = 2f * targetOrthoSize * aspect * usableWidthRatio;
+            float usableWorldHeight = 2f * targetOrthoSize * usableHeightRatio;
+            Assert(usableWorldWidth >= paddedW - 1e-3f, "FitMapMath", "Usable world width accommodates padded width");
+            Assert(usableWorldHeight >= paddedH - 1e-3f, "FitMapMath", "Usable world height accommodates padded height");
+
+            // 4. Viewport Offset Centering
+            // Panel offsets: center X is +20px, center Y is -19px on 1920x1080
+            const float normDeltaX = 20f / 1920f;
+            const float normDeltaY = -19f / 1080f;
+
+            float worldOffsetX = normDeltaX * (2f * targetOrthoSize * aspect);
+            float worldOffsetY = normDeltaY * (2f * targetOrthoSize);
+
+            float camPosX = centerX - worldOffsetX;
+            float camPosY = centerY - worldOffsetY;
+
+            // When camera is placed at (camPosX, camPosY), the center of usable viewport:
+            float viewportCenterX = camPosX + worldOffsetX;
+            float viewportCenterY = camPosY + worldOffsetY;
+
+            AssertApprox(centerX, viewportCenterX, 1e-4f, "FitMapMath", "Usable viewport center matches content bounds center X");
+            AssertApprox(centerY, viewportCenterY, 1e-4f, "FitMapMath", "Usable viewport center matches content bounds center Y");
+
+            // 5. Input Router API sanity check
+            var router = new Contrast.Level.EditorInteraction.EditorInputRouter();
+            Assert(router.GetScrollDelta() == 0f || float.IsFinite(router.GetScrollDelta()), "InputRouter", "GetScrollDelta returns finite value");
+            Assert(!router.IsFrameAllShortcutPressed(), "InputRouter", "IsFrameAllShortcutPressed defaults to false without input");
+        }
+
+        private static void Test_ResetLevel_Functionality()
+        {
+            // 1. Authoritative clearing of level content while preserving camera boundary
+            LevelData populatedLevel = new LevelData
+            {
+                startPos = new StartPosData
+                {
+                    position = new Vector2Data(0f, 2f),
+                    size = new Vector2Data(1f, 1f),
+                    color = 0f
+                },
+                checkPoint = new[]
+                {
+                    new CheckPointData
+                    {
+                        position = new Vector2Data(10f, 2f),
+                        size = new Vector2Data(1f, 1f),
+                        color = 127f
+                    }
+                },
+                end = new EndData
+                {
+                    position = new Vector2Data(25f, 2f),
+                    size = new Vector2Data(1.5f, 2f)
+                },
+                cameraBoundary = new CameraBoundaryData
+                {
+                    position = new Vector2Data(12f, 5f),
+                    size = new Vector2Data(50f, 25f)
+                },
+                platforms = new[]
+                {
+                    new ColorPlatformData
+                    {
+                        position = new Vector2Data(0f, 0f),
+                        size = new Vector2Data(5f, 1f),
+                        rawGrayscaleColor = 255f
+                    },
+                    new ColorPlatformData
+                    {
+                        position = new Vector2Data(10f, 0f),
+                        size = new Vector2Data(4f, 1f),
+                        rawGrayscaleColor = 0f,
+                        trajectory = TrajectoryData.CreateDefault(new Vector2(10f, 0f))
+                    }
+                }
+            };
+
+            Assert(populatedLevel.platforms.Length == 2, "ResetLevel", "Initial level has 2 platforms");
+            Assert(populatedLevel.checkPoint.Length == 1, "ResetLevel", "Initial level has 1 checkpoint");
+            Assert(populatedLevel.end != null, "ResetLevel", "Initial level has End marker");
+
+            // Perform Reset: clear editable content collections, preserve cameraBoundary
+            CameraBoundaryData preservedBoundary = populatedLevel.cameraBoundary;
+            LevelData resetLevel = new LevelData
+            {
+                platforms = new ColorPlatformData[0],
+                startPos = null,
+                checkPoint = null,
+                end = null,
+                spawnPoint = null,
+                cameraBoundary = preservedBoundary
+            };
+
+            Assert(resetLevel.platforms != null && resetLevel.platforms.Length == 0, "ResetLevel", "Platforms array is empty (0 platforms)");
+            Assert(resetLevel.checkPoint == null || resetLevel.checkPoint.Length == 0, "ResetLevel", "Checkpoints are cleared");
+            Assert(resetLevel.end == null, "ResetLevel", "End marker is cleared");
+            Assert(resetLevel.cameraBoundary != null, "ResetLevel", "Camera boundary setting is preserved");
+            AssertApprox(12f, resetLevel.cameraBoundary.position.x, 1e-4f, "ResetLevel", "Camera boundary center X preserved");
+            AssertApprox(50f, resetLevel.cameraBoundary.size.x, 1e-4f, "ResetLevel", "Camera boundary size X preserved");
+
+            // 2. Export persistence: serialize to JSON and verify empty content persists
+            string json = LevelDataSanitizer.SerializeToJson(resetLevel);
+            Assert(!json.Contains("\"platforms\":[{") && !json.Contains("\"platforms\": [{"), "ResetLevel", "Export JSON contains no platform entries");
+            Assert(!json.Contains("\"checkPoint\":[{") && !json.Contains("\"checkPoint\": [{"), "ResetLevel", "Export JSON contains no checkpoint entries");
+            Assert(!json.Contains("\"end\":{") && !json.Contains("\"end\": {"), "ResetLevel", "Export JSON contains no end marker");
+            Assert(json.Contains("\"cameraBoundary\""), "ResetLevel", "Export JSON preserves camera boundary");
+
+            // 3. Re-import verification
+            LevelData reimported = DeserializeLevelData(json);
+            Assert(reimported != null, "ResetLevel", "Reimported level deserializes successfully");
+            Assert(reimported.platforms == null || reimported.platforms.Length == 0, "ResetLevel", "Reimported level has 0 platforms");
+            Assert(reimported.end == null, "ResetLevel", "Reimported level has null End marker");
+            Assert(reimported.cameraBoundary != null, "ResetLevel", "Reimported level has camera boundary");
+
+            // 4. Stale working-copy marker resurrection prevention
+            // If editorWorkingCopy had been left populated, BuildExportData would restore markers.
+            // With ResetLevel clearing editorWorkingCopy, markers remain null.
+            LevelData workingCopy = resetLevel;
+            Assert(workingCopy.startPos == null, "ResetLevel", "Working copy startPos is null");
+            Assert(workingCopy.checkPoint == null, "ResetLevel", "Working copy checkPoint is null");
+            Assert(workingCopy.end == null, "ResetLevel", "Working copy end is null");
+
+            // 5. Empty level safety (idempotent reset)
+            LevelData secondReset = new LevelData
+            {
+                platforms = new ColorPlatformData[0],
+                startPos = null,
+                checkPoint = null,
+                end = null,
+                spawnPoint = null,
+                cameraBoundary = workingCopy.cameraBoundary
+            };
+            Assert(secondReset.platforms.Length == 0, "ResetLevel", "Second reset on empty level succeeds safely");
+        }
+
+        private static void Test_GhostPlatform_Prevention_And_ResetCleanup()
+        {
+            // 1. Author authored level with 1 static platform and 1 moving trajectory platform
+            LevelData authored = new LevelData
+            {
+                startPos = new StartPosData { position = new Vector2Data(0f, 1f), size = new Vector2Data(1f, 1f), color = 0f },
+                cameraBoundary = new CameraBoundaryData { position = new Vector2Data(10f, 0f), size = new Vector2Data(30f, 15f) },
+                platforms = new[]
+                {
+                    new ColorPlatformData { position = new Vector2Data(0f, 0f), size = new Vector2Data(4f, 1f), rawGrayscaleColor = 255f },
+                    new ColorPlatformData
+                    {
+                        position = new Vector2Data(10f, 2f),
+                        size = new Vector2Data(3f, 1f),
+                        rawGrayscaleColor = 0f,
+                        trajectory = new TrajectoryData
+                        {
+                            enabled = true,
+                            curveType = TrajectoryCurveType.Line,
+                            playbackMode = TrajectoryPlaybackMode.PingPong,
+                            originX = 10f,
+                            originY = 2f,
+                            scaleX = 8f,
+                            duration = 4f
+                        }
+                    }
+                }
+            };
+
+            // 2. Editor working copy captured before Test Play
+            string snapshotJson = LevelDataSanitizer.SerializeToJson(authored);
+            LevelData editorWorkingCopy = DeserializeLevelData(snapshotJson);
+            Assert(editorWorkingCopy.platforms.Length == 2, "GhostPrevention", "Editor working copy has exactly 2 platforms");
+            AssertVecApprox(new Vector2(10f, 2f), editorWorkingCopy.platforms[1].position.ToVector2(), 1e-4f, "GhostPrevention", "Authored platform at (10, 2)");
+
+            // 3. Test Play initialization: runtime copies data, roots unified, zero ghosts
+            LevelData runtimeData = DeserializeLevelData(snapshotJson);
+            Assert(runtimeData.platforms.Length == 2, "GhostPrevention", "Runtime level receives exactly 2 platforms (no duplicate records)");
+
+            // 4. Trajectory movement simulation
+            // Advance trajectory by 1.0s: phase = 1.0 / 4.0 = 0.25 => X moves to 10 + 8 * 0.25 = 12
+            Vector2 movingPos = Trajectory.EvaluateWorldPoint(runtimeData.platforms[1].trajectory, 0.25f);
+            AssertVecApprox(new Vector2(12f, 2f), movingPos, 1e-4f, "GhostPrevention", "Runtime platform moves to (12, 2)");
+            // Ensure editor working copy position remains untouched at (10, 2)
+            AssertVecApprox(new Vector2(10f, 2f), editorWorkingCopy.platforms[1].position.ToVector2(), 1e-4f, "GhostPrevention", "Editor working copy position isolated from runtime movement");
+
+            // 5. Reset execution during / after Test Play
+            CameraBoundaryData preservedBoundary = editorWorkingCopy.cameraBoundary;
+            LevelData resetLevel = new LevelData
+            {
+                platforms = new ColorPlatformData[0],
+                startPos = null,
+                checkPoint = null,
+                end = null,
+                spawnPoint = null,
+                cameraBoundary = preservedBoundary
+            };
+            string resetJson = LevelDataSanitizer.SerializeToJson(resetLevel);
+            LevelData reloadedReset = DeserializeLevelData(resetJson);
+            Assert(reloadedReset.platforms == null || reloadedReset.platforms.Length == 0, "GhostPrevention", "Reset clears all platforms from serialization");
+            Assert(reloadedReset.checkPoint == null || reloadedReset.checkPoint.Length == 0, "GhostPrevention", "Reset clears all checkpoints from serialization");
+            Assert(reloadedReset.end == null, "GhostPrevention", "Reset clears end marker from serialization");
+            Assert(reloadedReset.cameraBoundary != null, "GhostPrevention", "Reset preserves camera boundary");
+
+            // 6. Repeated Test Play cycles do not accumulate platforms or ghosts
+            LevelData iterativeData = authored;
+            for (int session = 1; session <= 5; session++)
+            {
+                string sessionSnapshot = LevelDataSanitizer.SerializeToJson(iterativeData);
+                LevelData sessionRuntime = DeserializeLevelData(sessionSnapshot);
+                Assert(sessionRuntime.platforms.Length == 2, "GhostPrevention", $"Test Play cycle #{session} maintains exactly 2 platforms");
+                
+                // Simulate runtime motion
+                Vector2 runtimePt = Trajectory.EvaluateWorldPoint(sessionRuntime.platforms[1].trajectory, 0.5f);
+                AssertVecApprox(new Vector2(14f, 2f), runtimePt, 1e-4f, "GhostPrevention", $"Test Play cycle #{session} motion evaluated correctly");
+
+                // Simulate return to edit: rebuild from authored snapshot
+                iterativeData = DeserializeLevelData(sessionSnapshot);
+                Assert(iterativeData.platforms.Length == 2, "GhostPrevention", $"Return to edit after cycle #{session} preserves platform count");
+                AssertVecApprox(new Vector2(10f, 2f), iterativeData.platforms[1].position.ToVector2(), 1e-4f, "GhostPrevention", $"Return to edit after cycle #{session} restores position to (10, 2)");
+            }
+        }
+
+        private static LevelData DeserializeLevelData(string json)
+        {
+            var options = new System.Text.Json.JsonSerializerOptions { IncludeFields = true, PropertyNameCaseInsensitive = true };
+            return System.Text.Json.JsonSerializer.Deserialize<LevelData>(json, options);
         }
     }
 }

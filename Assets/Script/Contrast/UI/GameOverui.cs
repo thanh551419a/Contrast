@@ -1,17 +1,22 @@
-using Contrast.Core;
-using UnityEngine;
-using UnityEngine.EventSystems;
-using UnityEngine.UI;
 namespace Contrast.UI
 {
+    using Contrast.Core;
+    using UnityEngine;
+    using UnityEngine.EventSystems;
+    using UnityEngine.UI;
+    using Color = UnityEngine.Color;
     /// <summary>
-    /// Result overlay for GAME OVER / YOU WIN with a Restart button.
+    /// Result overlay for GAME OVER / YOU WIN styled with the dark optical
+    /// translucent aesthetics of demo_quangbai1.html.
     /// </summary>
     public class GameOverUI : MonoBehaviour
     {
         private GameObject panel;
         private Text titleText;
+        private Text subText;
         private Button retryButton;
+        private Button restartButton;
+        private Button returnButton;
 
         private void Awake()
         {
@@ -31,6 +36,13 @@ namespace Contrast.UI
             if (titleText != null)
                 titleText.text = title;
 
+            if (subText != null)
+            {
+                subText.text = title == "YOU WIN"
+                    ? "HOÀN THÀNH PHÉP ĐO QUANG HỌC · OPTICAL MEASUREMENT COMPLETE"
+                    : "MẤT ĐỒNG BỘ PHA · THỬ LẠI ĐỂ TÁI LẬP GIAO THOA";
+            }
+
             if (retryButton != null)
                 retryButton.gameObject.SetActive(allowRetry);
 
@@ -48,11 +60,14 @@ namespace Contrast.UI
             GameManager.Instance?.Retry();
         }
 
+        private void OnReturnClicked()
+        {
+            GameManager.Instance?.ReturnFromGameplay();
+        }
+
         private void BuildUI()
         {
-            GameObject canvasGo = new GameObject(
-                "Canvas",
-                typeof(RectTransform));
+            GameObject canvasGo = new GameObject("Canvas", typeof(RectTransform));
             canvasGo.transform.SetParent(transform, false);
 
             Canvas canvas = canvasGo.AddComponent<Canvas>();
@@ -62,86 +77,151 @@ namespace Contrast.UI
             CanvasScaler scaler = canvasGo.AddComponent<CanvasScaler>();
             scaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
             scaler.referenceResolution = new Vector2(1920, 1080);
+            scaler.matchWidthOrHeight = 0.5f;
 
             canvasGo.AddComponent<GraphicRaycaster>();
 
             panel = NewUI("Panel", canvasGo.transform);
             Image bg = panel.AddComponent<Image>();
-            bg.color = new UnityEngine.Color(0f, 0f, 0f, 0.7f);
+            // Dark vignette backdrop #03060c at 92%
+            bg.color = new Color(0.012f, 0.024f, 0.047f, 0.92f);
             Stretch(panel.GetComponent<RectTransform>());
 
+            // Title
             GameObject title = NewUI("Title", panel.transform);
             titleText = title.AddComponent<Text>();
             titleText.font = GetFont();
             titleText.text = "GAME OVER";
-            titleText.fontSize = 96;
+            titleText.fontSize = 72;
             titleText.fontStyle = FontStyle.Bold;
             titleText.alignment = TextAnchor.MiddleCenter;
-            titleText.color = UnityEngine.Color.white;
+            titleText.color = new Color(0.96f, 0.98f, 1f, 1f);
+
+            Outline titleOutline = title.AddComponent<Outline>();
+            titleOutline.effectColor = new Color(0.85f, 0.95f, 1f, 0.35f);
+            titleOutline.effectDistance = new Vector2(2f, -2f);
 
             RectTransform titleRt = title.GetComponent<RectTransform>();
-            titleRt.sizeDelta = new Vector2(1000f, 160f);
-            titleRt.anchoredPosition = new Vector2(0f, 100f);
+            titleRt.sizeDelta = new Vector2(1200f, 100f);
+            titleRt.anchoredPosition = new Vector2(0f, 120f);
 
-            GameObject btnGo = NewUI("RestartButton", panel.transform);
-            Image btnImg = btnGo.AddComponent<Image>();
-            btnImg.color = new UnityEngine.Color(0.9f, 0.9f, 0.9f, 1f);
+            // Subtitle
+            GameObject sub = NewUI("Subtitle", panel.transform);
+            subText = sub.AddComponent<Text>();
+            subText.font = GetFont();
+            subText.text = "MẤT ĐỒNG BỘ PHA · THỬ LẠI ĐỂ TÁI LẬP GIAO THOA";
+            subText.fontSize = 16;
+            subText.fontStyle = FontStyle.Normal;
+            subText.alignment = TextAnchor.MiddleCenter;
+            subText.color = new Color(0.72f, 0.82f, 0.90f, 0.70f);
 
-            Button button = btnGo.AddComponent<Button>();
-            button.targetGraphic = btnImg;
-            button.onClick.AddListener(OnRestartClicked);
+            RectTransform subRt = sub.GetComponent<RectTransform>();
+            subRt.sizeDelta = new Vector2(1000f, 36f);
+            subRt.anchoredPosition = new Vector2(0f, 55f);
 
-            RectTransform btnRt = btnGo.GetComponent<RectTransform>();
-            btnRt.sizeDelta = new Vector2(360f, 100f);
-            btnRt.anchoredPosition = new Vector2(-200f, -60f);
+            // Button container
+            GameObject btnRow = NewUI("ButtonRow", panel.transform);
+            RectTransform rowRt = btnRow.GetComponent<RectTransform>();
+            rowRt.sizeDelta = new Vector2(800f, 80f);
+            rowRt.anchoredPosition = new Vector2(0f, -60f);
 
-            retryButton = CreateRetryButton(panel.transform);
+            // Retry Button
+            retryButton = CreateStyledButton(
+                btnRow.transform,
+                "RETRY",
+                "ĐIỂM LƯU GẦN NHẤT",
+                new Vector2(-240f, 0f),
+                OnRetryClicked);
 
-            GameObject label = NewUI("Label", btnGo.transform);
-            Text labelText = label.AddComponent<Text>();
-            labelText.font = GetFont();
-            labelText.text = "RESTART";
-            labelText.fontSize = 48;
-            labelText.alignment = TextAnchor.MiddleCenter;
-            labelText.color = UnityEngine.Color.black;
-            Stretch(label.GetComponent<RectTransform>());
+            // Restart Button
+            restartButton = CreateStyledButton(
+                btnRow.transform,
+                "RESTART",
+                "CHƠI LẠI TỪ ĐẦU",
+                new Vector2(0f, 0f),
+                OnRestartClicked);
 
+            // Return Button
+            returnButton = CreateStyledButton(
+                btnRow.transform,
+                "RETURN",
+                "QUAY LẠI",
+                new Vector2(240f, 0f),
+                OnReturnClicked);
+
+            // Hint
             GameObject hint = NewUI("Hint", panel.transform);
             Text hintText = hint.AddComponent<Text>();
             hintText.font = GetFont();
-            hintText.text = "hoặc nhấn R / Enter";
-            hintText.fontSize = 28;
+            hintText.text = "hoặc nhấn R để chơi lại · ESC để quay lại";
+            hintText.fontSize = 13;
+            hintText.fontStyle = FontStyle.Normal;
             hintText.alignment = TextAnchor.MiddleCenter;
-            hintText.color = new UnityEngine.Color(1f, 1f, 1f, 0.7f);
+            hintText.color = new Color(0.75f, 0.85f, 0.92f, 0.50f);
 
             RectTransform hintRt = hint.GetComponent<RectTransform>();
-            hintRt.sizeDelta = new Vector2(600f, 50f);
-            hintRt.anchoredPosition = new Vector2(0f, -150f);
+            hintRt.sizeDelta = new Vector2(600f, 30f);
+            hintRt.anchoredPosition = new Vector2(0f, -145f);
         }
 
-
-        private Button CreateRetryButton(Transform parent)
+        private static Button CreateStyledButton(
+            Transform parent,
+            string label,
+            string sub,
+            Vector2 pos,
+            UnityEngine.Events.UnityAction callback)
         {
-            GameObject btnGo = NewUI("RetryButton", parent);
+            GameObject btnGo = NewUI(label + "Button", parent);
             Image btnImg = btnGo.AddComponent<Image>();
-            btnImg.color = new UnityEngine.Color(0.75f, 0.75f, 0.75f, 1f);
+            btnImg.color = new Color(0.08f, 0.12f, 0.18f, 0.92f);
+
+            Outline outline = btnGo.AddComponent<Outline>();
+            outline.effectColor = new Color(0.75f, 0.88f, 0.98f, 0.32f);
+            outline.effectDistance = new Vector2(1.2f, -1.2f);
 
             Button button = btnGo.AddComponent<Button>();
             button.targetGraphic = btnImg;
-            button.onClick.AddListener(OnRetryClicked);
+            button.onClick.AddListener(callback);
+
+            ColorBlock cb = button.colors;
+            cb.normalColor = new Color(0.08f, 0.12f, 0.18f, 0.92f);
+            cb.highlightedColor = new Color(0.14f, 0.20f, 0.28f, 0.98f);
+            cb.pressedColor = new Color(0.20f, 0.28f, 0.38f, 1f);
+            button.colors = cb;
 
             RectTransform btnRt = btnGo.GetComponent<RectTransform>();
-            btnRt.sizeDelta = new Vector2(360f, 100f);
-            btnRt.anchoredPosition = new Vector2(200f, -60f);
+            btnRt.sizeDelta = new Vector2(260f, 68f);
+            btnRt.anchoredPosition = pos;
 
-            GameObject label = NewUI("Label", btnGo.transform);
-            Text labelText = label.AddComponent<Text>();
-            labelText.font = GetFont();
-            labelText.text = "RETRY";
-            labelText.fontSize = 48;
-            labelText.alignment = TextAnchor.MiddleCenter;
-            labelText.color = UnityEngine.Color.black;
-            Stretch(label.GetComponent<RectTransform>());
+            GameObject textGo = NewUI("Label", btnGo.transform);
+            Text text = textGo.AddComponent<Text>();
+            text.font = GetFont();
+            text.text = label;
+            text.fontSize = 18;
+            text.fontStyle = FontStyle.Bold;
+            text.alignment = TextAnchor.MiddleCenter;
+            text.color = new Color(0.94f, 0.97f, 1f, 1f);
+
+            RectTransform textRt = textGo.GetComponent<RectTransform>();
+            textRt.anchorMin = new Vector2(0f, 0.35f);
+            textRt.anchorMax = new Vector2(1f, 1f);
+            textRt.offsetMin = Vector2.zero;
+            textRt.offsetMax = Vector2.zero;
+
+            GameObject subGo = NewUI("SubLabel", btnGo.transform);
+            Text subText = subGo.AddComponent<Text>();
+            subText.font = GetFont();
+            subText.text = sub;
+            subText.fontSize = 10;
+            subText.fontStyle = FontStyle.Normal;
+            subText.alignment = TextAnchor.MiddleCenter;
+            subText.color = new Color(0.72f, 0.82f, 0.90f, 0.65f);
+
+            RectTransform subRt = subGo.GetComponent<RectTransform>();
+            subRt.anchorMin = new Vector2(0f, 0f);
+            subRt.anchorMax = new Vector2(1f, 0.45f);
+            subRt.offsetMin = Vector2.zero;
+            subRt.offsetMax = Vector2.zero;
 
             return button;
         }

@@ -1,8 +1,10 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using Contrast.Camera;
 using Contrast.Core;
 using Contrast.Data;
+using Contrast.Level.EditorInteraction;
 using Contrast.Player;
 using Contrast.UI;
 using UnityEngine;
@@ -10,16 +12,13 @@ using UnityEngine.EventSystems;
 #if UNITY_EDITOR
 using UnityEditor;
 #endif
-#if ENABLE_INPUT_SYSTEM
-using UnityEngine.InputSystem;
-#endif
 
 namespace Contrast.Level
 {
     /// <summary>
-    /// Runtime level editor. It reuses LevelLoader's JSON schema and runtime
-    /// construction. Editor interaction itself is independent from gameplay
-    /// Physics2D and works directly against the same AABB/data used by gameplay.
+    /// Runtime level editor controller. Coordinates edit mode lifecycle, viewport input routing,
+    /// selection state, platform and marker manipulation, import/export, and delegates trajectory
+    /// editing to <see cref="TrajectoryEditController"/>.
     /// </summary>
     public sealed class LevelEditorController : MonoBehaviour
     {
@@ -30,23 +29,13 @@ namespace Contrast.Level
             Marker
         }
 
-        private enum HandleKind
+        private enum ResizeHandleKind
         {
             None,
             Left,
             Right,
             Top,
-            Bottom,
-            TrajOrigin,
-            TrajLineEnd,
-            TrajCircleCenter,
-            TrajCircleRadius,
-            TrajArcStart,
-            TrajArcEnd,
-            TrajBoundsMinX,
-            TrajBoundsMaxX,
-            TrajBoundsMinY,
-            TrajBoundsMaxY
+            Bottom
         }
 
         [Header("Dependencies")]
@@ -78,43 +67,60 @@ namespace Contrast.Level
         private SelectionKind selectionKind;
         private ColorPlatform selectedPlatform;
         private LevelMarker selectedMarker;
-        private HandleKind activeHandle;
+        private ResizeHandleKind activeResizeHandle;
+        private TrajectoryHandleKind activeTrajHandle;
 
         private Vector2 dragStartWorld;
         private Vector2 dragStartPosition;
         private Vector2 dragStartSize;
 
-        // Trajectory drag initial state
+        // Platform & lockstep trajectory drag initial state
         private Vector2 dragStartTrajOrigin;
         private Vector2 dragStartBoundsMin;
         private Vector2 dragStartBoundsMax;
-        private float dragStartTrajRotation;
-        private float dragStartTrajScale;
-        private float dragStartTrajRadius;
-        private float dragStartParamMin;
-        private float dragStartParamMax;
-        private float dragStartTrajT;
 
         private GameObject handleRoot;
-        private readonly Dictionary<HandleKind, GameObject> handles =
-            new Dictionary<HandleKind, GameObject>();
+        private GameObject selectionBox;
+        private SpriteRenderer selectionBoxRenderer;
+        private static Sprite cachedHandleSprite;
+        private static Sprite cachedSelectionBoxSprite;
+        private readonly Dictionary<ResizeHandleKind, GameObject> resizeHandles =
+            new Dictionary<ResizeHandleKind, GameObject>();
 
-        private LineRenderer trajectoryLineRenderer;
-        private LineRenderer boundsLineRenderer;
+        private readonly EditorInputRouter inputRouter = new EditorInputRouter();
+        private TrajectoryEditController trajectoryController;
 
         public bool IsEditing => editing;
         public ColorPlatform SelectedPlatform => selectedPlatform;
+        public TrajectoryEditController TrajectoryController => trajectoryController;
+        public EditorInputRouter InputRouter => inputRouter;
+
+        private LevelData editorWorkingCopy;
 
         private void Awake()
         {
             levelLoader ??= FindAnyObjectByType<LevelLoader>();
             ui ??= FindAnyObjectByType<LevelEditorUI>(FindObjectsInactive.Include);
+            ui?.SetController(this);
+            trajectoryController ??= new TrajectoryEditController(handleSize, handleHitRadius);
         }
 
         public void StartEditing()
         {
             editing = true;
             EnsureDependencies();
+            trajectoryController ??= new TrajectoryEditController(handleSize, handleHitRadius);
+
+            // Rebuild scene from working copy if returning from gameplay or editing
+            if (editorWorkingCopy != null)
+            {
+                levelLoader?.BuildRuntimeLevel(editorWorkingCopy);
+            }
+            else if (levelLoader != null && levelLoader.CurrentLevelData != null)
+            {
+                editorWorkingCopy = BuildExportData();
+            }
+
             EnsureHandleRoot();
             ClearSelection();
             ui?.Show(true);
@@ -126,7 +132,9 @@ namespace Contrast.Level
             paletteDragging = false;
             mapPointerDragging = false;
             mapPanning = false;
-            activeHandle = HandleKind.None;
+            activeResizeHandle = ResizeHandleKind.None;
+            activeTrajHandle = TrajectoryHandleKind.None;
+            inputRouter.ForceReleasePointer();
             ClearSelection();
             ui?.Show(false);
         }
@@ -148,27 +156,43 @@ namespace Contrast.Level
 
             paletteDragging = false;
 
-            if (IsPointerOverUi())
+            if (inputRouter.IsPointerOverUi())
                 return;
 
-            Vector2 world = ScreenToWorld(screenPosition);
+            Vector2 world = inputRouter.ScreenToWorld(screenPosition);
             CreateFromPalette(pendingPaletteType, pendingPaletteIsMarker, world);
         }
 
         public void RequestImport()
         {
+            if (!editing)
+                return;
+
 #if UNITY_EDITOR
             string path = EditorUtility.OpenFilePanel(
                 "Import Contrast Level",
-                Application.dataPath,
+                LevelRepository.GetLevelsDirectory(),
                 "json");
 
             if (!string.IsNullOrEmpty(path))
+            {
                 ImportJson(path);
-#else
-            ui?.SetStatus(
-                "Import trong build cần đường dẫn file trong StreamingAssets.");
+                return;
+            }
 #endif
+
+            // In standalone build (or if user cancelled in-editor file picker):
+            if (GameManager.Instance != null && GameManager.Instance.LevelSelectUI != null)
+            {
+                GameManager.Instance.LevelSelectUI.OpenForImport((selectedPath) =>
+                {
+                    ImportJson(selectedPath);
+                });
+            }
+            else
+            {
+                ui?.SetStatus("Không thể mở giao diện chọn file.");
+            }
         }
 
         public void ImportJson(string path)
@@ -184,8 +208,9 @@ namespace Contrast.Level
 
             try
             {
-                string json = File.ReadAllText(path);
-                LevelData data = JsonUtility.FromJson<LevelData>(json);
+                Debug.Log($"[FLOW][LEVEL_FILE] load path={path}");
+                string rawJson = LevelRepository.ReadAllText(path);
+                LevelData data = JsonUtility.FromJson<LevelData>(rawJson);
 
                 if (data == null)
                 {
@@ -193,50 +218,51 @@ namespace Contrast.Level
                     return;
                 }
 
-                if (!ValidateImportedData(data, out string error))
+                data = LevelDataSanitizer.Sanitize(data, rawJson, out List<string> report);
+
+                if (report != null && report.Count > 0)
                 {
-                    ui?.SetStatus(error);
-                    return;
+                    Debug.Log($"[LEVEL_FIX] Automatically fixed {report.Count} issues.");
+                    foreach (string item in report)
+                        Debug.Log($"[LEVEL_FIX] {item}");
                 }
 
                 EnsureDependencies();
-                levelLoader.BuildRuntimeLevel(data);
+                levelLoader?.BuildRuntimeLevel(data);
+                editorWorkingCopy = data;
                 ClearSelection();
-                ui?.SetStatus("Import level thành công.");
+
+                string statusMsg = (report != null && report.Count > 0)
+                    ? $"Import level thành công (đã sửa {report.Count} lỗi)."
+                    : "Import level thành công.";
+                ui?.SetStatus(statusMsg);
             }
             catch (Exception ex)
             {
                 ui?.SetStatus("Import lỗi: " + ex.Message);
+                Debug.LogError($"[LEVEL_EDITOR] Import error: {ex.Message}");
             }
         }
 
-        public void RequestExport()
+        public void RequestExport(string desiredFileName = null)
         {
             if (!editing)
                 return;
 
             LevelData data = BuildExportData();
-            string json = JsonUtility.ToJson(data, true);
+            editorWorkingCopy = data;
+            string json = LevelDataSanitizer.SerializeToJson(data);
 
-#if UNITY_EDITOR
-            string path = EditorUtility.SaveFilePanel(
-                "Export Contrast Level",
-                Application.dataPath,
-                "ContrastLevel",
-                "json");
+            if (string.IsNullOrWhiteSpace(desiredFileName))
+                desiredFileName = ui != null ? ui.GetExportFileName() : null;
 
-            if (!string.IsNullOrEmpty(path))
-            {
-                File.WriteAllText(path, json);
-                ui?.SetStatus("Export level thành công.");
-            }
-#else
-            string path = Path.Combine(
-                Application.persistentDataPath,
-                "ContrastLevel.json");
-            File.WriteAllText(path, json);
-            ui?.SetStatus("Export: " + path);
-#endif
+            string savePath = LevelRepository.GetUniqueSavePath(desiredFileName);
+            LevelRepository.WriteAllText(savePath, json);
+
+            string fileNameOnly = Path.GetFileName(savePath);
+            ui?.SetExportFileName(fileNameOnly);
+            ui?.SetStatus("Export: " + savePath);
+            Debug.Log("[LEVEL_EXPORT] Saved: " + savePath);
         }
 
         public void RequestPlayLevel()
@@ -245,10 +271,13 @@ namespace Contrast.Level
                 return;
 
             LevelData data = BuildExportData();
+            editorWorkingCopy = data;
+            string snapshotJson = LevelDataSanitizer.SerializeToJson(data);
             ClearSelection();
+
             if (GameManager.Instance != null)
             {
-                GameManager.Instance.StartGameWithLevelData(data);
+                GameManager.Instance.StartGameWithLevelData(data, snapshotJson, GameplayEntryContext.EditorTestPlay);
             }
             else
             {
@@ -267,20 +296,10 @@ namespace Contrast.Level
             selectionKind = SelectionKind.Platform;
             selectedPlatform = platform;
             selectedMarker = null;
-            activeHandle = HandleKind.None;
+            activeResizeHandle = ResizeHandleKind.None;
+            activeTrajHandle = TrajectoryHandleKind.None;
 
-            // Ensure platform center is on the trajectory line if trajectory is active
-            Trajectory traj = platform.GetTrajectory();
-            TrajectoryData cfg = traj != null ? traj.Config : null;
-            if (cfg != null && cfg.enabled && Trajectory.Validate(cfg) == null)
-            {
-                Vector2 onTraj = Trajectory.ProjectPointOntoTrajectory(cfg, platform.Position, out _);
-                if ((onTraj - platform.Position).sqrMagnitude > 1e-6f)
-                {
-                    platform.SetEditorData(onTraj, platform.Size, platform.RawGrayscaleColor);
-                }
-            }
-
+            trajectoryController.SetTarget(platform, ui);
             ui?.SetSelectedPlatform(platform);
             RefreshHandles();
         }
@@ -303,19 +322,16 @@ namespace Contrast.Level
             Trajectory traj = selectedPlatform.GetTrajectory();
             if (traj != null && traj.Config != null && traj.Config.enabled && delta != Vector2.zero)
             {
-                traj.Config.originX += delta.x;
-                traj.Config.originY += delta.y;
-                if (traj.Config.domainMode == TrajectoryDomainMode.SpatialBounds)
-                {
-                    traj.Config.boundsXMin += delta.x;
-                    traj.Config.boundsXMax += delta.x;
-                    traj.Config.boundsYMin += delta.y;
-                    traj.Config.boundsYMax += delta.y;
-                }
-                ui?.RefreshSelectedPlatform(selectedPlatform);
+                trajectoryController.ApplyLockstepOffset(
+                    new Vector2(traj.Config.originX, traj.Config.originY),
+                    new Vector2(traj.Config.boundsXMin, traj.Config.boundsYMin),
+                    new Vector2(traj.Config.boundsXMax, traj.Config.boundsYMax),
+                    delta,
+                    ui);
             }
 
             RefreshHandles();
+            ui?.RefreshSelectedPlatform(selectedPlatform);
         }
 
         public void ApplySelectedTrajectoryFromUI(TrajectoryData data)
@@ -323,23 +339,7 @@ namespace Contrast.Level
             if (selectedPlatform == null)
                 return;
 
-            Trajectory traj = selectedPlatform.GetTrajectory();
-            if (traj == null)
-            {
-                selectedPlatform.InitializeTrajectory(data);
-            }
-            else
-            {
-                traj.SetConfig(data != null ? data.Clone() : null);
-            }
-
-            if (data != null && data.enabled && Trajectory.Validate(data) == null)
-            {
-                Vector2 onTraj = Trajectory.ProjectPointOntoTrajectory(data, selectedPlatform.Position, out _);
-                selectedPlatform.SetEditorData(onTraj, selectedPlatform.Size, selectedPlatform.RawGrayscaleColor);
-                ui?.RefreshSelectedPlatform(selectedPlatform);
-            }
-
+            trajectoryController.ApplyFromUI(data, ui);
             RefreshHandles();
             LogEditor($"[EDITOR][TRAJECTORY] platform={selectedPlatform.name} enabled={data?.enabled}");
         }
@@ -355,7 +355,10 @@ namespace Contrast.Level
             selectionKind = SelectionKind.Marker;
             selectedMarker = marker;
             selectedPlatform = null;
-            activeHandle = HandleKind.None;
+            activeResizeHandle = ResizeHandleKind.None;
+            activeTrajHandle = TrajectoryHandleKind.None;
+
+            trajectoryController.ClearTarget(ui);
             ui?.ClearSelectedPlatform();
             RefreshHandles();
         }
@@ -365,80 +368,104 @@ namespace Contrast.Level
             if (!editing)
                 return;
 
-            Vector2 screenPosition = ScreenPointerPosition();
-            bool pointerOverUi = IsPointerOverUi();
+            Vector2 screenPosition = inputRouter.GetScreenPointerPosition();
 
-            // Middle mouse = pan the editor camera.
-            if (MiddlePointerDown())
+            // ── Escape Key: Cancel ongoing interaction / preview ─────
+            if (inputRouter.IsCancelShortcutPressed())
             {
-                if (!pointerOverUi)
+                if (mapPointerDragging)
+                {
+                    CancelMapPointerDrag("Escape key pressed during drag");
+                }
+                else if (mapPanning)
+                {
+                    CancelMapPan("Escape key pressed during pan");
+                }
+                ui?.CancelResetConfirm();
+            }
+
+            // ── Middle mouse: camera pan ─────────────────────────────
+            if (inputRouter.IsMiddlePointerDown())
+            {
+                if (inputRouter.CanBeginViewportInteraction())
+                {
                     BeginMapPan(screenPosition);
+                }
                 else
+                {
                     LogEditor($"[EDITOR][PAN_BLOCKED_UI] screen={screenPosition}");
+                }
             }
 
-            if (MiddlePointerHeld())
+            if (inputRouter.IsMiddlePointerHeld())
             {
-                if (pointerOverUi)
-                    CancelMapPan("Pointer entered UI while panning");
-                else
+                if (mapPanning && inputRouter.IsOwner("pan"))
+                {
                     ContinueMapPan(screenPosition);
+                }
             }
 
-            if (MiddlePointerUp())
+            if (inputRouter.IsMiddlePointerUp())
             {
-                EndMapPan();
+                if (mapPanning && inputRouter.IsOwner("pan"))
+                {
+                    EndMapPan();
+                }
             }
 
             if (paletteDragging)
                 return;
 
-            if (PointerDown())
+            // ── Left pointer: viewport interaction ───────────────────
+            if (inputRouter.IsLeftPointerDown())
             {
-                if (!pointerOverUi)
+                if (inputRouter.CanBeginViewportInteraction())
+                {
                     BeginMapPointer(screenPosition);
+                }
                 else
+                {
                     LogEditor($"[EDITOR][MAP_POINTER_BLOCKED_UI] screen={screenPosition}");
-            }
-
-            if (PointerHeld() && mapPointerDragging)
-            {
-                if (pointerOverUi)
-                {
-                    CancelMapPointerDrag("Pointer entered UI while dragging");
-                }
-                else
-                {
-                    ContinueMapPointer(screenPosition);
                 }
             }
 
-            if (PointerUp())
+            if (inputRouter.IsLeftPointerHeld() && mapPointerDragging)
             {
-                EndMapPointerDrag();
+                // Once captured, the drag continues even if the pointer sweeps across UI!
+                ContinueMapPointer(screenPosition);
             }
 
-            // Delete key shortcut — guarded so typing in an InputField
-            // does not accidentally delete the selected platform.
-            if (DeleteKeyPressed() && !IsInputFieldFocused())
+            if (inputRouter.IsLeftPointerUp())
+            {
+                if (mapPointerDragging)
+                {
+                    EndMapPointerDrag();
+                }
+            }
+
+            // ── Delete key shortcut (guarded against focused InputField)
+            if (inputRouter.IsDeleteShortcutPressed())
             {
                 DeleteSelectedPlatform();
             }
 
-            // Ensure selected platform center stays on the trajectory line every frame in edit
-            if (selectedPlatform != null && !mapPointerDragging)
+            // ── Frame All / Fit Map shortcut ('F') ───────────────────
+            if (inputRouter.IsFrameAllShortcutPressed())
             {
-                Trajectory traj = selectedPlatform.GetTrajectory();
-                TrajectoryData cfg = traj != null ? traj.Config : null;
-                if (cfg != null && cfg.enabled && Trajectory.Validate(cfg) == null)
-                {
-                    Vector2 onTraj = Trajectory.ProjectPointOntoTrajectory(cfg, selectedPlatform.Position, out _);
-                    if ((onTraj - selectedPlatform.Position).sqrMagnitude > 1e-6f)
-                    {
-                        selectedPlatform.SetEditorData(onTraj, selectedPlatform.Size, selectedPlatform.RawGrayscaleColor);
-                        ui?.RefreshSelectedPlatform(selectedPlatform);
-                    }
-                }
+                FitMap();
+            }
+
+            // ── Mouse scroll: camera zoom ────────────────────────────
+            float scroll = inputRouter.GetScrollDelta();
+            if (Mathf.Abs(scroll) > 0.01f && !inputRouter.IsPointerOverUi())
+            {
+                ZoomCamera(scroll, screenPosition);
+            }
+
+            // ── Idle platform constraint on trajectory ───────────────
+            if (!mapPointerDragging)
+            {
+                trajectoryController.EnsurePlatformOnTrajectory(ui);
             }
 
             RefreshHandles();
@@ -446,69 +473,79 @@ namespace Contrast.Level
 
         private void BeginMapPointer(Vector2 screenPosition)
         {
-            Vector2 world = ScreenToWorld(screenPosition);
+            Vector2 world = inputRouter.ScreenToWorld(screenPosition);
 
-            HandleKind handle = HitHandle(world);
-            if (handle != HandleKind.None && selectedPlatform != null)
+            // Defocus any active UI InputField so that uncommitted text is committed
+            if (EventSystem.current != null && EventSystem.current.currentSelectedGameObject != null)
+            {
+                EventSystem.current.SetSelectedGameObject(null);
+            }
+
+            // 1. Hit-test trajectory handles first if a platform with trajectory is selected
+            TrajectoryHandleKind trajHandle = trajectoryController.HitHandle(world);
+            if (trajHandle != TrajectoryHandleKind.None && selectedPlatform != null)
+            {
+                activeTrajHandle = trajHandle;
+                activeResizeHandle = ResizeHandleKind.None;
+                dragStartWorld = world;
+
+                if (trajectoryController.BeginDrag(trajHandle, world))
+                {
+                    mapPointerDragging = true;
+                    inputRouter.CapturePointer(this);
+                    LogEditor($"[EDITOR][DRAG_START_HANDLE] platform={selectedPlatform.name} handle={activeTrajHandle} world={world}");
+                    return;
+                }
+            }
+
+            // 2. Hit-test platform resize handles
+            ResizeHandleKind resizeHandle = HitResizeHandle(world);
+            if (resizeHandle != ResizeHandleKind.None && selectedPlatform != null)
             {
                 mapPointerDragging = true;
-                activeHandle = handle;
+                activeResizeHandle = resizeHandle;
+                activeTrajHandle = TrajectoryHandleKind.None;
                 dragStartWorld = world;
                 dragStartPosition = selectedPlatform.Position;
                 dragStartSize = selectedPlatform.Size;
+                CaptureTrajectoryDragStart();
 
-                Trajectory traj = selectedPlatform.GetTrajectory();
-                TrajectoryData cfg = traj != null ? traj.Config : null;
-                if (cfg != null)
-                {
-                    dragStartTrajOrigin = new Vector2(cfg.originX, cfg.originY);
-                    dragStartBoundsMin = new Vector2(cfg.boundsXMin, cfg.boundsYMin);
-                    dragStartBoundsMax = new Vector2(cfg.boundsXMax, cfg.boundsYMax);
-                    dragStartTrajRotation = cfg.rotation;
-                    dragStartTrajScale = cfg.scaleX;
-                    dragStartTrajRadius = cfg.radius;
-                    dragStartParamMin = cfg.paramMin;
-                    dragStartParamMax = cfg.paramMax;
-                    Trajectory.ProjectPointOntoTrajectory(cfg, selectedPlatform.Position, out dragStartTrajT);
-                }
-
-                LogEditor($"[EDITOR][DRAG_START_HANDLE] platform={selectedPlatform.name} handle={activeHandle} world={world}");
+                inputRouter.CapturePointer(this);
+                LogEditor($"[EDITOR][DRAG_START_RESIZE] platform={selectedPlatform.name} handle={activeResizeHandle} world={world}");
                 return;
             }
 
+            // 3. Hit-test platform body
             ColorPlatform platform = HitPlatform(world);
             if (platform != null)
             {
                 SelectPlatform(platform);
                 mapPointerDragging = true;
-                activeHandle = HandleKind.None;
+                activeResizeHandle = ResizeHandleKind.None;
+                activeTrajHandle = TrajectoryHandleKind.None;
                 dragStartWorld = world;
                 dragStartPosition = platform.Position;
                 dragStartSize = platform.Size;
+                CaptureTrajectoryDragStart();
 
-                Trajectory traj = platform.GetTrajectory();
-                TrajectoryData cfg = traj != null ? traj.Config : null;
-                if (cfg != null)
-                {
-                    dragStartTrajOrigin = new Vector2(cfg.originX, cfg.originY);
-                    dragStartBoundsMin = new Vector2(cfg.boundsXMin, cfg.boundsYMin);
-                    dragStartBoundsMax = new Vector2(cfg.boundsXMax, cfg.boundsYMax);
-                    Trajectory.ProjectPointOntoTrajectory(cfg, platform.Position, out dragStartTrajT);
-                }
-
+                inputRouter.CapturePointer(this);
                 LogEditor($"[EDITOR][DRAG_START_PLATFORM] platform={platform.name} world={world}");
                 return;
             }
 
+            // 4. Hit-test level markers
             LevelMarker marker = HitMarker(world);
             if (marker != null)
             {
                 SelectMarker(marker);
                 mapPointerDragging = true;
-                activeHandle = HandleKind.None;
+                activeResizeHandle = ResizeHandleKind.None;
+                activeTrajHandle = TrajectoryHandleKind.None;
                 dragStartWorld = world;
                 dragStartPosition = marker.Position;
                 dragStartSize = marker.Size;
+
+                inputRouter.CapturePointer(this);
                 LogEditor($"[EDITOR][DRAG_START_MARKER] marker={marker.name} world={world}");
                 return;
             }
@@ -517,156 +554,93 @@ namespace Contrast.Level
             ClearSelection();
         }
 
+        private void CaptureTrajectoryDragStart()
+        {
+            if (selectedPlatform == null)
+                return;
+
+            Trajectory traj = selectedPlatform.GetTrajectory();
+            TrajectoryData cfg = traj != null ? traj.Config : null;
+            if (cfg != null)
+            {
+                dragStartTrajOrigin = new Vector2(cfg.originX, cfg.originY);
+                dragStartBoundsMin = new Vector2(cfg.boundsXMin, cfg.boundsYMin);
+                dragStartBoundsMax = new Vector2(cfg.boundsXMax, cfg.boundsYMax);
+            }
+        }
+
         private void ContinueMapPointer(Vector2 screenPosition)
         {
             if (selectionKind == SelectionKind.None)
                 return;
 
-            Vector2 world = ScreenToWorld(screenPosition);
+            Vector2 world = inputRouter.ScreenToWorld(screenPosition);
             Vector2 delta = world - dragStartWorld;
+
+            // 1. Trajectory handle dragging: delegated to TrajectoryEditController
+            if (activeTrajHandle != TrajectoryHandleKind.None)
+            {
+                trajectoryController.UpdateDrag(world, ui);
+                RefreshHandles();
+                return;
+            }
 
             if (selectedPlatform != null && selectionKind == SelectionKind.Platform)
             {
-                // Platform body dragging
-                if (activeHandle == HandleKind.None)
+                // 2. Platform body dragging
+                if (activeResizeHandle == ResizeHandleKind.None)
                 {
                     selectedPlatform.SetEditorData(
                         dragStartPosition + delta,
                         dragStartSize,
                         selectedPlatform.RawGrayscaleColor);
 
-                    Trajectory traj = selectedPlatform.GetTrajectory();
-                    TrajectoryData cfg = traj != null ? traj.Config : null;
-                    if (cfg != null && cfg.enabled)
-                    {
-                        cfg.originX = dragStartTrajOrigin.x + delta.x;
-                        cfg.originY = dragStartTrajOrigin.y + delta.y;
-                        if (cfg.domainMode == TrajectoryDomainMode.SpatialBounds)
-                        {
-                            cfg.boundsXMin = dragStartBoundsMin.x + delta.x;
-                            cfg.boundsXMax = dragStartBoundsMax.x + delta.x;
-                            cfg.boundsYMin = dragStartBoundsMin.y + delta.y;
-                            cfg.boundsYMax = dragStartBoundsMax.y + delta.y;
-                        }
-                    }
+                    trajectoryController.ApplyLockstepOffset(
+                        dragStartTrajOrigin,
+                        dragStartBoundsMin,
+                        dragStartBoundsMax,
+                        delta,
+                        ui);
 
                     ui?.RefreshSelectedPlatform(selectedPlatform);
                     RefreshHandles();
                     return;
                 }
 
-                // Trajectory handles
-                Trajectory pTraj = selectedPlatform.GetTrajectory();
-                TrajectoryData tCfg = pTraj != null ? pTraj.Config : null;
-                if (tCfg != null && IsTrajHandle(activeHandle))
-                {
-                    switch (activeHandle)
-                    {
-                        case HandleKind.TrajOrigin:
-                        case HandleKind.TrajCircleCenter:
-                            tCfg.originX = dragStartTrajOrigin.x + delta.x;
-                            tCfg.originY = dragStartTrajOrigin.y + delta.y;
-                            break;
-
-                        case HandleKind.TrajLineEnd:
-                            Vector2 lineVec = world - new Vector2(tCfg.originX, tCfg.originY);
-                            float pMaxAbs = Mathf.Max(0.001f, Mathf.Abs(tCfg.paramMax));
-                            tCfg.scaleX = Mathf.Max(0.1f, lineVec.magnitude / pMaxAbs);
-                            float angleDeg = Mathf.Atan2(lineVec.y, lineVec.x) * Mathf.Rad2Deg;
-                            if (tCfg.paramMax < 0f) angleDeg += 180f;
-                            tCfg.rotation = angleDeg;
-                            break;
-
-                        case HandleKind.TrajCircleRadius:
-                            Vector2 c = new Vector2(tCfg.originX, tCfg.originY);
-                            tCfg.radius = Mathf.Max(0.1f, Vector2.Distance(world, c));
-                            break;
-
-                        case HandleKind.TrajArcStart:
-                            Vector2 cS = new Vector2(tCfg.originX, tCfg.originY);
-                            float aS = Mathf.Atan2(world.y - cS.y, world.x - cS.x) * Mathf.Rad2Deg;
-                            if (aS < 0) aS += 360f;
-                            tCfg.paramMin = aS;
-                            break;
-
-                        case HandleKind.TrajArcEnd:
-                            Vector2 cE = new Vector2(tCfg.originX, tCfg.originY);
-                            float aE = Mathf.Atan2(world.y - cE.y, world.x - cE.x) * Mathf.Rad2Deg;
-                            if (aE < 0) aE += 360f;
-                            tCfg.paramMax = aE;
-                            break;
-
-                        case HandleKind.TrajBoundsMinX:
-                            tCfg.boundsXMin = Mathf.Min(world.x, tCfg.boundsXMax - 0.5f);
-                            break;
-
-                        case HandleKind.TrajBoundsMaxX:
-                            tCfg.boundsXMax = Mathf.Max(world.x, tCfg.boundsXMin + 0.5f);
-                            break;
-
-                        case HandleKind.TrajBoundsMinY:
-                            tCfg.boundsYMin = Mathf.Min(world.y, tCfg.boundsYMax - 0.5f);
-                            break;
-
-                        case HandleKind.TrajBoundsMaxY:
-                            tCfg.boundsYMax = Mathf.Max(world.y, tCfg.boundsYMin + 0.5f);
-                            break;
-                    }
-
-                    // Keep platform center on the trajectory in real-time per frame
-                    Vector2 newPos = Trajectory.EvaluateWorldPoint(tCfg, dragStartTrajT);
-                    selectedPlatform.SetEditorData(
-                        newPos,
-                        selectedPlatform.Size,
-                        selectedPlatform.RawGrayscaleColor);
-
-                    ui?.RefreshSelectedPlatform(selectedPlatform);
-                    RefreshHandles();
-                    return;
-                }
-
-                // Platform resize handles
+                // 3. Platform resize handles
                 Vector2 size = dragStartSize;
                 Vector2 position = dragStartPosition;
 
-                switch (activeHandle)
+                switch (activeResizeHandle)
                 {
-                    case HandleKind.Left:
+                    case ResizeHandleKind.Left:
                         size.x = Mathf.Max(0.1f, dragStartSize.x - delta.x);
                         position.x = dragStartPosition.x + delta.x * 0.5f;
                         break;
 
-                    case HandleKind.Right:
+                    case ResizeHandleKind.Right:
                         size.x = Mathf.Max(0.1f, dragStartSize.x + delta.x);
                         position.x = dragStartPosition.x + delta.x * 0.5f;
                         break;
 
-                    case HandleKind.Top:
+                    case ResizeHandleKind.Top:
                         size.y = Mathf.Max(0.1f, dragStartSize.y + delta.y);
                         position.y = dragStartPosition.y + delta.y * 0.5f;
                         break;
 
-                    case HandleKind.Bottom:
+                    case ResizeHandleKind.Bottom:
                         size.y = Mathf.Max(0.1f, dragStartSize.y - delta.y);
                         position.y = dragStartPosition.y + delta.y * 0.5f;
                         break;
                 }
 
-                pTraj = selectedPlatform.GetTrajectory();
-                tCfg = pTraj != null ? pTraj.Config : null;
-                if (tCfg != null && tCfg.enabled)
-                {
-                    Vector2 posDelta = position - dragStartPosition;
-                    tCfg.originX = dragStartTrajOrigin.x + posDelta.x;
-                    tCfg.originY = dragStartTrajOrigin.y + posDelta.y;
-                    if (tCfg.domainMode == TrajectoryDomainMode.SpatialBounds)
-                    {
-                        tCfg.boundsXMin = dragStartBoundsMin.x + posDelta.x;
-                        tCfg.boundsXMax = dragStartBoundsMax.x + posDelta.x;
-                        tCfg.boundsYMin = dragStartBoundsMin.y + posDelta.y;
-                        tCfg.boundsYMax = dragStartBoundsMax.y + posDelta.y;
-                    }
-                }
+                Vector2 posDelta = position - dragStartPosition;
+                trajectoryController.ApplyLockstepOffset(
+                    dragStartTrajOrigin,
+                    dragStartBoundsMin,
+                    dragStartBoundsMax,
+                    posDelta,
+                    ui);
 
                 selectedPlatform.SetEditorData(
                     position,
@@ -680,10 +654,65 @@ namespace Contrast.Level
 
             if (selectedMarker != null &&
                 selectionKind == SelectionKind.Marker &&
-                activeHandle == HandleKind.None)
+                activeResizeHandle == ResizeHandleKind.None)
             {
                 selectedMarker.SetEditorPosition(dragStartPosition + delta);
             }
+        }
+
+        private void EndMapPointerDrag()
+        {
+            if (!mapPointerDragging)
+                return;
+
+            if (activeTrajHandle != TrajectoryHandleKind.None)
+            {
+                trajectoryController.CommitDrag(ui);
+            }
+
+            mapPointerDragging = false;
+            activeResizeHandle = ResizeHandleKind.None;
+            activeTrajHandle = TrajectoryHandleKind.None;
+            inputRouter.ReleasePointer(this);
+            RefreshHandles();
+            LogEditor("[EDITOR][DRAG_END]");
+        }
+
+        private void CancelMapPointerDrag(string reason)
+        {
+            if (!mapPointerDragging)
+                return;
+
+            if (activeTrajHandle != TrajectoryHandleKind.None)
+            {
+                trajectoryController.CancelDrag(ui);
+            }
+            else if (selectedPlatform != null)
+            {
+                // Revert platform transform
+                selectedPlatform.SetEditorData(
+                    dragStartPosition,
+                    dragStartSize,
+                    selectedPlatform.RawGrayscaleColor);
+
+                trajectoryController.ApplyLockstepOffset(
+                    dragStartTrajOrigin,
+                    dragStartBoundsMin,
+                    dragStartBoundsMax,
+                    Vector2.zero,
+                    ui);
+            }
+            else if (selectedMarker != null)
+            {
+                selectedMarker.SetEditorPosition(dragStartPosition);
+            }
+
+            mapPointerDragging = false;
+            activeResizeHandle = ResizeHandleKind.None;
+            activeTrajHandle = TrajectoryHandleKind.None;
+            inputRouter.ReleasePointer(this);
+            RefreshHandles();
+            LogEditor($"[EDITOR][DRAG_CANCEL] reason={reason}");
         }
 
         private void BeginMapPan(Vector2 screenPosition)
@@ -698,15 +727,13 @@ namespace Contrast.Level
             mapPanning = true;
             panStartScreen = screenPosition;
             panStartCameraPosition = cam.transform.position;
+            inputRouter.CapturePointer("pan");
             LogEditor($"[EDITOR][PAN_START] screen={screenPosition} camera={panStartCameraPosition}");
         }
 
         private void ContinueMapPan(Vector2 screenPosition)
         {
             if (!mapPanning)
-                return;
-
-            if (IsPointerOverUi())
                 return;
 
             UnityEngine.Camera cam = UnityEngine.Camera.main;
@@ -734,6 +761,7 @@ namespace Contrast.Level
                 return;
 
             mapPanning = false;
+            inputRouter.ReleasePointer("pan");
             UnityEngine.Camera cam = UnityEngine.Camera.main;
             LogEditor($"[EDITOR][PAN_END] camera={(cam != null ? cam.transform.position.ToString() : "null")}");
         }
@@ -744,24 +772,194 @@ namespace Contrast.Level
                 return;
 
             mapPanning = false;
+            inputRouter.ReleasePointer("pan");
             LogEditor($"[EDITOR][PAN_CANCEL] reason={reason}");
         }
 
-        private void EndMapPointerDrag()
+        private void ZoomCamera(float scrollDelta, Vector2 screenPosition)
         {
-            if (!mapPointerDragging)
+            UnityEngine.Camera cam = UnityEngine.Camera.main;
+            if (cam == null)
                 return;
 
-            mapPointerDragging = false;
-            activeHandle = HandleKind.None;
-            LogEditor("[EDITOR][DRAG_END]");
+            float currentSize = cam.orthographicSize;
+            float zoomFactor = scrollDelta > 0f ? 0.9f : 1.1f;
+            float newSize = Mathf.Clamp(currentSize * zoomFactor, 2.5f, 250f);
+
+            if (Mathf.Approximately(currentSize, newSize))
+                return;
+
+            Vector3 mouseWorldBefore = cam.ScreenToWorldPoint(new Vector3(screenPosition.x, screenPosition.y, Mathf.Abs(cam.transform.position.z)));
+            cam.orthographicSize = newSize;
+            Vector3 mouseWorldAfter = cam.ScreenToWorldPoint(new Vector3(screenPosition.x, screenPosition.y, Mathf.Abs(cam.transform.position.z)));
+
+            Vector3 diff = mouseWorldBefore - mouseWorldAfter;
+            cam.transform.position += new Vector3(diff.x, diff.y, 0f);
         }
 
-        private void CancelMapPointerDrag(string reason)
+        /// <summary>
+        /// Computes the comprehensive world-space bounding box of all level content,
+        /// including platforms, active trajectory extents, level markers (StartPos, CheckPoints, End),
+        /// or existing camera boundaries. Handles empty, single-object, and degenerate levels safely.
+        /// </summary>
+        public Bounds CalculateLevelBounds()
         {
-            mapPointerDragging = false;
-            activeHandle = HandleKind.None;
-            LogEditor($"[EDITOR][DRAG_CANCEL] reason={reason}");
+            bool hasPoint = false;
+            float minX = float.MaxValue;
+            float maxX = float.MinValue;
+            float minY = float.MaxValue;
+            float maxY = float.MinValue;
+
+            void IncludePoint(Vector2 pt)
+            {
+                if (float.IsNaN(pt.x) || float.IsNaN(pt.y) || float.IsInfinity(pt.x) || float.IsInfinity(pt.y))
+                    return;
+                hasPoint = true;
+                if (pt.x < minX) minX = pt.x;
+                if (pt.x > maxX) maxX = pt.x;
+                if (pt.y < minY) minY = pt.y;
+                if (pt.y > maxY) maxY = pt.y;
+            }
+
+            void IncludeAabb(Vector2 center, Vector2 size)
+            {
+                if (float.IsNaN(center.x) || float.IsNaN(center.y) || float.IsNaN(size.x) || float.IsNaN(size.y))
+                    return;
+                Vector2 half = new Vector2(Mathf.Abs(size.x) * 0.5f, Mathf.Abs(size.y) * 0.5f);
+                IncludePoint(center - half);
+                IncludePoint(center + half);
+            }
+
+            // 1. All active platforms and their trajectory motion envelopes
+            List<ColorPlatform> platforms = ColorPlatform.All;
+            for (int i = 0; i < platforms.Count; i++)
+            {
+                ColorPlatform p = platforms[i];
+                if (p == null)
+                    continue;
+
+                Rect aabb = p.GetAabb();
+                IncludePoint(new Vector2(aabb.xMin, aabb.yMin));
+                IncludePoint(new Vector2(aabb.xMax, aabb.yMax));
+
+                // Include trajectory envelope
+                Trajectory traj = p.GetTrajectory();
+                if (traj != null && traj.Config != null && traj.Config.enabled)
+                {
+                    TrajectoryData cfg = traj.Config;
+                    IncludePoint(new Vector2(cfg.originX, cfg.originY));
+
+                    if (cfg.curveType == TrajectoryCurveType.Line)
+                    {
+                        IncludePoint(Trajectory.EvaluateWorldPoint(cfg, 0f));
+                        IncludePoint(Trajectory.EvaluateWorldPoint(cfg, 0.5f));
+                        IncludePoint(Trajectory.EvaluateWorldPoint(cfg, 1f));
+
+                        if (cfg.domainMode == TrajectoryDomainMode.SpatialBounds)
+                        {
+                            IncludePoint(new Vector2(cfg.boundsXMin, cfg.boundsYMin));
+                            IncludePoint(new Vector2(cfg.boundsXMax, cfg.boundsYMax));
+                        }
+                    }
+                    else if (cfg.curveType == TrajectoryCurveType.Circle)
+                    {
+                        float r = Mathf.Max(0.001f, cfg.radius);
+                        IncludePoint(new Vector2(cfg.originX - r, cfg.originY - r));
+                        IncludePoint(new Vector2(cfg.originX + r, cfg.originY + r));
+                    }
+                }
+            }
+
+            // 2. All level markers (StartPos, CheckPoints, End)
+            List<LevelMarker> markers = LevelMarker.All;
+            for (int i = 0; i < markers.Count; i++)
+            {
+                LevelMarker m = markers[i];
+                if (m == null)
+                    continue;
+
+                IncludeAabb(m.Position, m.Size);
+            }
+
+            // 3. Fallback: Saved camera boundary from CameraFollow or working copy
+            if (!hasPoint)
+            {
+                CameraFollow camFollow = FindAnyObjectByType<CameraFollow>();
+                if (camFollow != null && camFollow.HasBoundary)
+                {
+                    IncludeAabb(camFollow.BoundaryCenter, camFollow.BoundarySize);
+                }
+                else if (editorWorkingCopy != null && editorWorkingCopy.cameraBoundary != null &&
+                         editorWorkingCopy.cameraBoundary.position != null && editorWorkingCopy.cameraBoundary.size != null)
+                {
+                    IncludeAabb(editorWorkingCopy.cameraBoundary.position.ToVector2(), editorWorkingCopy.cameraBoundary.size.ToVector2());
+                }
+            }
+
+            // 4. Default fallback if level is completely empty
+            if (!hasPoint)
+            {
+                return new Bounds(Vector3.zero, new Vector3(20f, 10f, 0f));
+            }
+
+            Vector2 bCenter = new Vector2((minX + maxX) * 0.5f, (minY + maxY) * 0.5f);
+            Vector2 bSize = new Vector2(Mathf.Max(2f, maxX - minX), Mathf.Max(2f, maxY - minY));
+            return new Bounds(bCenter, new Vector3(bSize.x, bSize.y, 0f));
+        }
+
+        /// <summary>
+        /// Centers and scales the Edit Viewport camera so the entire level fits comfortably
+        /// within the usable screen area between overlapping panels (Inspector, Palette, Top/Bottom bars),
+        /// preserving aspect ratio with reasonable margins.
+        /// </summary>
+        public void FitMap()
+        {
+            UnityEngine.Camera cam = UnityEngine.Camera.main;
+            if (cam == null)
+            {
+                LogEditor("[EDITOR][FIT_MAP_FAILED] Camera.main is null.");
+                return;
+            }
+
+            Bounds bounds = CalculateLevelBounds();
+
+            // Margin: 15% of dimension, at least 2.5 world units
+            float marginX = Mathf.Max(2.5f, bounds.size.x * 0.15f);
+            float marginY = Mathf.Max(2.5f, bounds.size.y * 0.15f);
+            float paddedW = bounds.size.x + 2f * marginX;
+            float paddedH = bounds.size.y + 2f * marginY;
+
+            // Usable viewport ratios relative to full screen (1920x1080 canvas)
+            // Left Inspector: 360px, Right Palette: 320px -> Usable width = 1240 / 1920
+            // Top Bar: 76px, Bottom Help Bar: 38px -> Usable height = 966 / 1080
+            const float usableWidthRatio = 1240f / 1920f;
+            const float usableHeightRatio = 966f / 1080f;
+
+            float aspect = cam.aspect > 0.01f ? cam.aspect : (16f / 9f);
+
+            float sizeForHeight = paddedH / (2f * usableHeightRatio);
+            float sizeForWidth = paddedW / (2f * aspect * usableWidthRatio);
+
+            float targetOrthoSize = Mathf.Clamp(Mathf.Max(sizeForHeight, sizeForWidth), 3.5f, 250f);
+            cam.orthographicSize = targetOrthoSize;
+
+            // Viewport usable center offset in normalized screen coordinates
+            // Center X is (360 + 1600)/2 = 980 -> +20px from screen center 960 (+20/1920)
+            // Center Y is (38 + 1004)/2 = 521 -> -19px from screen center 540 (-19/1080)
+            const float normDeltaX = 20f / 1920f;
+            const float normDeltaY = -19f / 1080f;
+
+            float worldOffsetX = normDeltaX * (2f * targetOrthoSize * aspect);
+            float worldOffsetY = normDeltaY * (2f * targetOrthoSize);
+
+            Vector3 camPos = cam.transform.position;
+            cam.transform.position = new Vector3(
+                bounds.center.x - worldOffsetX,
+                bounds.center.y - worldOffsetY,
+                camPos.z);
+
+            ui?.SetStatus("Fit Map: Framed entire level.");
+            LogEditor($"[EDITOR][FIT_MAP] bounds={bounds} orthoSize={targetOrthoSize} camPos={cam.transform.position}");
         }
 
         private void LogEditor(string message)
@@ -811,10 +1009,12 @@ namespace Contrast.Level
             platformObject.transform.SetParent(FindOrCreatePlatformRoot(), false);
 
             ColorPlatform platform = platformObject.AddComponent<ColorPlatform>();
+            var pres = platformObject.AddComponent<Contrast.Presentation.PlatformVisualPresentation>();
             platform.Initialize(
                 worldPosition,
                 defaultPlatformSize,
                 defaultPlatformColor);
+            pres.InitializeVisuals();
 
             // Initialize disabled trajectory for new platform.
             platform.InitializeTrajectory(null);
@@ -823,33 +1023,14 @@ namespace Contrast.Level
             ui?.SetStatus("Platform added.");
         }
 
-        private bool ValidateImportedData(LevelData data, out string error)
-        {
-            error = null;
-            if (data.platforms != null)
-            {
-                for (int i = 0; i < data.platforms.Length; i++)
-                {
-                    if (data.platforms[i] == null)
-                    {
-                        error = "JSON chứa platform null tại index " + i + ".";
-                        return false;
-                    }
-                }
-            }
-            return true;
-        }
-
         public LevelData BuildExportData()
         {
-            LevelData source = levelLoader != null ? levelLoader.CurrentLevelData : null;
-            LevelData data = source ?? new LevelData();
+            LevelData data = new LevelData();
 
             // Filter out any null/destroyed entries that might remain.
             ColorPlatform.All.RemoveAll(p => p == null || p.gameObject == null);
 
             data.platforms = new ColorPlatformData[ColorPlatform.All.Count];
-            data.spawnPoint = null;
 
             for (int i = 0; i < ColorPlatform.All.Count; i++)
             {
@@ -874,16 +1055,12 @@ namespace Contrast.Level
                 };
             }
 
-            data.startPos = null;
-            data.checkPoint = null;
-            data.end = null;
-
             List<CheckPointData> checkpoints = new List<CheckPointData>();
 
             for (int i = 0; i < LevelMarker.All.Count; i++)
             {
                 LevelMarker marker = LevelMarker.All[i];
-                if (marker == null)
+                if (marker == null || marker.gameObject == null)
                     continue;
 
                 Vector2Data pos = new Vector2Data(marker.Position.x, marker.Position.y);
@@ -892,12 +1069,15 @@ namespace Contrast.Level
                 switch (marker.Type)
                 {
                     case LevelMarkerType.StartPos:
-                        data.startPos = new StartPosData
+                        if (data.startPos == null)
                         {
-                            position = pos,
-                            size = size,
-                            color = marker.RawColor
-                        };
+                            data.startPos = new StartPosData
+                            {
+                                position = pos,
+                                size = size,
+                                color = marker.RawColor
+                            };
+                        }
                         break;
 
                     case LevelMarkerType.CheckPoint:
@@ -910,16 +1090,84 @@ namespace Contrast.Level
                         break;
 
                     case LevelMarkerType.End:
-                        data.end = new EndData
+                        if (data.end == null)
                         {
-                            position = pos,
-                            size = size
-                        };
+                            data.end = new EndData
+                            {
+                                position = pos,
+                                size = size
+                            };
+                        }
                         break;
                 }
             }
 
-            data.checkPoint = checkpoints.ToArray();
+            // Restore markers from working copy if they were consumed during gameplay
+            if (data.startPos == null && editorWorkingCopy != null && editorWorkingCopy.startPos != null)
+            {
+                data.startPos = new StartPosData
+                {
+                    position = new Vector2Data(editorWorkingCopy.startPos.position.x, editorWorkingCopy.startPos.position.y),
+                    size = new Vector2Data(editorWorkingCopy.startPos.size.x, editorWorkingCopy.startPos.size.y),
+                    color = editorWorkingCopy.startPos.color
+                };
+            }
+
+            if (checkpoints.Count == 0 && editorWorkingCopy != null && editorWorkingCopy.checkPoint != null)
+            {
+                foreach (CheckPointData cp in editorWorkingCopy.checkPoint)
+                {
+                    if (cp != null && cp.position != null)
+                    {
+                        checkpoints.Add(new CheckPointData
+                        {
+                            position = new Vector2Data(cp.position.x, cp.position.y),
+                            size = cp.size != null ? new Vector2Data(cp.size.x, cp.size.y) : new Vector2Data(1f, 1f),
+                            color = cp.color
+                        });
+                    }
+                }
+            }
+
+            if (data.end == null && editorWorkingCopy != null && editorWorkingCopy.end != null)
+            {
+                data.end = new EndData
+                {
+                    position = new Vector2Data(editorWorkingCopy.end.position.x, editorWorkingCopy.end.position.y),
+                    size = editorWorkingCopy.end.size != null ? new Vector2Data(editorWorkingCopy.end.size.x, editorWorkingCopy.end.size.y) : new Vector2Data(1.5f, 2f)
+                };
+            }
+
+            if (checkpoints.Count > 0)
+                data.checkPoint = checkpoints.ToArray();
+            else
+                data.checkPoint = null;
+
+            // Camera boundary
+            CameraFollow camFollow = FindAnyObjectByType<CameraFollow>();
+            if (camFollow != null && camFollow.HasBoundary)
+            {
+                data.cameraBoundary = new CameraBoundaryData
+                {
+                    position = new Vector2Data(camFollow.BoundaryCenter.x, camFollow.BoundaryCenter.y),
+                    size = new Vector2Data(camFollow.BoundarySize.x, camFollow.BoundarySize.y)
+                };
+            }
+            else if (editorWorkingCopy != null && editorWorkingCopy.cameraBoundary != null)
+            {
+                data.cameraBoundary = new CameraBoundaryData
+                {
+                    position = new Vector2Data(editorWorkingCopy.cameraBoundary.position.x, editorWorkingCopy.cameraBoundary.position.y),
+                    size = new Vector2Data(editorWorkingCopy.cameraBoundary.size.x, editorWorkingCopy.cameraBoundary.size.y)
+                };
+            }
+
+            // Do not export legacy spawnPoint
+            data.spawnPoint = null;
+
+            // Sanitize without modifying working active references
+            data = LevelDataSanitizer.Sanitize(data, null, out _);
+
             return data;
         }
 
@@ -971,12 +1219,11 @@ namespace Contrast.Level
             return null;
         }
 
-        private HandleKind HitHandle(Vector2 world)
+        private ResizeHandleKind HitResizeHandle(Vector2 world)
         {
             if (selectedPlatform == null)
-                return HandleKind.None;
+                return ResizeHandleKind.None;
 
-            // Platform resize handles
             Rect r = selectedPlatform.GetAabb();
             Vector2 left = new Vector2(r.xMin, r.center.y);
             Vector2 right = new Vector2(r.xMax, r.center.y);
@@ -984,72 +1231,15 @@ namespace Contrast.Level
             Vector2 bottom = new Vector2(r.center.x, r.yMin);
 
             if (Vector2.Distance(world, left) <= handleHitRadius)
-                return HandleKind.Left;
+                return ResizeHandleKind.Left;
             if (Vector2.Distance(world, right) <= handleHitRadius)
-                return HandleKind.Right;
+                return ResizeHandleKind.Right;
             if (Vector2.Distance(world, top) <= handleHitRadius)
-                return HandleKind.Top;
+                return ResizeHandleKind.Top;
             if (Vector2.Distance(world, bottom) <= handleHitRadius)
-                return HandleKind.Bottom;
+                return ResizeHandleKind.Bottom;
 
-            // Trajectory handles
-            Trajectory traj = selectedPlatform.GetTrajectory();
-            TrajectoryData cfg = traj != null ? traj.Config : null;
-            if (cfg != null && cfg.enabled && Trajectory.Validate(cfg) == null)
-            {
-                if (cfg.curveType == TrajectoryCurveType.Line)
-                {
-                    Vector2 origin = new Vector2(cfg.originX, cfg.originY);
-                    if (Vector2.Distance(world, origin) <= handleHitRadius)
-                        return HandleKind.TrajOrigin;
-
-                    if (cfg.domainMode == TrajectoryDomainMode.ParameterRange)
-                    {
-                        Vector2 lineEnd = Trajectory.EvaluateWorldPoint(cfg, 1f);
-                        if (Vector2.Distance(world, lineEnd) <= handleHitRadius)
-                            return HandleKind.TrajLineEnd;
-                    }
-                    else if (cfg.domainMode == TrajectoryDomainMode.SpatialBounds)
-                    {
-                        Vector2 bMinX = new Vector2(cfg.boundsXMin, (cfg.boundsYMin + cfg.boundsYMax) * 0.5f);
-                        Vector2 bMaxX = new Vector2(cfg.boundsXMax, (cfg.boundsYMin + cfg.boundsYMax) * 0.5f);
-                        Vector2 bMinY = new Vector2((cfg.boundsXMin + cfg.boundsXMax) * 0.5f, cfg.boundsYMin);
-                        Vector2 bMaxY = new Vector2((cfg.boundsXMin + cfg.boundsXMax) * 0.5f, cfg.boundsYMax);
-
-                        if (Vector2.Distance(world, bMinX) <= handleHitRadius) return HandleKind.TrajBoundsMinX;
-                        if (Vector2.Distance(world, bMaxX) <= handleHitRadius) return HandleKind.TrajBoundsMaxX;
-                        if (Vector2.Distance(world, bMinY) <= handleHitRadius) return HandleKind.TrajBoundsMinY;
-                        if (Vector2.Distance(world, bMaxY) <= handleHitRadius) return HandleKind.TrajBoundsMaxY;
-                    }
-                }
-                else if (cfg.curveType == TrajectoryCurveType.Circle)
-                {
-                    Vector2 center = new Vector2(cfg.originX, cfg.originY);
-                    if (Vector2.Distance(world, center) <= handleHitRadius)
-                        return HandleKind.TrajCircleCenter;
-
-                    Vector2 radPos = center + Vector2.right * cfg.radius;
-                    if (Vector2.Distance(world, radPos) <= handleHitRadius)
-                        return HandleKind.TrajCircleRadius;
-
-                    float angleSpan = Mathf.Abs(cfg.paramMax - cfg.paramMin);
-                    if (angleSpan < 355f)
-                    {
-                        Vector2 arcStart = Trajectory.EvaluateWorldPoint(cfg, 0f);
-                        Vector2 arcEnd = Trajectory.EvaluateWorldPoint(cfg, 1f);
-
-                        if (Vector2.Distance(world, arcStart) <= handleHitRadius) return HandleKind.TrajArcStart;
-                        if (Vector2.Distance(world, arcEnd) <= handleHitRadius) return HandleKind.TrajArcEnd;
-                    }
-                }
-            }
-
-            return HandleKind.None;
-        }
-
-        private static bool IsTrajHandle(HandleKind kind)
-        {
-            return kind >= HandleKind.TrajOrigin && kind <= HandleKind.TrajBoundsMaxY;
+            return ResizeHandleKind.None;
         }
 
         public void RefreshHandles()
@@ -1059,116 +1249,33 @@ namespace Contrast.Level
             if (selectedPlatform == null || !editing)
             {
                 SetHandlesVisible(false);
+                if (selectionBox != null)
+                    selectionBox.SetActive(false);
+                trajectoryController?.RefreshVisualization(false);
                 return;
             }
 
-            // Platform resize handles
+            // Platform resize handles and high-visibility selection outline
             Rect r = selectedPlatform.GetAabb();
-            SetHandle(HandleKind.Left, new Vector2(r.xMin, r.center.y), true);
-            SetHandle(HandleKind.Right, new Vector2(r.xMax, r.center.y), true);
-            SetHandle(HandleKind.Top, new Vector2(r.center.x, r.yMax), true);
-            SetHandle(HandleKind.Bottom, new Vector2(r.center.x, r.yMin), true);
+            if (selectionBox != null && selectionBoxRenderer != null)
+            {
+                selectionBox.transform.position = new Vector3(r.center.x, r.center.y, -0.5f);
+                selectionBoxRenderer.size = new Vector2(r.width + 0.08f, r.height + 0.08f);
+                selectionBox.SetActive(true);
+            }
+
+            SetResizeHandle(ResizeHandleKind.Left, new Vector2(r.xMin, r.center.y), true);
+            SetResizeHandle(ResizeHandleKind.Right, new Vector2(r.xMax, r.center.y), true);
+            SetResizeHandle(ResizeHandleKind.Top, new Vector2(r.center.x, r.yMax), true);
+            SetResizeHandle(ResizeHandleKind.Bottom, new Vector2(r.center.x, r.yMin), true);
 
             // Trajectory preview and handles
-            Trajectory traj = selectedPlatform.GetTrajectory();
-            TrajectoryData cfg = traj != null ? traj.Config : null;
-
-            if (cfg != null && cfg.enabled && Trajectory.Validate(cfg) == null)
-            {
-                // Draw curve preview
-                Vector2[] pts = Trajectory.GetPreviewPoints(cfg, 64);
-                if (trajectoryLineRenderer != null)
-                {
-                    trajectoryLineRenderer.positionCount = pts.Length;
-                    for (int i = 0; i < pts.Length; i++)
-                        trajectoryLineRenderer.SetPosition(i, new Vector3(pts[i].x, pts[i].y, -0.8f));
-                }
-
-                // Spatial bounds preview
-                if (cfg.curveType == TrajectoryCurveType.Line &&
-                    cfg.domainMode == TrajectoryDomainMode.SpatialBounds &&
-                    boundsLineRenderer != null)
-                {
-                    boundsLineRenderer.positionCount = 5;
-                    boundsLineRenderer.SetPosition(0, new Vector3(cfg.boundsXMin, cfg.boundsYMin, -0.7f));
-                    boundsLineRenderer.SetPosition(1, new Vector3(cfg.boundsXMax, cfg.boundsYMin, -0.7f));
-                    boundsLineRenderer.SetPosition(2, new Vector3(cfg.boundsXMax, cfg.boundsYMax, -0.7f));
-                    boundsLineRenderer.SetPosition(3, new Vector3(cfg.boundsXMin, cfg.boundsYMax, -0.7f));
-                    boundsLineRenderer.SetPosition(4, new Vector3(cfg.boundsXMin, cfg.boundsYMin, -0.7f));
-
-                    SetHandle(HandleKind.TrajBoundsMinX, new Vector2(cfg.boundsXMin, (cfg.boundsYMin + cfg.boundsYMax) * 0.5f), true);
-                    SetHandle(HandleKind.TrajBoundsMaxX, new Vector2(cfg.boundsXMax, (cfg.boundsYMin + cfg.boundsYMax) * 0.5f), true);
-                    SetHandle(HandleKind.TrajBoundsMinY, new Vector2((cfg.boundsXMin + cfg.boundsXMax) * 0.5f, cfg.boundsYMin), true);
-                    SetHandle(HandleKind.TrajBoundsMaxY, new Vector2((cfg.boundsXMin + cfg.boundsXMax) * 0.5f, cfg.boundsYMax), true);
-                }
-                else
-                {
-                    if (boundsLineRenderer != null) boundsLineRenderer.positionCount = 0;
-                    HideHandle(HandleKind.TrajBoundsMinX);
-                    HideHandle(HandleKind.TrajBoundsMaxX);
-                    HideHandle(HandleKind.TrajBoundsMinY);
-                    HideHandle(HandleKind.TrajBoundsMaxY);
-                }
-
-                if (cfg.curveType == TrajectoryCurveType.Line)
-                {
-                    SetHandle(HandleKind.TrajOrigin, new Vector2(cfg.originX, cfg.originY), true);
-                    if (cfg.domainMode == TrajectoryDomainMode.ParameterRange)
-                    {
-                        SetHandle(HandleKind.TrajLineEnd, Trajectory.EvaluateWorldPoint(cfg, 1f), true);
-                    }
-                    else
-                    {
-                        HideHandle(HandleKind.TrajLineEnd);
-                    }
-
-                    HideHandle(HandleKind.TrajCircleCenter);
-                    HideHandle(HandleKind.TrajCircleRadius);
-                    HideHandle(HandleKind.TrajArcStart);
-                    HideHandle(HandleKind.TrajArcEnd);
-                }
-                else if (cfg.curveType == TrajectoryCurveType.Circle)
-                {
-                    SetHandle(HandleKind.TrajCircleCenter, new Vector2(cfg.originX, cfg.originY), true);
-                    SetHandle(HandleKind.TrajCircleRadius, new Vector2(cfg.originX + cfg.radius, cfg.originY), true);
-
-                    float angleSpan = Mathf.Abs(cfg.paramMax - cfg.paramMin);
-                    if (angleSpan < 355f)
-                    {
-                        SetHandle(HandleKind.TrajArcStart, Trajectory.EvaluateWorldPoint(cfg, 0f), true);
-                        SetHandle(HandleKind.TrajArcEnd, Trajectory.EvaluateWorldPoint(cfg, 1f), true);
-                    }
-                    else
-                    {
-                        HideHandle(HandleKind.TrajArcStart);
-                        HideHandle(HandleKind.TrajArcEnd);
-                    }
-
-                    HideHandle(HandleKind.TrajOrigin);
-                    HideHandle(HandleKind.TrajLineEnd);
-                }
-            }
-            else
-            {
-                if (trajectoryLineRenderer != null) trajectoryLineRenderer.positionCount = 0;
-                if (boundsLineRenderer != null) boundsLineRenderer.positionCount = 0;
-
-                HideHandle(HandleKind.TrajOrigin);
-                HideHandle(HandleKind.TrajLineEnd);
-                HideHandle(HandleKind.TrajCircleCenter);
-                HideHandle(HandleKind.TrajCircleRadius);
-                HideHandle(HandleKind.TrajArcStart);
-                HideHandle(HandleKind.TrajArcEnd);
-                HideHandle(HandleKind.TrajBoundsMinX);
-                HideHandle(HandleKind.TrajBoundsMaxX);
-                HideHandle(HandleKind.TrajBoundsMinY);
-                HideHandle(HandleKind.TrajBoundsMaxY);
-            }
+            trajectoryController?.RefreshVisualization(editing);
         }
 
-        private void SetHandle(HandleKind kind, Vector2 position, bool visible)
+        private void SetResizeHandle(ResizeHandleKind kind, Vector2 position, bool visible)
         {
-            if (!handles.TryGetValue(kind, out GameObject go) || go == null)
+            if (!resizeHandles.TryGetValue(kind, out GameObject go) || go == null)
                 return;
 
             go.transform.position = new Vector3(position.x, position.y, -1f);
@@ -1176,15 +1283,12 @@ namespace Contrast.Level
             go.SetActive(visible);
         }
 
-        private void HideHandle(HandleKind kind)
-        {
-            if (handles.TryGetValue(kind, out GameObject go) && go != null)
-                go.SetActive(false);
-        }
-
         private void SetHandlesVisible(bool visible)
         {
-            foreach (GameObject go in handles.Values)
+            if (selectionBox != null)
+                selectionBox.SetActive(visible);
+
+            foreach (GameObject go in resizeHandles.Values)
             {
                 if (go != null)
                     go.SetActive(visible);
@@ -1192,8 +1296,7 @@ namespace Contrast.Level
 
             if (!visible)
             {
-                if (trajectoryLineRenderer != null) trajectoryLineRenderer.positionCount = 0;
-                if (boundsLineRenderer != null) boundsLineRenderer.positionCount = 0;
+                trajectoryController?.RefreshVisualization(false);
             }
         }
 
@@ -1205,62 +1308,116 @@ namespace Contrast.Level
             handleRoot = new GameObject("EditorHandles");
             handleRoot.transform.SetParent(transform, false);
 
-            // Platform resize handles
-            CreateHandle(HandleKind.Left, UnityEngine.Color.white);
-            CreateHandle(HandleKind.Right, UnityEngine.Color.white);
-            CreateHandle(HandleKind.Top, UnityEngine.Color.white);
-            CreateHandle(HandleKind.Bottom, UnityEngine.Color.white);
+            if (selectionBox == null)
+            {
+                selectionBox = new GameObject("SelectionBox");
+                selectionBox.transform.SetParent(handleRoot.transform, false);
+                selectionBoxRenderer = selectionBox.AddComponent<SpriteRenderer>();
+                selectionBoxRenderer.sprite = GetSelectionBoxSprite();
+                selectionBoxRenderer.drawMode = SpriteDrawMode.Sliced;
+                selectionBoxRenderer.sortingOrder = 1004;
+                selectionBoxRenderer.color = new UnityEngine.Color(0.2f, 0.75f, 1f, 0.85f);
+                selectionBox.SetActive(false);
+            }
 
-            // Trajectory control handles
-            CreateHandle(HandleKind.TrajOrigin, new UnityEngine.Color(1f, 0.9f, 0.2f, 1f));
-            CreateHandle(HandleKind.TrajLineEnd, new UnityEngine.Color(0.2f, 0.9f, 1f, 1f));
-            CreateHandle(HandleKind.TrajCircleCenter, new UnityEngine.Color(1f, 0.9f, 0.2f, 1f));
-            CreateHandle(HandleKind.TrajCircleRadius, new UnityEngine.Color(1f, 0.3f, 0.8f, 1f));
-            CreateHandle(HandleKind.TrajArcStart, new UnityEngine.Color(0.4f, 1f, 0.4f, 1f));
-            CreateHandle(HandleKind.TrajArcEnd, new UnityEngine.Color(0.4f, 1f, 0.4f, 1f));
-            CreateHandle(HandleKind.TrajBoundsMinX, new UnityEngine.Color(1f, 0.6f, 0.1f, 1f));
-            CreateHandle(HandleKind.TrajBoundsMaxX, new UnityEngine.Color(1f, 0.6f, 0.1f, 1f));
-            CreateHandle(HandleKind.TrajBoundsMinY, new UnityEngine.Color(1f, 0.6f, 0.1f, 1f));
-            CreateHandle(HandleKind.TrajBoundsMaxY, new UnityEngine.Color(1f, 0.6f, 0.1f, 1f));
+            CreateResizeHandle(ResizeHandleKind.Left, UnityEngine.Color.white);
+            CreateResizeHandle(ResizeHandleKind.Right, UnityEngine.Color.white);
+            CreateResizeHandle(ResizeHandleKind.Top, UnityEngine.Color.white);
+            CreateResizeHandle(ResizeHandleKind.Bottom, UnityEngine.Color.white);
 
-            // Line renderers for preview
-            trajectoryLineRenderer = CreatePreviewLine("TrajectoryPreview", new UnityEngine.Color(0.2f, 1f, 0.4f, 0.85f), 0.06f);
-            boundsLineRenderer = CreatePreviewLine("BoundsPreview", new UnityEngine.Color(1f, 0.7f, 0.2f, 0.75f), 0.04f);
+            trajectoryController ??= new TrajectoryEditController(handleSize, handleHitRadius);
+            trajectoryController.Initialize(handleRoot.transform);
         }
 
-        private void CreateHandle(HandleKind kind, UnityEngine.Color color)
+        private static Sprite GetHandleSprite()
+        {
+            if (cachedHandleSprite != null)
+                return cachedHandleSprite;
+
+            const int size = 16;
+            Texture2D tex = new Texture2D(size, size, TextureFormat.RGBA32, false)
+            {
+                filterMode = FilterMode.Point,
+                wrapMode = TextureWrapMode.Clamp,
+                hideFlags = HideFlags.DontSave
+            };
+
+            UnityEngine.Color borderCol = new UnityEngine.Color(0.06f, 0.10f, 0.16f, 1f);
+            UnityEngine.Color innerCol = new UnityEngine.Color(0.92f, 0.96f, 1f, 1f);
+
+            UnityEngine.Color[] pixels = new UnityEngine.Color[size * size];
+            for (int y = 0; y < size; y++)
+            {
+                for (int x = 0; x < size; x++)
+                {
+                    bool isBorder = x == 0 || x == size - 1 || y == 0 || y == size - 1;
+                    pixels[y * size + x] = isBorder ? borderCol : innerCol;
+                }
+            }
+            tex.SetPixels(pixels);
+            tex.Apply();
+
+            cachedHandleSprite = Sprite.Create(
+                tex,
+                new Rect(0, 0, size, size),
+                new Vector2(0.5f, 0.5f),
+                16f,
+                0,
+                SpriteMeshType.FullRect);
+
+            return cachedHandleSprite;
+        }
+
+        private static Sprite GetSelectionBoxSprite()
+        {
+            if (cachedSelectionBoxSprite != null)
+                return cachedSelectionBoxSprite;
+
+            const int res = 32;
+            Texture2D tex = new Texture2D(res, res, TextureFormat.RGBA32, false)
+            {
+                filterMode = FilterMode.Point,
+                wrapMode = TextureWrapMode.Clamp,
+                hideFlags = HideFlags.DontSave
+            };
+
+            UnityEngine.Color[] pixels = new UnityEngine.Color[res * res];
+            const int borderPx = 2;
+            for (int y = 0; y < res; y++)
+            {
+                for (int x = 0; x < res; x++)
+                {
+                    bool isBorder = (x < borderPx || x >= res - borderPx || y < borderPx || y >= res - borderPx);
+                    pixels[y * res + x] = isBorder ? UnityEngine.Color.white : new UnityEngine.Color(1f, 1f, 1f, 0f);
+                }
+            }
+            tex.SetPixels(pixels);
+            tex.Apply();
+
+            cachedSelectionBoxSprite = Sprite.Create(
+                tex,
+                new Rect(0, 0, res, res),
+                new Vector2(0.5f, 0.5f),
+                32f,
+                0,
+                SpriteMeshType.FullRect,
+                new Vector4(borderPx, borderPx, borderPx, borderPx));
+
+            return cachedSelectionBoxSprite;
+        }
+
+        private void CreateResizeHandle(ResizeHandleKind kind, UnityEngine.Color color)
         {
             GameObject go = new GameObject(kind + "Handle");
             go.transform.SetParent(handleRoot.transform, false);
 
             SpriteRenderer sr = go.AddComponent<SpriteRenderer>();
-            sr.sprite = ColorPlatform.GetDefaultSprite();
+            sr.sprite = GetHandleSprite();
             sr.sortingOrder = 1005;
             sr.color = color;
 
-            handles[kind] = go;
+            resizeHandles[kind] = go;
             go.SetActive(false);
-        }
-
-        private LineRenderer CreatePreviewLine(string name, UnityEngine.Color color, float width)
-        {
-            GameObject go = new GameObject(name);
-            go.transform.SetParent(handleRoot.transform, false);
-
-            LineRenderer lr = go.AddComponent<LineRenderer>();
-            lr.useWorldSpace = true;
-            lr.sortingOrder = 990;
-            lr.startWidth = width;
-            lr.endWidth = width;
-
-            Shader shader = Shader.Find("Sprites/Default");
-            if (shader != null)
-                lr.material = new Material(shader);
-
-            lr.startColor = color;
-            lr.endColor = color;
-            lr.positionCount = 0;
-            return lr;
         }
 
         private void ClearSelection()
@@ -1268,7 +1425,11 @@ namespace Contrast.Level
             selectionKind = SelectionKind.None;
             selectedPlatform = null;
             selectedMarker = null;
-            activeHandle = HandleKind.None;
+            activeResizeHandle = ResizeHandleKind.None;
+            activeTrajHandle = TrajectoryHandleKind.None;
+            if (selectionBox != null)
+                selectionBox.SetActive(false);
+            trajectoryController?.ClearTarget(ui);
             ui?.ClearSelectedPlatform();
             SetHandlesVisible(false);
         }
@@ -1291,21 +1452,178 @@ namespace Contrast.Level
             // Remove from registry immediately.
             ColorPlatform.All.Remove(toDelete);
 
-            // Destroy GameObject.
-            Destroy(toDelete.gameObject);
+            // Destroy GameObject safely.
+            SafeDestroy(toDelete.gameObject);
 
             LogEditor($"[EDITOR][DELETE] platform={name}");
             ui?.SetStatus($"Deleted {name}.");
         }
 
-        private Transform FindOrCreatePlatformRoot()
+        /// <summary>
+        /// Clears all editable level content (platforms, trajectories, markers) from the currently open level,
+        /// leaving an empty level-editing canvas while preserving editor infrastructure, UI, and camera view.
+        /// Updates authoritative data so subsequent exports and gameplay starts reflect the empty level.
+        /// </summary>
+        public void ResetLevel()
         {
+            // 1. Cancel ongoing interactions safely
+            if (mapPointerDragging)
+            {
+                CancelMapPointerDrag("Level reset");
+            }
+            if (mapPanning)
+            {
+                CancelMapPan("Level reset");
+            }
+            paletteDragging = false;
+            activeResizeHandle = ResizeHandleKind.None;
+            activeTrajHandle = TrajectoryHandleKind.None;
+            inputRouter.ForceReleasePointer();
+
+            // 2. Clear selection and inspector references
+            ClearSelection();
+
+            // 3. Clear trajectory visualizations and handles
+            trajectoryController?.ClearTarget(ui);
+            trajectoryController?.RefreshVisualization(false);
+
+            // Record if level had any content before clearing (for status reporting)
+            bool hadContent = ColorPlatform.All.Count > 0 || LevelMarker.All.Count > 0;
+
+            // 4. Destroy all platform GameObjects and clear registry
+            Transform platformRoot = FindOrCreatePlatformRoot();
+            if (platformRoot != null)
+            {
+                for (int i = platformRoot.childCount - 1; i >= 0; i--)
+                {
+                    Transform child = platformRoot.GetChild(i);
+                    if (child != null)
+                    {
+                        SafeDestroy(child.gameObject);
+                    }
+                }
+            }
+
+            for (int i = ColorPlatform.All.Count - 1; i >= 0; i--)
+            {
+                ColorPlatform p = ColorPlatform.All[i];
+                if (p != null && p.gameObject != null)
+                {
+                    SafeDestroy(p.gameObject);
+                }
+            }
+            ColorPlatform.ClearRegistry();
+
+            // 5. Destroy all marker GameObjects and clear registry
+            Transform editorRoot = FindOrCreateEditorRoot();
+            if (editorRoot != null)
+            {
+                for (int i = editorRoot.childCount - 1; i >= 0; i--)
+                {
+                    Transform child = editorRoot.GetChild(i);
+                    if (child != null)
+                    {
+                        SafeDestroy(child.gameObject);
+                    }
+                }
+            }
+
+            for (int i = LevelMarker.All.Count - 1; i >= 0; i--)
+            {
+                LevelMarker m = LevelMarker.All[i];
+                if (m != null && m.gameObject != null)
+                {
+                    SafeDestroy(m.gameObject);
+                }
+            }
+            LevelMarker.ClearRegistry();
+
+            // Sweep any stray or orphaned platforms / markers in the scene
+            ColorPlatform[] strayPlatforms = FindObjectsByType<ColorPlatform>();
+            for (int i = 0; i < strayPlatforms.Length; i++)
+            {
+                if (strayPlatforms[i] != null && strayPlatforms[i].gameObject != null)
+                    SafeDestroy(strayPlatforms[i].gameObject);
+            }
+
+            LevelMarker[] strayMarkers = FindObjectsByType<LevelMarker>();
+            for (int i = 0; i < strayMarkers.Length; i++)
+            {
+                if (strayMarkers[i] != null && strayMarkers[i].gameObject != null)
+                    SafeDestroy(strayMarkers[i].gameObject);
+            }
+
+            // Also clean redundant roots if any exist outside our canonical roots
+            GameObject roguePlat = GameObject.Find("Platforms");
+            if (roguePlat != null && roguePlat.transform != platformRoot)
+            {
+                for (int i = roguePlat.transform.childCount - 1; i >= 0; i--)
+                    SafeDestroy(roguePlat.transform.GetChild(i).gameObject);
+                SafeDestroy(roguePlat);
+            }
+
+            GameObject rogueObjs = GameObject.Find("LevelObjects");
+            if (rogueObjs != null && rogueObjs.transform != editorRoot)
+            {
+                for (int i = rogueObjs.transform.childCount - 1; i >= 0; i--)
+                    SafeDestroy(rogueObjs.transform.GetChild(i).gameObject);
+                SafeDestroy(rogueObjs);
+            }
+
+            // 6. Update authoritative data sources to prevent stale data resurrection
+            CameraBoundaryData preservedBoundary = editorWorkingCopy?.cameraBoundary;
+            editorWorkingCopy = new LevelData
+            {
+                platforms = new ColorPlatformData[0],
+                startPos = null,
+                checkPoint = null,
+                end = null,
+                spawnPoint = null,
+                cameraBoundary = preservedBoundary
+            };
+
             if (levelLoader != null)
             {
-                Transform root = levelLoader.PlatformsRoot;
-                if (root != null)
-                    return root;
+                levelLoader.ClearLevel(preserveCameraBoundary: true);
             }
+
+            RefreshHandles();
+
+            if (hadContent)
+            {
+                ui?.SetStatus("Level reset: All editable level content cleared.");
+                LogEditor("[EDITOR][RESET] All editable level content cleared.");
+            }
+            else
+            {
+                ui?.SetStatus("Level reset: Level is already empty.");
+                LogEditor("[EDITOR][RESET] Level already empty.");
+            }
+        }
+
+        private static void SafeDestroy(GameObject go)
+        {
+            if (go == null)
+                return;
+
+            go.SetActive(false);
+#if UNITY_EDITOR
+            if (!Application.isPlaying)
+            {
+                DestroyImmediate(go);
+                return;
+            }
+#endif
+            Destroy(go);
+        }
+
+        private Transform FindOrCreatePlatformRoot()
+        {
+            if (levelLoader == null)
+                levelLoader = FindAnyObjectByType<LevelLoader>();
+
+            if (levelLoader != null)
+                return levelLoader.PlatformsRoot;
 
             GameObject go = GameObject.Find("Platforms");
             if (go != null)
@@ -1316,12 +1634,11 @@ namespace Contrast.Level
 
         private Transform FindOrCreateEditorRoot()
         {
+            if (levelLoader == null)
+                levelLoader = FindAnyObjectByType<LevelLoader>();
+
             if (levelLoader != null)
-            {
-                Transform root = levelLoader.LevelObjectsRoot;
-                if (root != null)
-                    return root;
-            }
+                return levelLoader.LevelObjectsRoot;
 
             GameObject go = GameObject.Find("LevelObjects");
             if (go != null)
@@ -1334,126 +1651,12 @@ namespace Contrast.Level
         {
             levelLoader ??= FindAnyObjectByType<LevelLoader>();
             ui ??= FindAnyObjectByType<LevelEditorUI>(FindObjectsInactive.Include);
+            ui?.SetController(this);
         }
 
-        private static Vector2 ScreenToWorld(Vector2 screenPosition)
+        private void OnDestroy()
         {
-            UnityEngine.Camera cam = UnityEngine.Camera.main;
-            if (cam == null)
-                return screenPosition;
-
-            Vector3 screen = new Vector3(
-                screenPosition.x,
-                screenPosition.y,
-                Mathf.Abs(cam.transform.position.z));
-
-            Vector3 world = cam.ScreenToWorldPoint(screen);
-            return new Vector2(world.x, world.y);
-        }
-
-        private static bool IsPointerOverUi()
-        {
-            return EventSystem.current != null &&
-                   EventSystem.current.IsPointerOverGameObject();
-        }
-
-        private static Vector2 ScreenPointerPosition()
-        {
-#if ENABLE_INPUT_SYSTEM
-            return Mouse.current != null
-                ? Mouse.current.position.ReadValue()
-                : Vector2.zero;
-#else
-            return Input.mousePosition;
-#endif
-        }
-
-        private static bool MiddlePointerDown()
-        {
-#if ENABLE_INPUT_SYSTEM
-            return Mouse.current != null &&
-                   Mouse.current.middleButton.wasPressedThisFrame;
-#else
-            return Input.GetMouseButtonDown(2);
-#endif
-        }
-
-        private static bool MiddlePointerHeld()
-        {
-#if ENABLE_INPUT_SYSTEM
-            return Mouse.current != null &&
-                   Mouse.current.middleButton.isPressed;
-#else
-            return Input.GetMouseButton(2);
-#endif
-        }
-
-        private static bool MiddlePointerUp()
-        {
-#if ENABLE_INPUT_SYSTEM
-            return Mouse.current != null &&
-                   Mouse.current.middleButton.wasReleasedThisFrame;
-#else
-            return Input.GetMouseButtonUp(2);
-#endif
-        }
-
-        private static bool PointerDown()
-        {
-#if ENABLE_INPUT_SYSTEM
-            return Mouse.current != null &&
-                   Mouse.current.leftButton.wasPressedThisFrame;
-#else
-            return Input.GetMouseButtonDown(0);
-#endif
-        }
-
-        private static bool PointerHeld()
-        {
-#if ENABLE_INPUT_SYSTEM
-            return Mouse.current != null &&
-                   Mouse.current.leftButton.isPressed;
-#else
-            return Input.GetMouseButton(0);
-#endif
-        }
-
-        private static bool PointerUp()
-        {
-#if ENABLE_INPUT_SYSTEM
-            return Mouse.current != null &&
-                   Mouse.current.leftButton.wasReleasedThisFrame;
-#else
-            return Input.GetMouseButtonUp(0);
-#endif
-        }
-
-        private static bool DeleteKeyPressed()
-        {
-#if ENABLE_INPUT_SYSTEM
-            Keyboard kb = Keyboard.current;
-            return kb != null &&
-                   (kb.deleteKey.wasPressedThisFrame || kb.backspaceKey.wasPressedThisFrame);
-#else
-            return Input.GetKeyDown(KeyCode.Delete) || Input.GetKeyDown(KeyCode.Backspace);
-#endif
-        }
-
-        /// <summary>
-        /// Returns true when a UI InputField currently has focus,
-        /// preventing the Delete key from deleting a platform while
-        /// the user is typing in a text field.
-        /// </summary>
-        private static bool IsInputFieldFocused()
-        {
-            if (EventSystem.current == null)
-                return false;
-
-            GameObject selected = EventSystem.current.currentSelectedGameObject;
-            if (selected == null)
-                return false;
-
-            return selected.GetComponent<UnityEngine.UI.InputField>() != null;
+            trajectoryController?.Cleanup();
         }
     }
 }
