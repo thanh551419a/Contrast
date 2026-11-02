@@ -74,7 +74,8 @@ namespace Contrast.Player
                 playerColor,
                 allowCurrentOverlapEscape,
                 out bool blockedDownward,
-                out bool blockedY);
+                out bool blockedY,
+                out ColorPlatform downwardPlatform);
 
             resolvedPosition.y = resolvedCenterY - playerOffset.y;
 
@@ -82,8 +83,17 @@ namespace Contrast.Player
                 resolvedPosition + playerOffset,
                 playerSize);
 
-            bool grounded = blockedDownward ||
-                            HasGroundSupport(finalBounds, playerColor);
+            ColorPlatform groundedPlatform = null;
+            if (blockedDownward && downwardPlatform != null)
+            {
+                groundedPlatform = downwardPlatform;
+            }
+            else if (HasGroundSupport(finalBounds, playerColor, out ColorPlatform supportPlatform))
+            {
+                groundedPlatform = supportPlatform;
+            }
+
+            bool grounded = groundedPlatform != null;
 
             Vector2 finalMove = resolvedPosition - currentPosition;
 
@@ -92,14 +102,16 @@ namespace Contrast.Player
                 Debug.Log(
                     $"[COLLISION][FINAL] resolvedPosition={resolvedPosition} " +
                     $"finalMove={finalMove} blockedX={blockedX} " +
-                    $"blockedY={blockedY} grounded={grounded}");
+                    $"blockedY={blockedY} grounded={grounded} " +
+                    $"platform={(groundedPlatform != null ? groundedPlatform.name : "none")}");
             }
 
             return new CollisionResult(
                 finalMove,
                 grounded,
                 blockedX,
-                blockedY);
+                blockedY,
+                groundedPlatform);
         }
 
         private float ResolveHorizontal(
@@ -200,10 +212,12 @@ namespace Contrast.Player
             LogicalColor playerColor,
             bool allowCurrentOverlapEscape,
             out bool blockedDownward,
-            out bool blocked)
+            out bool blocked,
+            out ColorPlatform downwardPlatform)
         {
             blockedDownward = false;
             blocked = false;
+            downwardPlatform = null;
 
             if (Mathf.Abs(moveY) <= collisionEpsilon)
                 return current.Center.y;
@@ -238,6 +252,7 @@ namespace Contrast.Player
                 }
 
                 float correctedY;
+                bool isCandidateDownward = false;
 
                 if (moveY < 0f)
                 {
@@ -246,7 +261,7 @@ namespace Contrast.Player
                         correctedY = platformBounds.Max.y
                                       + playerSize.y * 0.5f
                                       + collisionEpsilon;
-                        blockedDownward = true;
+                        isCandidateDownward = true;
                     }
                     else
                     {
@@ -274,6 +289,8 @@ namespace Contrast.Player
                     bestCorrection = correction;
                     bestY = correctedY;
                     blocked = true;
+                    blockedDownward = isCandidateDownward;
+                    downwardPlatform = isCandidateDownward ? platform : null;
 
                     if (logCollision)
                         Debug.Log($"[COLLISION][Y] BLOCK platform={platform.name} correctedY={correctedY:F4} downward={blockedDownward}");
@@ -283,8 +300,9 @@ namespace Contrast.Player
             return bestY;
         }
 
-        private bool HasGroundSupport(Aabb playerBounds, LogicalColor playerColor)
+        private bool HasGroundSupport(Aabb playerBounds, LogicalColor playerColor, out ColorPlatform supportPlatform)
         {
+            supportPlatform = null;
             for (int i = 0; i < ColorPlatform.All.Count; i++)
             {
                 ColorPlatform platform = ColorPlatform.All[i];
@@ -306,6 +324,7 @@ namespace Contrast.Player
                 if (verticalGap <= groundEpsilon &&
                     playerBounds.Center.y >= platformBounds.Center.y)
                 {
+                    supportPlatform = platform;
                     return true;
                 }
             }
@@ -340,17 +359,20 @@ namespace Contrast.Player
         public readonly bool IsGrounded;
         public readonly bool BlockedX;
         public readonly bool BlockedY;
+        public readonly ColorPlatform GroundedPlatform;
 
         public CollisionResult(
             Vector2 finalMove,
             bool isGrounded,
             bool blockedX,
-            bool blockedY)
+            bool blockedY,
+            ColorPlatform groundedPlatform = null)
         {
             FinalMove = finalMove;
             IsGrounded = isGrounded;
             BlockedX = blockedX;
             BlockedY = blockedY;
+            GroundedPlatform = groundedPlatform;
         }
     }
 }

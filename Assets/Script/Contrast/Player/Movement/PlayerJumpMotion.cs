@@ -66,6 +66,11 @@ namespace Contrast.Player
 
         public Vector2 GetMoveIntent(float deltaTime, bool isGrounded)
         {
+            return GetMoveIntent(deltaTime, isGrounded, false);
+        }
+
+        public Vector2 GetMoveIntent(float deltaTime, bool isGrounded, bool fastFall)
+        {
             deltaTime = Mathf.Max(0f, deltaTime);
 
             if (isGrounded && !jumping)
@@ -77,6 +82,12 @@ namespace Contrast.Player
             float gravity = Physics2D.gravity.y * rb.gravityScale;
             Vector2 velocity = rb.linearVelocity;
 
+            if (fastFall)
+            {
+                // HTML: vy += 900 * dt, which is 900 / 64 = ~14.0625 units/s^2 extra downward acceleration
+                velocity.y -= 14.0625f * deltaTime;
+            }
+
             velocity.y += gravity * deltaTime;
             velocity.y = Mathf.Max(velocity.y, -maxFallSpeed);
             rb.linearVelocity = velocity;
@@ -86,7 +97,7 @@ namespace Contrast.Player
             if (logMotion)
             {
                 Debug.Log(
-                    $"[JumpMotion] velocity={velocity} intent={intent} grounded={isGrounded} jumping={jumping}");
+                    $"[JumpMotion] velocity={velocity} intent={intent} grounded={isGrounded} jumping={jumping} fastFall={fastFall}");
             }
 
             return intent;

@@ -18,10 +18,14 @@ namespace Contrast.Player
         [Header("Player Geometry")]
         [SerializeField] private Vector2 playerSize = Vector2.one;
         [SerializeField] private Vector2 playerOffset = Vector2.zero;
+        [Header("Void Fall")]
+        [SerializeField] private float voidGraceUnits = 3.75f;
+        private float lastSupportedFeet = float.NegativeInfinity;
 
-        [Header("Color")]
+        [Header("Color & Phase")]
         [SerializeField] private LogicalColor currentColor = LogicalColor.White;
-        [SerializeField, Range(0f, 254f)] private float currentColorValue = 0f;
+        [SerializeField, Range(0f, 255f)] private float currentColorValue = 255f;
+        [SerializeField] private float currentPhase = 0f;
         [SerializeField] private bool autoCreateSprite = true;
 
         [Header("Debug")]
@@ -30,8 +34,15 @@ namespace Contrast.Player
         public PlayerState State { get; private set; } = PlayerState.Falling;
         public LogicalColor CurrentColor => currentColor;
         public float CurrentColorValue => currentColorValue;
+        public float CurrentPhase => currentPhase;
+        public float CurrentIntensity => CalculateIntensity(currentPhase);
+        public bool NewtonMarkRequested { get; private set; }
+        public event System.Action OnNewtonMarkRequested;
+
         public Vector2 PlayerSize => playerSize;
         public Vector2 PlayerOffset => playerOffset;
+        public ColorPlatform GroundedPlatform { get; private set; }
+        public bool IsGrounded => isGrounded;
 
         private SpriteRenderer sr;
         private PlayerInput inputReader;
@@ -39,6 +50,20 @@ namespace Contrast.Player
         private PlayerJumpMotion jumpMotion;
         private bool isGrounded;
         private Vector2 riderDisplacement;
+        private bool inputEnabled = true;
+
+        public void SetInputEnabled(bool enabled)
+        {
+            inputEnabled = enabled;
+        }
+
+#if UNITY_EDITOR
+        public void SetGroundedForTest(bool grounded, ColorPlatform platform)
+        {
+            isGrounded = grounded;
+            GroundedPlatform = platform;
+        }
+#endif
 
         public void SetRiderDisplacement(Vector2 disp)
         {
@@ -81,8 +106,21 @@ namespace Contrast.Player
 
             deltaTime = Mathf.Max(0f, deltaTime);
 
+            NewtonMarkRequested = false;
+
             PlayerInputIntent input =
                 inputReader.ReadInput(deltaTime, moveSpeed, isGrounded);
+
+            if (!inputEnabled)
+            {
+                input = new PlayerInputIntent(Vector2.zero, false, false, currentColor, 0);
+            }
+
+            if (input.NewtonMarkRequested)
+            {
+                NewtonMarkRequested = true;
+                OnNewtonMarkRequested?.Invoke();
+            }
 
             if (logFlow)
             {
@@ -91,21 +129,36 @@ namespace Contrast.Player
                     $"pos={transform.position} " +
                     $"inputMove={input.Move} " +
                     $"jumpRequested={input.JumpRequested} " +
+                    $"fastFall={input.FastFall} " +
+                    $"phaseTuneDelta={input.PhaseTuneDelta:F3} " +
+                    $"newtonMark={NewtonMarkRequested} " +
                     $"colorChange={input.HasColorChange} " +
                     $"color={input.RequestedColor} " +
+                    $"phase={currentPhase:F2} " +
                     $"grounded={isGrounded}");
             }
 
-            if (input.ColorChunkStep != 0)
+            if (Mathf.Abs(input.PhaseTuneDelta) > Mathf.Epsilon)
+            {
+                TunePhase(input.PhaseTuneDelta);
+            }
+            else if (input.ColorChunkStep != 0)
+            {
                 StepColorChunk(input.ColorChunkStep);
+            }
             else if (input.HasColorChange)
+            {
                 SetColor(input.RequestedColor);
+            }
 
             if (input.JumpRequested)
+            {
                 jumpMotion?.RequestJump();
+                Contrast.Audio.ContrastAudioManager.Instance?.PlayJump();
+            }
 
             Vector2 jumpIntent = jumpMotion != null
-                ? jumpMotion.GetMoveIntent(deltaTime, isGrounded)
+                ? jumpMotion.GetMoveIntent(deltaTime, isGrounded, input.FastFall)
                 : Vector2.zero;
 
             if (logFlow)
@@ -142,6 +195,7 @@ namespace Contrast.Player
             ApplyMove(result.FinalMove);
 
             isGrounded = result.IsGrounded;
+            GroundedPlatform = isGrounded ? result.GroundedPlatform : null;
 
             if (result.IsStuck)
             {
@@ -150,6 +204,7 @@ namespace Contrast.Player
             }
             else if (isGrounded)
             {
+                lastSupportedFeet = transform.position.y - playerSize.y * 0.5f;
                 State = PlayerState.Grounded;
                 jumpMotion?.NotifyGrounded(true);
             }
@@ -157,11 +212,44 @@ namespace Contrast.Player
             {
                 State = PlayerState.Falling;
                 jumpMotion?.NotifyGrounded(false);
+
+                // Authoritative HTML free-world void death:
+                // If the player drops beyond void grace distance with no potential reachable landing below, trigger death.
+                float currentFeet = transform.position.y - playerSize.y * 0.5f;
+                if (!float.IsNegativeInfinity(lastSupportedFeet) &&
+                    currentFeet < lastSupportedFeet - voidGraceUnits &&
+                    !HasPotentialLandingBelow())
+                {
+                    Die();
+                }
             }
 
             GameManager gm = GameManager.Instance;
             if (gm != null && transform.position.y < gm.KillY)
                 Die();
+        }
+
+        private bool HasPotentialLandingBelow()
+        {
+            float feet = transform.position.y - playerSize.y * 0.5f;
+            float left = transform.position.x - playerSize.x * 0.5f;
+            float right = transform.position.x + playerSize.x * 0.5f;
+
+            for (int i = 0; i < ColorPlatform.All.Count; i++)
+            {
+                ColorPlatform p = ColorPlatform.All[i];
+                if (p == null || !p.gameObject.activeInHierarchy || !p.enabled) continue;
+                Rect aabb = p.GetAabb();
+                float deltaY = feet - aabb.yMax;
+                if (deltaY < -0.05f) continue; // Platform top is above player feet
+
+                // Optimistic freefall reach
+                float airborneTime = Mathf.Sqrt(2f * Mathf.Max(0f, deltaY) / 20f) + 0.28f;
+                float horizontalReach = Mathf.Max(3.28f, moveSpeed * airborneTime) + playerSize.x;
+                if (aabb.xMin <= right + horizontalReach && aabb.xMax >= left - horizontalReach)
+                    return true;
+            }
+            return false;
         }
 
         /// <summary>
@@ -215,17 +303,93 @@ namespace Contrast.Player
             SetColor(next);
         }
 
+        public static float WrapPhase(float phi)
+        {
+            float tau = Mathf.PI * 2f;
+            phi %= tau;
+            return phi < 0f ? phi + tau : phi;
+        }
+
+        public static float CalculateIntensity(float phase)
+        {
+            return Mathf.Clamp01((1f + Mathf.Cos(phase)) * 0.5f);
+        }
+
+        public static LogicalColor ClassifyIntensity(float intensity)
+        {
+            // Authoritative HTML thresholds:
+            // WHITE: I >= 0.78
+            // BLACK: I <= 0.22
+            // GRAY:  0.22 < I < 0.78
+            if (intensity >= 0.78f) return LogicalColor.White;
+            if (intensity <= 0.22f) return LogicalColor.Black;
+            return LogicalColor.Gray;
+        }
+
+        public void SetPhase(float phase)
+        {
+            currentPhase = WrapPhase(phase);
+            UpdateColorFromPhase();
+        }
+
+        public void TunePhase(float delta)
+        {
+            currentPhase = WrapPhase(currentPhase + delta);
+            UpdateColorFromPhase();
+        }
+
+        private void UpdateColorFromPhase()
+        {
+            float intensity = CalculateIntensity(currentPhase);
+            LogicalColor newColor = ClassifyIntensity(intensity);
+            if (currentColor != newColor)
+            {
+                Contrast.Audio.ContrastAudioManager.Instance?.PlayColorShift(newColor);
+                currentColor = newColor;
+            }
+
+            currentColorValue = intensity * 255f;
+            ApplyColorVisual();
+
+            if (logFlow)
+            {
+                Debug.Log($"[PHASE_TUNE] phase={currentPhase:F3} intensity={intensity:F3} color={currentColor}");
+            }
+        }
+
         public void SetColor(LogicalColor color)
         {
+            if (currentColor != color)
+            {
+                Contrast.Audio.ContrastAudioManager.Instance?.PlayColorShift(color);
+            }
+
             currentColor = color;
             currentColorValue = ColorClassifier.DefaultValue(color);
+
+            // Synchronize phase with chosen color
+            currentPhase = color switch
+            {
+                LogicalColor.White => 0f,
+                LogicalColor.Gray => Mathf.PI * 0.5f,
+                LogicalColor.Black => Mathf.PI,
+                _ => 0f
+            };
+
             ApplyColorVisual();
 
             if (logFlow)
             {
                 Debug.Log(
-                    $"[COLOR] {currentColor} (val={currentColorValue}) at {transform.position}");
+                    $"[COLOR] {currentColor} (val={currentColorValue}, phase={currentPhase:F2}) at {transform.position}");
             }
+        }
+
+        public void Respawn(Vector2 worldPosition, float phase)
+        {
+            SetSpawnPosition(worldPosition);
+            SetPhase(phase);
+            ResetState();
         }
 
         public void SetColorValue(float value)
@@ -247,6 +411,7 @@ namespace Contrast.Player
                 worldPosition.x,
                 worldPosition.y,
                 transform.position.z);
+            lastSupportedFeet = worldPosition.y - playerSize.y * 0.5f;
         }
 
         /// <summary>
@@ -263,6 +428,9 @@ namespace Contrast.Player
         public void ResetState()
         {
             isGrounded = false;
+            GroundedPlatform = null;
+            riderDisplacement = Vector2.zero;
+            inputEnabled = true;
             jumpMotion?.ResetMotion();
             State = PlayerState.Falling;
         }
@@ -270,6 +438,8 @@ namespace Contrast.Player
         public void StopMovement()
         {
             isGrounded = false;
+            GroundedPlatform = null;
+            riderDisplacement = Vector2.zero;
             jumpMotion?.ResetMotion();
 
             if (State != PlayerState.Dead)
@@ -280,7 +450,10 @@ namespace Contrast.Player
         {
             State = PlayerState.Dead;
             isGrounded = false;
+            GroundedPlatform = null;
+            riderDisplacement = Vector2.zero;
             jumpMotion?.ResetMotion();
+            Contrast.Audio.ContrastAudioManager.Instance?.PlayDeath();
             Contrast.Presentation.VisualPresentationManager.Instance?.NotifyPlayerDied();
             GameManager.Instance?.OnPlayerDied();
         }

@@ -43,6 +43,25 @@ namespace Contrast.Presentation
             transform.position = new Vector3(pos.x, pos.y, 2f);
         }
 
+        public void Configure(float scale, float outer, float sLambda = 550f, float rLambda = 550f)
+        {
+            ringScale = scale;
+            outerRadius = outer;
+            sourceLambda = sLambda;
+            referenceLambda = rLambda;
+            if (interferenceTexture != null)
+            {
+                DestroyImmediate(interferenceTexture);
+                interferenceTexture = null;
+            }
+            if (meshFilter != null && meshFilter.sharedMesh != null)
+            {
+                DestroyImmediate(meshFilter.sharedMesh);
+                meshFilter.sharedMesh = null;
+            }
+            EnsureApparatus();
+        }
+
         private void EnsureApparatus()
         {
             if (meshFilter == null)

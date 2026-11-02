@@ -1,4 +1,5 @@
 using Contrast.Color;
+using Contrast.Level;
 using UnityEngine;
 
 namespace Contrast.Player
@@ -143,7 +144,8 @@ namespace Contrast.Player
                 collision.BlockedX,
                 collision.BlockedY,
                 combinedIntent,
-                pushMove);
+                pushMove,
+                collision.GroundedPlatform);
         }
     }
 
@@ -159,6 +161,7 @@ namespace Contrast.Player
         public readonly bool BlockedY;
         public readonly Vector2 CombinedIntent;
         public readonly Vector2 PushMove;
+        public readonly ColorPlatform GroundedPlatform;
 
         public MovementResult(
             Vector2 finalMove,
@@ -170,7 +173,8 @@ namespace Contrast.Player
             bool blockedX,
             bool blockedY,
             Vector2 combinedIntent,
-            Vector2 pushMove)
+            Vector2 pushMove,
+            ColorPlatform groundedPlatform = null)
         {
             FinalMove = finalMove;
             IsGrounded = isGrounded;
@@ -182,6 +186,7 @@ namespace Contrast.Player
             BlockedY = blockedY;
             CombinedIntent = combinedIntent;
             PushMove = pushMove;
+            GroundedPlatform = groundedPlatform;
         }
     }
 }

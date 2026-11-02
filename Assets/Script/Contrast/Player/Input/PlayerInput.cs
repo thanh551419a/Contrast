@@ -1,19 +1,45 @@
 using Contrast.Color;
+using Contrast.Input;
+using Contrast.UI;
 using UnityEngine;
-#if ENABLE_INPUT_SYSTEM
-using UnityEngine.InputSystem;
-#endif
 
 namespace Contrast.Player
 {
     /// <summary>
-    /// Reads player input and creates data only.
-    /// It never changes Player position and never performs collision logic.
+    /// Reads player input through platform adapters (<see cref="IPlatformInputAdapter"/>)
+    /// and produces pure data <see cref="PlayerInputIntent"/>.
+    /// Decouples game rules from specific hardware (Windows Keyboard/Mouse, Android Touchscreen).
+    /// It never mutates Player transform and never executes collision logic.
     /// </summary>
     public sealed class PlayerInput : MonoBehaviour
     {
         [Header("Debug")]
         [SerializeField] private bool logInput = true;
+
+        private readonly IPlatformInputAdapter keyboardAdapter = new StandaloneKeyboardInputAdapter();
+        private IPlatformInputAdapter customAdapter;
+
+        public IPlatformInputAdapter KeyboardAdapter => keyboardAdapter;
+        public IPlatformInputAdapter CustomAdapter => customAdapter;
+
+        /// <summary>
+        /// Allows unit/audit tests to inject a specific platform adapter for input equivalence verification.
+        /// </summary>
+        public void SetCustomAdapter(IPlatformInputAdapter adapter)
+        {
+            customAdapter = adapter;
+        }
+
+        /// <summary>
+        /// Deprecated flag from legacy prototype. Kept for backward compatibility.
+        /// Space is now strictly and exclusively a Jump input across all stages.
+        /// </summary>
+        public static bool IsNewtonFinaleActive { get; set; } = false;
+
+        public static bool IsJumpInputPressed(bool wPressed, bool spacePressed)
+        {
+            return wPressed || spacePressed;
+        }
 
         public PlayerInputIntent ReadInput(
             float deltaTime,
@@ -24,101 +50,107 @@ namespace Contrast.Player
 
             Vector2 moveIntent = Vector2.zero;
             bool jumpRequested = false;
+            bool fastFall = false;
+            float phaseTuneAxis = 0f;
+            bool newtonMark = false;
             bool hasColorChange = false;
             int colorChunkStep = 0;
             LogicalColor requestedColor = LogicalColor.White;
 
-#if ENABLE_INPUT_SYSTEM
-            Keyboard kb = Keyboard.current;
-            if (kb == null)
+            if (customAdapter != null)
             {
-                if (logInput)
-                    Debug.Log("[INPUT] Keyboard.current = null");
+                float axis = Mathf.Clamp(customAdapter.GetHorizontalAxis(), -1f, 1f);
+                moveIntent = Vector2.right * axis * moveSpeed * deltaTime;
 
-                return new PlayerInputIntent(moveIntent, false, false, requestedColor, 0);
+                if (customAdapter.GetJumpDown() && isGrounded)
+                    jumpRequested = true;
+
+                fastFall = customAdapter.GetFastFall();
+                phaseTuneAxis = Mathf.Clamp(customAdapter.GetPhaseTuneAxis(), -1f, 1f);
+                newtonMark = customAdapter.GetNewtonMarkDown();
+
+                colorChunkStep = customAdapter.GetColorChunkStep();
+                hasColorChange = customAdapter.TryGetDirectColor(out requestedColor);
+                customAdapter.ResetFrameState();
+
+                float customPhaseDelta = phaseTuneAxis * 2.75f * deltaTime;
+
+                return new PlayerInputIntent(
+                    moveIntent,
+                    jumpRequested,
+                    fastFall,
+                    customPhaseDelta,
+                    newtonMark,
+                    hasColorChange,
+                    requestedColor,
+                    colorChunkStep);
             }
 
-            // A/D for horizontal movement
-            float inputX =
-                (kb.dKey.isPressed ? 1f : 0f) -
-                (kb.aKey.isPressed ? 1f : 0f);
+            // 1. Read from physical keyboard adapter (Windows Desktop)
+            float kbAxis = keyboardAdapter.GetHorizontalAxis();
+            bool kbJump = keyboardAdapter.GetJumpDown();
+            bool kbFastFall = keyboardAdapter.GetFastFall();
+            float kbPhaseAxis = keyboardAdapter.GetPhaseTuneAxis();
+            bool kbNewtonMark = keyboardAdapter.GetNewtonMarkDown();
+            int kbColorStep = keyboardAdapter.GetColorChunkStep();
+            bool kbHasDirectColor = keyboardAdapter.TryGetDirectColor(out LogicalColor kbDirectColor);
 
-            moveIntent = Vector2.right * inputX * moveSpeed * deltaTime;
+            // 2. Read from virtual touch adapter (Android Mobile / Touch UI)
+            IPlatformInputAdapter touchAdapter = VirtualControlsUI.Instance?.TouchAdapter;
+            float touchAxis = touchAdapter != null ? touchAdapter.GetHorizontalAxis() : 0f;
+            bool touchJump = touchAdapter != null && touchAdapter.GetJumpDown();
+            bool touchFastFall = touchAdapter != null && touchAdapter.GetFastFall();
+            float touchPhaseAxis = touchAdapter != null ? touchAdapter.GetPhaseTuneAxis() : 0f;
+            bool touchNewtonMark = touchAdapter != null && touchAdapter.GetNewtonMarkDown();
+            int touchColorStep = touchAdapter != null ? touchAdapter.GetColorChunkStep() : 0;
+            LogicalColor touchDirectColor = LogicalColor.White;
+            bool touchHasDirectColor = touchAdapter != null && touchAdapter.TryGetDirectColor(out touchDirectColor);
 
-            if (kb.spaceKey.wasPressedThisFrame && isGrounded)
+            // 3. Compose combined platform input (both channels produce identical commands)
+            float combinedAxis = Mathf.Clamp(kbAxis + touchAxis, -1f, 1f);
+            moveIntent = Vector2.right * combinedAxis * moveSpeed * deltaTime;
+
+            bool jumpPressed = kbJump || touchJump;
+            if (jumpPressed && isGrounded)
+            {
                 jumpRequested = true;
-
-            // Arrow keys change color by chunk of 84
-            if (kb.rightArrowKey.wasPressedThisFrame || kb.upArrowKey.wasPressedThisFrame)
-            {
-                colorChunkStep = 1;
-            }
-            else if (kb.leftArrowKey.wasPressedThisFrame || kb.downArrowKey.wasPressedThisFrame)
-            {
-                colorChunkStep = -1;
             }
 
-            // Direct digit keys: 1=White (0..84), 2=Gray (85..169), 3=Black (170..254)
-            if (kb.digit1Key.wasPressedThisFrame || kb.numpad1Key.wasPressedThisFrame)
+            fastFall = kbFastFall || touchFastFall;
+            phaseTuneAxis = Mathf.Clamp(kbPhaseAxis + touchPhaseAxis, -1f, 1f);
+            newtonMark = kbNewtonMark || touchNewtonMark;
+
+            float phaseTuneDelta = phaseTuneAxis * 2.75f * deltaTime;
+
+            if (kbColorStep != 0)
+                colorChunkStep = kbColorStep;
+            else if (touchColorStep != 0)
+                colorChunkStep = touchColorStep;
+
+            if (kbHasDirectColor)
             {
                 hasColorChange = true;
-                requestedColor = LogicalColor.White;
+                requestedColor = kbDirectColor;
             }
-            else if (kb.digit2Key.wasPressedThisFrame || kb.numpad2Key.wasPressedThisFrame)
+            else if (touchHasDirectColor)
             {
                 hasColorChange = true;
-                requestedColor = LogicalColor.Gray;
-            }
-            else if (kb.digit3Key.wasPressedThisFrame || kb.numpad3Key.wasPressedThisFrame)
-            {
-                hasColorChange = true;
-                requestedColor = LogicalColor.Black;
-            }
-#else
-            // Fallback for classic InputManager
-            float inputX = 0f;
-            if (Input.GetKey(KeyCode.D)) inputX += 1f;
-            if (Input.GetKey(KeyCode.A)) inputX -= 1f;
-
-            moveIntent = Vector2.right * inputX * moveSpeed * deltaTime;
-
-            if (Input.GetKeyDown(KeyCode.Space) && isGrounded)
-                jumpRequested = true;
-
-            // Arrow keys change color by chunk of 84
-            if (Input.GetKeyDown(KeyCode.RightArrow) || Input.GetKeyDown(KeyCode.UpArrow))
-            {
-                colorChunkStep = 1;
-            }
-            else if (Input.GetKeyDown(KeyCode.LeftArrow) || Input.GetKeyDown(KeyCode.DownArrow))
-            {
-                colorChunkStep = -1;
+                requestedColor = touchDirectColor;
             }
 
-            // Direct digit keys
-            if (Input.GetKeyDown(KeyCode.Alpha1) || Input.GetKeyDown(KeyCode.Keypad1))
-            {
-                hasColorChange = true;
-                requestedColor = LogicalColor.White;
-            }
-            else if (Input.GetKeyDown(KeyCode.Alpha2) || Input.GetKeyDown(KeyCode.Keypad2))
-            {
-                hasColorChange = true;
-                requestedColor = LogicalColor.Gray;
-            }
-            else if (Input.GetKeyDown(KeyCode.Alpha3) || Input.GetKeyDown(KeyCode.Keypad3))
-            {
-                hasColorChange = true;
-                requestedColor = LogicalColor.Black;
-            }
-#endif
+            // 4. Reset transient frame states
+            keyboardAdapter.ResetFrameState();
+            touchAdapter?.ResetFrameState();
 
-            if (logInput && (inputX != 0f || jumpRequested || hasColorChange || colorChunkStep != 0))
+            if (logInput && (combinedAxis != 0f || jumpRequested || fastFall || phaseTuneAxis != 0f || newtonMark || hasColorChange || colorChunkStep != 0))
             {
                 Debug.Log(
-                    $"[INPUT] inputX={inputX:F2} " +
+                    $"[INPUT] axis={combinedAxis:F2} " +
                     $"moveIntent={moveIntent} " +
                     $"jumpRequested={jumpRequested} " +
+                    $"fastFall={fastFall} " +
+                    $"phaseDelta={phaseTuneDelta:F3} " +
+                    $"newtonMark={newtonMark} " +
                     $"colorStep={colorChunkStep} " +
                     $"colorChange={hasColorChange} " +
                     $"requestedColor={requestedColor}");
@@ -127,6 +159,9 @@ namespace Contrast.Player
             return new PlayerInputIntent(
                 moveIntent,
                 jumpRequested,
+                fastFall,
+                phaseTuneDelta,
+                newtonMark,
                 hasColorChange,
                 requestedColor,
                 colorChunkStep);
@@ -137,6 +172,9 @@ namespace Contrast.Player
     {
         public readonly Vector2 Move;
         public readonly bool JumpRequested;
+        public readonly bool FastFall;
+        public readonly float PhaseTuneDelta;
+        public readonly bool NewtonMarkRequested;
         public readonly bool HasColorChange;
         public readonly LogicalColor RequestedColor;
         public readonly int ColorChunkStep;
@@ -144,15 +182,32 @@ namespace Contrast.Player
         public PlayerInputIntent(
             Vector2 move,
             bool jumpRequested,
+            bool fastFall,
+            float phaseTuneDelta,
+            bool newtonMarkRequested,
             bool hasColorChange,
             LogicalColor requestedColor,
             int colorChunkStep = 0)
         {
             Move = move;
             JumpRequested = jumpRequested;
+            FastFall = fastFall;
+            PhaseTuneDelta = phaseTuneDelta;
+            NewtonMarkRequested = newtonMarkRequested;
             HasColorChange = hasColorChange;
             RequestedColor = requestedColor;
             ColorChunkStep = colorChunkStep;
+        }
+
+        // Backward compatible constructor
+        public PlayerInputIntent(
+            Vector2 move,
+            bool jumpRequested,
+            bool hasColorChange,
+            LogicalColor requestedColor,
+            int colorChunkStep = 0)
+            : this(move, jumpRequested, false, 0f, false, hasColorChange, requestedColor, colorChunkStep)
+        {
         }
     }
 }

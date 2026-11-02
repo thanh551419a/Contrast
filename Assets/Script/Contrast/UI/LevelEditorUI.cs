@@ -291,7 +291,13 @@ namespace Contrast.UI
             exportFilenameInput.text = Contrast.Data.LevelRepository.GenerateUniqueFileName();
 
             CreateTopBarButton(top.transform, "TEST PLAY", new Vector2(520f, -38f), new Vector2(125f, 46f), new UnityEngine.Color(0.18f, 0.72f, 0.38f, 1f), UnityEngine.Color.white, () => controller?.RequestPlayLevel());
-            CreateTopBarButton(top.transform, "BACK", new Vector2(645f, -38f), new Vector2(95f, 46f), new UnityEngine.Color(0.35f, 0.35f, 0.38f, 1f), UnityEngine.Color.white, () => GameManager.Instance?.ReturnToMainMenu());
+            CreateTopBarButton(top.transform, "BACK", new Vector2(645f, -38f), new Vector2(95f, 46f), new UnityEngine.Color(0.35f, 0.35f, 0.38f, 1f), UnityEngine.Color.white, () =>
+            {
+                if (GameManager.Instance != null)
+                    GameManager.Instance.ReturnToMainMenu();
+                else
+                    Application.Quit();
+            });
             CreateTopBarButton(top.transform, "FIT MAP", new Vector2(755f, -38f), new Vector2(100f, 46f), new UnityEngine.Color(0.24f, 0.52f, 0.88f, 1f), UnityEngine.Color.white, () => controller?.FitMap());
             BuildResetButton(top.transform, new Vector2(875f, -38f), new Vector2(115f, 46f));
 

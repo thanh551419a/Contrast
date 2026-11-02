@@ -41,6 +41,7 @@ namespace Contrast.Level
         [Header("Dependencies")]
         [SerializeField] private LevelLoader levelLoader;
         [SerializeField] private LevelEditorUI ui;
+        [SerializeField] private LevelSelectUI levelSelectUI;
 
         [Header("Placement Defaults")]
         [SerializeField] private Vector2 defaultPlatformSize = Vector2.one;
@@ -182,9 +183,21 @@ namespace Contrast.Level
 #endif
 
             // In standalone build (or if user cancelled in-editor file picker):
-            if (GameManager.Instance != null && GameManager.Instance.LevelSelectUI != null)
+            LevelSelectUI picker = levelSelectUI;
+            if (picker == null && GameManager.Instance != null)
+                picker = GameManager.Instance.LevelSelectUI;
+            if (picker == null)
+                picker = FindAnyObjectByType<LevelSelectUI>(FindObjectsInactive.Include);
+            if (picker == null)
             {
-                GameManager.Instance.LevelSelectUI.OpenForImport((selectedPath) =>
+                GameObject pickerGo = new GameObject("LevelSelectUI");
+                picker = pickerGo.AddComponent<LevelSelectUI>();
+                levelSelectUI = picker;
+            }
+
+            if (picker != null)
+            {
+                picker.OpenForImport((selectedPath) =>
                 {
                     ImportJson(selectedPath);
                 });
@@ -285,6 +298,11 @@ namespace Contrast.Level
             }
         }
 
+        public void SetWorkingCopy(LevelData data)
+        {
+            editorWorkingCopy = data;
+        }
+
         public void SelectPlatform(ColorPlatform platform)
         {
             if (platform == null)
@@ -299,6 +317,7 @@ namespace Contrast.Level
             activeResizeHandle = ResizeHandleKind.None;
             activeTrajHandle = TrajectoryHandleKind.None;
 
+            trajectoryController ??= new TrajectoryEditController(handleSize, handleHitRadius);
             trajectoryController.SetTarget(platform, ui);
             ui?.SetSelectedPlatform(platform);
             RefreshHandles();
@@ -1570,17 +1589,8 @@ namespace Contrast.Level
                 SafeDestroy(rogueObjs);
             }
 
-            // 6. Update authoritative data sources to prevent stale data resurrection
-            CameraBoundaryData preservedBoundary = editorWorkingCopy?.cameraBoundary;
-            editorWorkingCopy = new LevelData
-            {
-                platforms = new ColorPlatformData[0],
-                startPos = null,
-                checkPoint = null,
-                end = null,
-                spawnPoint = null,
-                cameraBoundary = preservedBoundary
-            };
+            // 6. Clear working copy to allow fresh level loads to become authoritative
+            editorWorkingCopy = null;
 
             if (levelLoader != null)
             {

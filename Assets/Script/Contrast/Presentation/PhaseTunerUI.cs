@@ -268,14 +268,14 @@ namespace Contrast.Presentation
             rt.anchorMax = new Vector2(0f, 1f);
             rt.pivot = new Vector2(0f, 1f);
             rt.anchoredPosition = new Vector2(24f, -24f);
-            rt.sizeDelta = new Vector2(280f, 130f);
-
             // Controls text
-            CreateLabel(hintPanel.transform, "ĐIỀU KHIỂN QUANG HỌC", new Vector2(16f, 106f), 11, FontStyle.Bold, new Color(0.95f, 0.98f, 1f, 0.9f));
-            CreateLabel(hintPanel.transform, "A / D          DI CHUYỂN", new Vector2(16f, 80f), 11, FontStyle.Normal, new Color(0.85f, 0.90f, 0.95f, 0.75f));
-            CreateLabel(hintPanel.transform, "SPACE / W      NHẢY", new Vector2(16f, 58f), 11, FontStyle.Normal, new Color(0.85f, 0.90f, 0.95f, 0.75f));
-            CreateLabel(hintPanel.transform, "← / →          ĐỔI PHA (TUNING)", new Vector2(16f, 36f), 11, FontStyle.Normal, new Color(0.85f, 0.90f, 0.95f, 0.75f));
-            CreateLabel(hintPanel.transform, "R              RESTART LEVEL", new Vector2(16f, 14f), 10, FontStyle.Normal, new Color(0.75f, 0.82f, 0.88f, 0.50f));
+            CreateLabel(hintPanel.transform, "ĐIỀU KHIỂN QUANG HỌC", new Vector2(16f, 130f), 11, FontStyle.Bold, new Color(0.95f, 0.98f, 1f, 0.9f));
+            CreateLabel(hintPanel.transform, "A / D          DI CHUYỂN", new Vector2(16f, 108f), 11, FontStyle.Normal, new Color(0.85f, 0.90f, 0.95f, 0.75f));
+            CreateLabel(hintPanel.transform, "SPACE / W      NHẢY", new Vector2(16f, 88f), 11, FontStyle.Normal, new Color(0.85f, 0.90f, 0.95f, 0.75f));
+            CreateLabel(hintPanel.transform, "S              FAST FALL", new Vector2(16f, 68f), 11, FontStyle.Normal, new Color(0.85f, 0.90f, 0.95f, 0.75f));
+            CreateLabel(hintPanel.transform, "← / →          ĐỔI PHA (TUNING)", new Vector2(16f, 48f), 11, FontStyle.Normal, new Color(0.85f, 0.90f, 0.95f, 0.75f));
+            CreateLabel(hintPanel.transform, "X              ĐO VÂN NEWTON", new Vector2(16f, 28f), 11, FontStyle.Normal, new Color(1f, 0.88f, 0.45f, 0.85f));
+            CreateLabel(hintPanel.transform, "R              RESTART LEVEL", new Vector2(16f, 10f), 10, FontStyle.Normal, new Color(0.75f, 0.82f, 0.88f, 0.50f));
         }
 
         private void BuildCheckpointToast(Transform parent)
@@ -354,21 +354,15 @@ namespace Contrast.Presentation
             if (!isPlaying)
                 return;
 
-            // Calculate current phase
+            if (player == null)
+                player = FindAnyObjectByType<PlayerController>();
+
+            float currentPhase = player != null ? player.CurrentPhase : simulatedPhase;
             LogicalColor color = player != null ? player.CurrentColor : LogicalColor.White;
-            float targetPhase = color switch
-            {
-                LogicalColor.White => 0f,
-                LogicalColor.Gray => Mathf.PI * 0.5f,
-                LogicalColor.Black => Mathf.PI,
-                _ => 0f
-            };
 
-            simulatedPhase = Mathf.LerpAngle(simulatedPhase * Mathf.Rad2Deg, targetPhase * Mathf.Rad2Deg, Time.deltaTime * 10f) * Mathf.Deg2Rad;
-
-            UpdateWaveTexture(simulatedPhase);
-            UpdateStatusBadge(color, simulatedPhase);
-            UpdateOmbreCursor(simulatedPhase);
+            UpdateWaveTexture(currentPhase);
+            UpdateStatusBadge(color, currentPhase);
+            UpdateOmbreCursor(currentPhase);
             UpdateCheckpointToast();
         }
 

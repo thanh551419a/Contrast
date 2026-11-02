@@ -36,17 +36,60 @@ namespace Contrast.Data
             }
         }
 
+        private static string[] GetCandidateExternalDirectories()
+        {
+            try
+            {
+                string baseDir = AppDomain.CurrentDomain.BaseDirectory;
+                if (string.IsNullOrEmpty(baseDir))
+                    return new string[0];
+
+                return new string[]
+                {
+                    Path.GetFullPath(Path.Combine(baseDir, "../../Levels")),
+                    Path.GetFullPath(Path.Combine(baseDir, "../Levels")),
+                    Path.GetFullPath(Path.Combine(baseDir, "Levels"))
+                };
+            }
+            catch
+            {
+                return new string[0];
+            }
+        }
+
         public static string[] ListLevelFiles()
         {
             EnsureDirectory();
             string dir = GetLevelsDirectory();
 
-            DirectoryInfo dirInfo = new DirectoryInfo(dir);
-            FileInfo[] files = dirInfo.GetFiles("*.json");
+            var fileMap = new System.Collections.Generic.Dictionary<string, string>(System.StringComparer.OrdinalIgnoreCase);
 
-            return files
-                .OrderByDescending(f => f.LastWriteTimeUtc)
-                .Select(f => f.FullName)
+            if (Directory.Exists(dir))
+            {
+                DirectoryInfo dirInfo = new DirectoryInfo(dir);
+                foreach (FileInfo f in dirInfo.GetFiles("*.json"))
+                {
+                    fileMap[f.Name] = f.FullName;
+                }
+            }
+
+            foreach (string extDir in GetCandidateExternalDirectories())
+            {
+                if (Directory.Exists(extDir))
+                {
+                    DirectoryInfo extInfo = new DirectoryInfo(extDir);
+                    foreach (FileInfo f in extInfo.GetFiles("*.json"))
+                    {
+                        if (!fileMap.ContainsKey(f.Name))
+                        {
+                            fileMap[f.Name] = f.FullName;
+                        }
+                    }
+                }
+            }
+
+            return fileMap.Values
+                .OrderByDescending(path => File.GetLastWriteTimeUtc(path))
                 .ToArray();
         }
 
@@ -68,6 +111,26 @@ namespace Contrast.Data
             }
 
             File.WriteAllText(path, json);
+
+            // Sync to shared external Release/Levels directory if available
+            try
+            {
+                string fileName = Path.GetFileName(path);
+                foreach (string extDir in GetCandidateExternalDirectories())
+                {
+                    if (Directory.Exists(extDir) && !string.Equals(dir, extDir, StringComparison.OrdinalIgnoreCase))
+                    {
+                        string extPath = Path.Combine(extDir, fileName);
+                        File.WriteAllText(extPath, json);
+                        SafeLog($"[LEVEL_REPO] Mirrored level save to external directory: {extPath}");
+                        break;
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                SafeLogWarning($"[LEVEL_REPO] External sync note: {ex.Message}");
+            }
 
 #if UNITY_WEBGL && !UNITY_EDITOR
             // WebGL persistentDataPath sync to IndexedDB
@@ -152,6 +215,28 @@ namespace Contrast.Data
         {
             EnsureDirectory();
             string dir = GetLevelsDirectory();
+
+            string[] campaignLevels = new string[] { "L01", "L02", "L03", "Easy_Level" };
+            foreach (string lvlName in campaignLevels)
+            {
+                string targetPath = Path.Combine(dir, $"{lvlName}.json");
+                if (!File.Exists(targetPath))
+                {
+                    try
+                    {
+                        TextAsset asset = Resources.Load<TextAsset>($"Levels/{lvlName}");
+                        if (asset != null && !string.IsNullOrWhiteSpace(asset.text))
+                        {
+                            File.WriteAllText(targetPath, asset.text);
+                            SafeLog($"[LEVEL_REPO] Seeded {lvlName} from Resources template 'Levels/{lvlName}'.");
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        SafeLogWarning($"[LEVEL_REPO] Could not seed {lvlName}: {ex.Message}");
+                    }
+                }
+            }
 
             string[] existing = Directory.GetFiles(dir, "*.json");
             if (existing != null && existing.Length > 0)

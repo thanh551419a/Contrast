@@ -28,6 +28,7 @@ namespace Contrast.Core
         [SerializeField] private MainMenuUI mainMenuUI;
         [SerializeField] private LevelSelectUI levelSelectUI;
         [SerializeField] private LoadingOverlayUI loadingOverlayUI;
+        [SerializeField] private VirtualControlsUI virtualControlsUI;
         [SerializeField] private LevelEditorUI levelEditorUI;
         [SerializeField] private LevelEditorController levelEditor;
         [SerializeField] private PlayerController player;
@@ -43,6 +44,7 @@ namespace Contrast.Core
         public CameraFollow CameraFollow => cameraFollow;
         public LevelSelectUI LevelSelectUI => levelSelectUI;
         public LoadingOverlayUI LoadingOverlayUI => loadingOverlayUI;
+        public VirtualControlsUI VirtualControlsUI => virtualControlsUI;
         public InGameMenuUI InGameMenuUI => inGameMenuUI;
 
         private void Awake()
@@ -64,6 +66,7 @@ namespace Contrast.Core
             mainMenuUI ??= FindAnyObjectByType<MainMenuUI>(FindObjectsInactive.Include);
             levelSelectUI ??= FindAnyObjectByType<LevelSelectUI>(FindObjectsInactive.Include);
             loadingOverlayUI ??= FindAnyObjectByType<LoadingOverlayUI>(FindObjectsInactive.Include);
+            virtualControlsUI ??= FindAnyObjectByType<VirtualControlsUI>(FindObjectsInactive.Include);
             levelEditorUI ??= FindAnyObjectByType<LevelEditorUI>(FindObjectsInactive.Include);
             levelEditor ??= FindAnyObjectByType<LevelEditorController>(FindObjectsInactive.Include);
 
@@ -72,6 +75,9 @@ namespace Contrast.Core
 
             if (gameControlUI == null)
                 gameControlUI = new GameObject("GameControlUI").AddComponent<GameControlUI>();
+
+            if (virtualControlsUI == null)
+                virtualControlsUI = new GameObject("VirtualControlsUI").AddComponent<VirtualControlsUI>();
 
             if (inGameMenuUI == null)
                 inGameMenuUI = new GameObject("InGameMenuUI").AddComponent<InGameMenuUI>();
@@ -531,6 +537,7 @@ namespace Contrast.Core
             levelSelectUI?.Show(state == GameState.LevelSelect);
             loadingOverlayUI?.Show(state == GameState.Loading);
             gameControlUI?.Show(state == GameState.Playing);
+            virtualControlsUI?.Show(state == GameState.Playing);
             inGameMenuUI?.Show(state == GameState.Paused, CurrentEntryContext);
             levelEditorUI?.Show(state == GameState.Editing);
 

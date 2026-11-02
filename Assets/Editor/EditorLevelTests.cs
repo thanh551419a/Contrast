@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using Contrast.Color;
 using Contrast.Data;
+using Contrast.Input;
 using Contrast.Level;
 using Contrast.Level.EditorInteraction;
 using Contrast.Player;
@@ -61,6 +62,11 @@ namespace Contrast.Tests
             Test_FitMap_And_LevelBounds_Calculations();
             Test_ResetLevel_Functionality();
             Test_GhostPlatform_TestPlay_Lifecycle_And_Reset();
+            Test_EasyNewtonFinale_Integration();
+            Test_PlatformInputAdapters_And_Equivalence();
+            Test_StandaloneLevelEditor_Lifecycle();
+            Test_CampaignLevels_JSON_Validation();
+            Test_Newton_Marking_Sequence_And_Tolerances();
 
             Debug.Log("================================================================================");
             Debug.Log($"[TEST_SUITE] COMPLETED: {passedCount} PASSED, {failedCount} FAILED, 0 BLOCKED");
@@ -73,6 +79,19 @@ namespace Contrast.Tests
                 Debug.Log("[TEST_SUITE] ALL AUDIT AND ACCEPTANCE TESTS PASSED SUCCESSFULLY!");
             }
             Debug.Log("================================================================================");
+        }
+
+        public static void RunAllTestsBatch()
+        {
+            RunAllEditorTests();
+            if (failedCount > 0)
+            {
+                EditorApplication.Exit(1);
+            }
+            else
+            {
+                EditorApplication.Exit(0);
+            }
         }
 
         private static void AssertTrue(bool condition, string testName, string details)
@@ -1179,7 +1198,7 @@ namespace Contrast.Tests
                             originX = 10f,
                             originY = 2f,
                             scaleX = 8f,
-                            duration = 4f
+                            duration = 8f
                         }
                     }
                 }
@@ -1227,8 +1246,9 @@ namespace Contrast.Tests
             // Re-load authored level, move it, then test return to Edit mode
             loader.BuildRuntimeLevel(authoredData);
             LevelData beforeTestPlay = ctrl.BuildExportData();
+            ctrl.SetWorkingCopy(beforeTestPlay);
             loader.BuildRuntimeLevel(beforeTestPlay);
-            TrajectorySystem.UpdateAll(2.0f); // advance to turnaround point x=18
+            TrajectorySystem.UpdateAll(4.0f); // advance to turnaround point x=18 (4s = half cycle of 8s PingPong)
 
             // Stop Test Play and return to Edit (rebuilds from working copy)
             ctrl.StartEditing();
@@ -1250,6 +1270,505 @@ namespace Contrast.Tests
             UnityEngine.Object.DestroyImmediate(camGo);
             ColorPlatform.ClearRegistry();
             LevelMarker.All.Clear();
+        }
+
+        private static void Test_EasyNewtonFinale_Integration()
+        {
+            Debug.Log("[TEST] --- Running Test_EasyNewtonFinale_Integration ---");
+
+            // 1. Input mapping test
+            PlayerInput.IsNewtonFinaleActive = false;
+            AssertTrue(PlayerInput.IsJumpInputPressed(false, true), "FinaleInput_NormalSpaceJump", "Space triggers jump outside finale");
+            AssertTrue(PlayerInput.IsJumpInputPressed(true, false), "FinaleInput_NormalWJump", "W triggers jump outside finale");
+            AssertTrue(PlayerInput.IsJumpInputPressed(true, true), "FinaleInput_NormalBothJump", "Both keys trigger jump outside finale");
+
+            PlayerInput.IsNewtonFinaleActive = true;
+            AssertTrue(PlayerInput.IsJumpInputPressed(false, true), "FinaleInput_FinaleSpaceJumps", "Space ALWAYS triggers jump even inside finale");
+            AssertTrue(PlayerInput.IsJumpInputPressed(true, false), "FinaleInput_FinaleWJump", "W triggers jump inside finale");
+            AssertTrue(PlayerInput.IsJumpInputPressed(true, true), "FinaleInput_FinaleBothJump", "W still jumps even if space pressed inside finale");
+            PlayerInput.IsNewtonFinaleActive = false;
+
+            // 2. Easy Level Detection
+            LevelData easyLevel = new LevelData { platforms = new[] { new ColorPlatformData { position = new Vector2Data(45.625f, 0.4375f) } } };
+            LevelData hardLevel = new LevelData { platforms = new[] { new ColorPlatformData { position = new Vector2Data(10f, 10f) } } };
+            AssertTrue(LevelLoader.IsEasyLevel(easyLevel), "FinaleLevel_EasyDetected", "IsEasyLevel returns true for Easy_Level");
+            AssertTrue(!LevelLoader.IsEasyLevel(hardLevel), "FinaleLevel_HardExcluded", "IsEasyLevel returns false for Hard_Level");
+
+            // 3. Mathematical Geometry Verification
+            float ringScale = 3.4375f; // 220 px / 64
+            float rK = ringScale * Mathf.Sqrt(4f); // 6.875 units
+            float rI = ringScale * Mathf.Sqrt(2f); // ~4.86134 units
+            AssertApproximately(6.875f, rK, 0.001f, "FinaleMath_RadiusK", "Platform K radius is exactly 6.875 units (440 px)");
+            AssertApproximately(4.86134f, rI, 0.001f, "FinaleMath_RadiusI", "Platform I radius is exactly 4.86134 units (311.127 px)");
+
+            Vector2 centerO = new Vector2(61.0f, 0.625f);
+            float testAngle = 60f * Mathf.Deg2Rad;
+            Vector2 u = new Vector2(Mathf.Cos(testAngle), Mathf.Sin(testAngle)).normalized;
+            Vector2 ptK = centerO + u * rK;
+            Vector2 ptI = centerO - u * rI;
+            Vector2 ptKp = centerO - u * rK;
+
+            float distB_units = Vector2.Distance(ptK, ptI);
+            float distb_units = Vector2.Distance(ptI, ptKp);
+            AssertApproximately(rK + rI, distB_units, 0.001f, "FinaleMath_DistB", "Measured B equals rK + rI");
+            AssertApproximately(rK - rI, distb_units, 0.001f, "FinaleMath_Distb", "Measured b equals rK - rI");
+
+            float lambdaRefMm = 550f * 1e-6f;
+            float R_mm = 855f;
+            float physicalR1Mm = Mathf.Sqrt(lambdaRefMm * R_mm);
+            float mmPerUnit = physicalR1Mm / ringScale;
+
+            float distB_mm = distB_units * mmPerUnit;
+            float distb_mm = distb_units * mmPerUnit;
+            int orderDelta = Mathf.Abs(4 - 2);
+            float denom = orderDelta * R_mm;
+            float lambdaOutMm = (distB_mm * distb_mm) / denom;
+            float lambdaOutNm = lambdaOutMm * 1e6f;
+            AssertApproximately(550f, lambdaOutNm, 0.05f, "FinaleMath_CalculatedWavelength", "Physical formula calculates exactly 550.0 nm wavelength");
+
+            // 4. Runtime Controller Lifecycle & Platform Registry
+            ColorPlatform.ClearRegistry();
+            GameObject finaleGo = new GameObject("TestEasyNewtonFinale");
+            EasyNewtonFinaleController ctrl = finaleGo.AddComponent<EasyNewtonFinaleController>();
+            ctrl.Initialize(null, null);
+
+            AssertTrue(EasyNewtonFinaleController.Instance != null, "FinaleLifecycle_InstanceRegistered", "Singleton instance is registered");
+            AssertTrue(ctrl.CurrentStep == NewtonFinaleStep.CaptureK, "FinaleLifecycle_InitialStep", "Initial step is CaptureK");
+            AssertTrue(!ctrl.HasK && !ctrl.HasI && !ctrl.HasKp, "FinaleLifecycle_NoInitialCaptures", "No points captured initially");
+
+            // Check platforms registered in ColorPlatform.All
+            bool foundK = false;
+            bool foundI = false;
+            for (int i = 0; i < ColorPlatform.All.Count; i++)
+            {
+                var p = ColorPlatform.All[i];
+                if (p.gameObject.name.Contains("OrbitPlatform_K_White"))
+                {
+                    foundK = true;
+                    AssertApproximately(255f, p.RawGrayscaleColor, 0.01f, "FinalePlat_WhiteColor", "Platform K has white color 255");
+                    var traj = p.GetTrajectory();
+                    AssertTrue(traj != null && traj.Config != null && traj.Config.curveType == TrajectoryCurveType.Circle, "FinalePlat_WhiteTrajectoryCircle", "Platform K has Circle trajectory");
+                    AssertApproximately(6.875f, traj.Config.radius, 0.001f, "FinalePlat_WhiteTrajectoryRadius", "Platform K radius is 6.875");
+                    AssertApproximately(10.8f, traj.Config.duration, 0.001f, "FinalePlat_WhiteTrajectoryPeriod", "Platform K period is 10.8s");
+                }
+                else if (p.gameObject.name.Contains("OrbitPlatform_I_Gray"))
+                {
+                    foundI = true;
+                    AssertApproximately(128f, p.RawGrayscaleColor, 0.01f, "FinalePlat_GrayColor", "Platform I has gray color 128");
+                    var traj = p.GetTrajectory();
+                    AssertTrue(traj != null && traj.Config != null && traj.Config.curveType == TrajectoryCurveType.Circle, "FinalePlat_GrayTrajectoryCircle", "Platform I has Circle trajectory");
+                    AssertApproximately(4.86134f, traj.Config.radius, 0.01f, "FinalePlat_GrayTrajectoryRadius", "Platform I radius is 4.86134");
+                    AssertApproximately(8.6f, traj.Config.duration, 0.001f, "FinalePlat_GrayTrajectoryPeriod", "Platform I period is 8.6s");
+                }
+            }
+            AssertTrue(foundK, "FinalePlat_WhitePlatformRegistered", "OrbitPlatform_K_White registered in ColorPlatform.All");
+            AssertTrue(foundI, "FinalePlat_GrayPlatformRegistered", "OrbitPlatform_I_Gray registered in ColorPlatform.All");
+
+            // 5. Test Teardown
+            ctrl.Teardown();
+            UnityEngine.Object.DestroyImmediate(finaleGo);
+            AssertTrue(EasyNewtonFinaleController.Instance == null, "FinaleLifecycle_InstanceCleared", "Singleton instance cleared after teardown");
+            AssertTrue(ColorPlatform.All.Count == 0, "FinaleLifecycle_RegistryClean", "ColorPlatform.All is empty after teardown");
+        }
+
+        private static void Test_PlatformInputAdapters_And_Equivalence()
+        {
+            Debug.Log("[TEST_CASE] Starting Test_PlatformInputAdapters_And_Equivalence");
+
+            // 1. Test StandaloneKeyboardInputAdapter contract
+            StandaloneKeyboardInputAdapter kb = new StandaloneKeyboardInputAdapter();
+            AssertApproximately(0f, kb.GetHorizontalAxis(), 0.001f, "KeyboardAdapter_NeutralAxis", "Default keyboard axis is 0");
+            AssertTrue(!kb.GetJumpDown(), "KeyboardAdapter_NeutralJump", "Default keyboard jump is false");
+            AssertTrue(kb.GetColorChunkStep() == 0, "KeyboardAdapter_NeutralColorStep", "Default color step is 0");
+            AssertTrue(!kb.TryGetDirectColor(out _), "KeyboardAdapter_NeutralDirectColor", "Default direct color is false");
+
+            // 2. Test MobileTouchInputAdapter contract
+            MobileTouchInputAdapter touch = new MobileTouchInputAdapter();
+            AssertApproximately(0f, touch.GetHorizontalAxis(), 0.001f, "TouchAdapter_InitAxis", "Initial touch axis is 0");
+
+            touch.SetMoveLeft(true);
+            AssertApproximately(-1f, touch.GetHorizontalAxis(), 0.001f, "TouchAdapter_MoveLeft", "Touch move left produces -1");
+
+            touch.SetMoveLeft(false);
+            touch.SetMoveRight(true);
+            AssertApproximately(1f, touch.GetHorizontalAxis(), 0.001f, "TouchAdapter_MoveRight", "Touch move right produces +1");
+            touch.SetMoveRight(false);
+
+            touch.TriggerJump();
+            AssertTrue(touch.GetJumpDown(), "TouchAdapter_JumpTriggered", "TriggerJump produces GetJumpDown == true");
+            touch.ResetFrameState();
+            AssertTrue(!touch.GetJumpDown(), "TouchAdapter_JumpReset", "ResetFrameState resets jump to false");
+
+            touch.TriggerColorChunkStep(1);
+            AssertTrue(touch.GetColorChunkStep() == 1, "TouchAdapter_ColorStepTriggered", "TriggerColorChunkStep(1) produces 1");
+            touch.ResetFrameState();
+            AssertTrue(touch.GetColorChunkStep() == 0, "TouchAdapter_ColorStepReset", "ResetFrameState resets color step to 0");
+
+            touch.TriggerDirectColor(LogicalColor.Black);
+            AssertTrue(touch.TryGetDirectColor(out LogicalColor directCol) && directCol == LogicalColor.Black, "TouchAdapter_DirectColor", "TriggerDirectColor(Black) produces Black");
+            touch.ResetFrameState();
+            AssertTrue(!touch.TryGetDirectColor(out _), "TouchAdapter_DirectColorReset", "ResetFrameState resets direct color");
+
+            // 3. Test Cross-Platform Input Equivalence (Test D)
+            // Execute equivalent command sequences through desktop adapter and mobile adapter:
+            GameObject inputGo = new GameObject("TestPlayerInputHost");
+            PlayerInput playerInput = inputGo.AddComponent<PlayerInput>();
+
+            float deltaTime = 0.0166667f;
+            float moveSpeed = 6f;
+
+            // Scenario A: Move Right Intent
+            MockControlledInputAdapter mockDesktop = new MockControlledInputAdapter { Axis = 1f, Jump = false };
+            playerInput.SetCustomAdapter(mockDesktop);
+            PlayerInputIntent desktopMoveIntent = playerInput.ReadInput(deltaTime, moveSpeed, true);
+
+            touch.SetMoveRight(true);
+            playerInput.SetCustomAdapter(touch);
+            PlayerInputIntent mobileMoveIntent = playerInput.ReadInput(deltaTime, moveSpeed, true);
+            touch.SetMoveRight(false);
+
+            AssertApproximately(desktopMoveIntent.Move.x, mobileMoveIntent.Move.x, 0.0001f, "InputEquivalence_MoveX", "Desktop Move.x matches Mobile Move.x exactly");
+            AssertApproximately(desktopMoveIntent.Move.y, mobileMoveIntent.Move.y, 0.0001f, "InputEquivalence_MoveY", "Desktop Move.y matches Mobile Move.y exactly");
+
+            // Scenario B: Jump when Grounded
+            mockDesktop.Axis = 0f;
+            mockDesktop.Jump = true;
+            playerInput.SetCustomAdapter(mockDesktop);
+            PlayerInputIntent desktopJumpGrounded = playerInput.ReadInput(deltaTime, moveSpeed, true);
+
+            touch.TriggerJump();
+            playerInput.SetCustomAdapter(touch);
+            PlayerInputIntent mobileJumpGrounded = playerInput.ReadInput(deltaTime, moveSpeed, true);
+
+            AssertTrue(desktopJumpGrounded.JumpRequested == mobileJumpGrounded.JumpRequested && mobileJumpGrounded.JumpRequested,
+                "InputEquivalence_JumpGrounded", "Desktop and Mobile both request jump when grounded");
+
+            // Scenario C: Jump when Airborne (should NOT trigger jump intent)
+            mockDesktop.Jump = true;
+            playerInput.SetCustomAdapter(mockDesktop);
+            PlayerInputIntent desktopJumpAirborne = playerInput.ReadInput(deltaTime, moveSpeed, false);
+
+            touch.TriggerJump();
+            playerInput.SetCustomAdapter(touch);
+            PlayerInputIntent mobileJumpAirborne = playerInput.ReadInput(deltaTime, moveSpeed, false);
+
+            AssertTrue(!desktopJumpAirborne.JumpRequested && !mobileJumpAirborne.JumpRequested,
+                "InputEquivalence_JumpAirborne", "Desktop and Mobile both reject jump when airborne");
+
+            // Scenario D: Color Shift to Gray
+            mockDesktop.Jump = false;
+            mockDesktop.HasDirectColor = true;
+            mockDesktop.DirectColor = LogicalColor.Gray;
+            playerInput.SetCustomAdapter(mockDesktop);
+            PlayerInputIntent desktopColorIntent = playerInput.ReadInput(deltaTime, moveSpeed, true);
+
+            touch.TriggerDirectColor(LogicalColor.Gray);
+            playerInput.SetCustomAdapter(touch);
+            PlayerInputIntent mobileColorIntent = playerInput.ReadInput(deltaTime, moveSpeed, true);
+
+            AssertTrue(desktopColorIntent.HasColorChange == mobileColorIntent.HasColorChange && mobileColorIntent.HasColorChange,
+                "InputEquivalence_ColorChangeFlag", "Desktop and Mobile both signal HasColorChange");
+            AssertTrue(desktopColorIntent.RequestedColor == mobileColorIntent.RequestedColor && mobileColorIntent.RequestedColor == LogicalColor.Gray,
+                "InputEquivalence_ColorValue", "Desktop and Mobile both request Gray color");
+
+            // Scenario E: Fast Fall (S key / mobile touch)
+            mockDesktop.HasDirectColor = false;
+            mockDesktop.FastFall = true;
+            playerInput.SetCustomAdapter(mockDesktop);
+            PlayerInputIntent desktopFastFall = playerInput.ReadInput(deltaTime, moveSpeed, false);
+
+            touch.SetFastFall(true);
+            playerInput.SetCustomAdapter(touch);
+            PlayerInputIntent mobileFastFall = playerInput.ReadInput(deltaTime, moveSpeed, false);
+            touch.SetFastFall(false);
+
+            AssertTrue(desktopFastFall.FastFall && mobileFastFall.FastFall,
+                "InputEquivalence_FastFall", "Desktop and Mobile both signal FastFall");
+
+            // Scenario F: Continuous Phase Tuning (Left/Right Arrow / mobile phase touch)
+            mockDesktop.FastFall = false;
+            mockDesktop.PhaseTuneAxis = 1f;
+            playerInput.SetCustomAdapter(mockDesktop);
+            PlayerInputIntent desktopPhaseIntent = playerInput.ReadInput(deltaTime, moveSpeed, true);
+
+            touch.SetPhaseTuneRight(true);
+            playerInput.SetCustomAdapter(touch);
+            PlayerInputIntent mobilePhaseIntent = playerInput.ReadInput(deltaTime, moveSpeed, true);
+            touch.SetPhaseTuneRight(false);
+
+            AssertApproximately(desktopPhaseIntent.PhaseTuneDelta, mobilePhaseIntent.PhaseTuneDelta, 0.0001f,
+                "InputEquivalence_PhaseTuneDelta", "Desktop and Mobile PhaseTuneDelta match");
+
+            // Scenario G: Newton Marking Request (X key / mobile mark button)
+            mockDesktop.PhaseTuneAxis = 0f;
+            mockDesktop.NewtonMark = true;
+            playerInput.SetCustomAdapter(mockDesktop);
+            PlayerInputIntent desktopNewtonMark = playerInput.ReadInput(deltaTime, moveSpeed, true);
+
+            touch.TriggerNewtonMark();
+            playerInput.SetCustomAdapter(touch);
+            PlayerInputIntent mobileNewtonMark = playerInput.ReadInput(deltaTime, moveSpeed, true);
+
+            AssertTrue(desktopNewtonMark.NewtonMarkRequested && mobileNewtonMark.NewtonMarkRequested,
+                "InputEquivalence_NewtonMark", "Desktop and Mobile both signal NewtonMarkRequested on X / Mark button");
+
+            // Space key must NEVER trigger NewtonMarkRequested
+            mockDesktop.NewtonMark = false;
+            mockDesktop.Jump = true;
+            playerInput.SetCustomAdapter(mockDesktop);
+            PlayerInputIntent spaceIntent = playerInput.ReadInput(deltaTime, moveSpeed, true);
+            AssertTrue(!spaceIntent.NewtonMarkRequested, "Space_Never_Triggers_NewtonMark", "Space key strictly jumps and never triggers NewtonMark");
+
+            UnityEngine.Object.DestroyImmediate(inputGo);
+        }
+
+        private static void Test_StandaloneLevelEditor_Lifecycle()
+        {
+            Debug.Log("[TEST_CASE] Starting Test_StandaloneLevelEditor_Lifecycle");
+
+            // 1. Directory & Persistence resolution
+            string dir = LevelRepository.GetLevelsDirectory();
+            AssertTrue(!string.IsNullOrEmpty(dir), "LevelRepo_DirectoryResolved", "Levels directory resolved properly");
+
+            LevelRepository.EnsureDefaultLevelFile();
+            string[] files = LevelRepository.ListLevelFiles();
+            AssertTrue(files != null && files.Length > 0, "LevelRepo_FilesDiscovered", "ListLevelFiles finds seeded default levels");
+
+            string uniqueName = LevelRepository.GenerateUniqueFileName("test_prefix_");
+            AssertTrue(uniqueName.StartsWith("test_prefix_") && uniqueName.EndsWith(".json"), "LevelRepo_UniqueNameFormat", "Unique filename has proper prefix and extension");
+
+            // 2. Standalone Bootstrapper lifecycle
+            GameObject editorRoot = new GameObject("TestStandaloneEditorRoot");
+            StandaloneLevelEditorBootstrapper bootstrapper = editorRoot.AddComponent<StandaloneLevelEditorBootstrapper>();
+            LevelLoader loader = editorRoot.AddComponent<LevelLoader>();
+            LevelEditorController ctrl = editorRoot.AddComponent<LevelEditorController>();
+            LevelEditorUI ui = editorRoot.AddComponent<LevelEditorUI>();
+
+            AssertTrue(bootstrapper != null, "StandaloneEditor_BootstrapperCreated", "Bootstrapper component created");
+            AssertTrue(loader != null && ctrl != null && ui != null, "StandaloneEditor_ComponentsPresent", "Editor infrastructure present without GameManager");
+
+            // 3. Test Level Export & Import Interoperability
+            string programmaticJson = LevelRepository.GenerateProgrammaticDefaultJson();
+            AssertTrue(!string.IsNullOrEmpty(programmaticJson), "LevelRepo_ProgrammaticJsonValid", "Generated programmatic default JSON is valid");
+
+            LevelData parsed = JsonUtility.FromJson<LevelData>(programmaticJson);
+            AssertTrue(parsed != null && parsed.platforms != null && parsed.platforms.Length > 0, "LevelRepo_JsonParsesProperly", "LevelData deserializes successfully");
+
+            UnityEngine.Object.DestroyImmediate(editorRoot);
+        }
+
+        private static void Test_CampaignLevels_JSON_Validation()
+        {
+            Debug.Log("[TEST_CASE] Starting Test_CampaignLevels_JSON_Validation");
+
+            string[] levels = new[] { "L01", "L02", "L03" };
+            foreach (string lvl in levels)
+            {
+                string path = Path.Combine(Application.dataPath, "Resources", "Levels", $"{lvl}.json");
+                AssertTrue(File.Exists(path), $"{lvl}_File_Exists", $"Resource file {lvl}.json exists on disk");
+
+                string json = File.ReadAllText(path);
+                AssertTrue(!string.IsNullOrEmpty(json), $"{lvl}_JSON_NotEmpty", $"{lvl}.json has content");
+
+                LevelData data = JsonUtility.FromJson<LevelData>(json);
+                AssertTrue(data != null, $"{lvl}_JSON_Parses", $"{lvl}.json deserializes to LevelData");
+
+                LevelData sanitized = LevelDataSanitizer.Sanitize(data, json, out List<string> report);
+                AssertTrue(sanitized != null, $"{lvl}_Sanitizes_Successfully", $"{lvl} sanitization succeeds");
+
+                if (lvl == "L01")
+                {
+                    AssertTrue(sanitized.platforms != null && sanitized.platforms.Length == 16, "L01_BlockCount_16", $"L01 has 16 terrain blocks (actual: {sanitized.platforms?.Length})");
+                    int w = 0, g = 0, b = 0, f = 0;
+                    foreach (var p in sanitized.platforms)
+                    {
+                        if (p.rawGrayscaleColor >= 254.5f) f++;
+                        else if (p.rawGrayscaleColor <= 84.5f) w++;
+                        else if (p.rawGrayscaleColor <= 169.5f) g++;
+                        else b++;
+                    }
+                    AssertTrue(w == 6, "L01_WhiteBlocks_6", $"L01 White blocks == 6 (actual: {w})");
+                    AssertTrue(g == 4, "L01_GrayBlocks_4", $"L01 Gray blocks == 4 (actual: {g})");
+                    AssertTrue(b == 5, "L01_BlackBlocks_5", $"L01 Black blocks == 5 (actual: {b})");
+                    AssertTrue(f == 1, "L01_FixedBlocks_1", $"L01 Fixed blocks == 1 (actual: {f})");
+
+                    AssertTrue(sanitized.checkPoint != null && sanitized.checkPoint.Length == 5, "L01_Checkpoints_5", "L01 has 5 checkpoints (+ startPos = 6)");
+                    AssertTrue(sanitized.collectibles != null && sanitized.collectibles.Length == 2, "L01_Collectibles_2", "L01 has 2 collectibles");
+                    AssertTrue(sanitized.newton != null && sanitized.newton.i == 3 && sanitized.newton.k == 6, "L01_Newton_Config", "L01 Newton i=3, k=6");
+                    AssertTrue(sanitized.newton.orbitStart == "auto", "L01_Newton_OrbitStart_Auto", "L01 orbitStart == auto");
+                }
+                else if (lvl == "L02")
+                {
+                    AssertTrue(sanitized.platforms != null && sanitized.platforms.Length == 15, "L02_BlockCount_15", $"L02 has 15 terrain blocks (actual: {sanitized.platforms?.Length})");
+                    int w = 0, g = 0, b = 0, f = 0;
+                    foreach (var p in sanitized.platforms)
+                    {
+                        if (p.rawGrayscaleColor >= 254.5f) f++;
+                        else if (p.rawGrayscaleColor <= 84.5f) w++;
+                        else if (p.rawGrayscaleColor <= 169.5f) g++;
+                        else b++;
+                    }
+                    AssertTrue(w == 3, "L02_WhiteBlocks_3", $"L02 White blocks == 3 (actual: {w})");
+                    AssertTrue(g == 2, "L02_GrayBlocks_2", $"L02 Gray blocks == 2 (actual: {g})");
+                    AssertTrue(b == 8, "L02_BlackBlocks_8", $"L02 Black blocks == 8 (actual: {b})");
+                    AssertTrue(f == 2, "L02_FixedBlocks_2", $"L02 Fixed blocks == 2 (actual: {f})");
+
+                    AssertTrue(sanitized.checkPoint != null && sanitized.checkPoint.Length == 4, "L02_Checkpoints_4", "L02 has 4 checkpoints (+ startPos = 5)");
+                    AssertTrue(sanitized.collectibles != null && sanitized.collectibles.Length == 2, "L02_Collectibles_2", "L02 has 2 collectibles");
+                    AssertTrue(sanitized.newton != null && sanitized.newton.i == 2 && sanitized.newton.k == 4, "L02_Newton_Config", "L02 Newton i=2, k=4");
+                    AssertTrue(sanitized.newton.orbitStart == "dock", "L02_Newton_OrbitStart_Dock", "L02 orbitStart == dock");
+                }
+                else if (lvl == "L03")
+                {
+                    AssertTrue(sanitized.platforms != null && sanitized.platforms.Length == 27, "L03_BlockCount_27", $"L03 has 27 terrain blocks (actual: {sanitized.platforms?.Length})");
+                    int w = 0, g = 0, b = 0, f = 0;
+                    int movingCount = 0;
+                    foreach (var p in sanitized.platforms)
+                    {
+                        if (p.rawGrayscaleColor >= 254.5f) f++;
+                        else if (p.rawGrayscaleColor <= 84.5f) w++;
+                        else if (p.rawGrayscaleColor <= 169.5f) g++;
+                        else b++;
+
+                        if (p.trajectory != null && p.trajectory.enabled)
+                            movingCount++;
+                    }
+                    AssertTrue(w == 5, "L03_WhiteBlocks_5", $"L03 White blocks == 5 (actual: {w})");
+                    AssertTrue(g == 8, "L03_GrayBlocks_8", $"L03 Gray blocks == 8 (actual: {g})");
+                    AssertTrue(b == 5, "L03_BlackBlocks_5", $"L03 Black blocks == 5 (actual: {b})");
+                    AssertTrue(f == 9, "L03_FixedBlocks_9", $"L03 Fixed blocks == 9 (actual: {f})");
+                    AssertTrue(movingCount == 3, "L03_MovingPlatforms_3", $"L03 moving platforms == 3 (actual: {movingCount})");
+
+                    AssertTrue(sanitized.checkPoint != null && sanitized.checkPoint.Length == 8, "L03_Checkpoints_8", "L03 has 8 checkpoints (+ startPos = 9)");
+                    AssertTrue(sanitized.collectibles != null && sanitized.collectibles.Length == 3, "L03_Collectibles_3", "L03 has 3 collectibles");
+                    AssertTrue(sanitized.newton != null && sanitized.newton.i == 2 && sanitized.newton.k == 7, "L03_Newton_Config", "L03 Newton i=2, k=7");
+                    AssertTrue(sanitized.newton.orbitStart == "auto", "L03_Newton_OrbitStart_Auto", "L03 orbitStart == auto");
+                }
+            }
+        }
+
+        private static void Test_Newton_Marking_Sequence_And_Tolerances()
+        {
+            Debug.Log("[TEST_CASE] Starting Test_Newton_Marking_Sequence_And_Tolerances");
+
+            GameObject newtonGo = new GameObject("TestNewtonSequenceController");
+            EasyNewtonFinaleController ctrl = newtonGo.AddComponent<EasyNewtonFinaleController>();
+
+            GameObject playerGo = new GameObject("TestPlayer");
+            PlayerController player = playerGo.AddComponent<PlayerController>();
+
+            NewtonChamberData chamberData = new NewtonChamberData
+            {
+                cx = 5135f,
+                cy = 659f,
+                i = 3,
+                k = 6,
+                orbitStart = "auto",
+                rails = new NewtonRailsConfigData
+                {
+                    K = new NewtonRailData { width = 136f, period = 10.8f, angleDeg = 0f, direction = 1 },
+                    I = new NewtonRailData { width = 126f, period = 8.6f, angleDeg = 0f, direction = 1 }
+                }
+            };
+
+            ctrl.Initialize(player, null, chamberData);
+
+            AssertTrue(ctrl.CurrentStep == NewtonFinaleStep.CaptureK, "Newton_InitialStep_WaitingForK", "Initial measurement step is CaptureK");
+            AssertTrue(ctrl.MarkerCount == 0, "Newton_InitialMarkers_Zero", "No markers locked initially");
+
+            // 1. Pressing mark when NOT grounded should fail
+            player.SetGroundedForTest(false, null);
+            ctrl.AttemptCapture();
+            AssertTrue(ctrl.CurrentStep == NewtonFinaleStep.CaptureK, "Newton_MarkUngrounded_Fails", "Mark attempt when ungrounded remains in CaptureK");
+            AssertTrue(ctrl.MarkerCount == 0, "Newton_MarkerCount_StillZero", "Marker count still 0 after invalid attempt");
+
+            // 2. Put player on rail I (wrong rail for step 1)
+            player.SetGroundedForTest(true, ctrl.PlatformI);
+            ctrl.AttemptCapture();
+            AssertTrue(ctrl.CurrentStep == NewtonFinaleStep.CaptureK, "Newton_MarkWrongPlatform_Fails", "Mark attempt on rail I for Step K remains in CaptureK");
+            AssertTrue(ctrl.MarkerCount == 0, "Newton_MarkerCount_StillZero2", "Marker count still 0");
+
+            // 3. Put player on rail K and mark
+            player.SetGroundedForTest(true, ctrl.PlatformK);
+            ctrl.AttemptCapture();
+            AssertTrue(ctrl.CurrentStep == NewtonFinaleStep.CaptureI, "Newton_StepAdvancesTo_CaptureI", "Marking on K establishes reference axis and advances to CaptureI");
+            AssertTrue(ctrl.MarkerCount == 1, "Newton_MarkerK_Locked", "Marker K successfully locked");
+            AssertTrue(ctrl.HasK, "Newton_HasK_True", "HasK flag is true");
+
+            // 4. Mark on rail I when misaligned (> toleranceI = 0.75 units = 48 px)
+            float rI = ctrl.GetRadiusForOrder(3);
+            Vector2 misalignedPosI = ctrl.CenterO + new Vector2(ctrl.AxisU.y, -ctrl.AxisU.x) * rI;
+            ctrl.PlatformI.transform.position = new Vector3(misalignedPosI.x, misalignedPosI.y, 0f);
+            player.SetGroundedForTest(true, ctrl.PlatformI);
+            ctrl.AttemptCapture();
+            AssertTrue(ctrl.CurrentStep == NewtonFinaleStep.CaptureI, "Newton_MisalignedI_Rejected", "Misaligned mark on I is rejected within 48px tolerance");
+            AssertTrue(ctrl.MarkerCount == 1, "Newton_MarkerI_NotLockedYet", "Marker count remains 1");
+
+            // 5. Mark on rail I when aligned (within 48px tolerance)
+            Vector2 alignedPosI = ctrl.CenterO - ctrl.AxisU * rI;
+            ctrl.PlatformI.transform.position = new Vector3(alignedPosI.x, alignedPosI.y, 0f);
+            player.SetGroundedForTest(true, ctrl.PlatformI);
+            ctrl.AttemptCapture();
+            AssertTrue(ctrl.CurrentStep == NewtonFinaleStep.CaptureKp, "Newton_AlignedI_Accepted", "Aligned mark on I advances to CaptureKp");
+            AssertTrue(ctrl.MarkerCount == 2, "Newton_MarkerI_Locked", "Marker I successfully locked");
+            AssertTrue(ctrl.HasI, "Newton_HasI_True", "HasI flag is true");
+
+            // 6. Mark on rail K for K' when misaligned (> 54 px = 0.84375 units)
+            float rK = ctrl.GetRadiusForOrder(6);
+            Vector2 misalignedPosK = ctrl.CenterO + ctrl.AxisU * rK;
+            ctrl.PlatformK.transform.position = new Vector3(misalignedPosK.x, misalignedPosK.y, 0f);
+            player.SetGroundedForTest(true, ctrl.PlatformK);
+            ctrl.AttemptCapture();
+            AssertTrue(ctrl.CurrentStep == NewtonFinaleStep.CaptureKp, "Newton_MisalignedKp_Rejected", "Misaligned mark on K' is rejected within 54px tolerance");
+            AssertTrue(ctrl.MarkerCount == 2, "Newton_MarkerKp_NotLockedYet", "Marker count remains 2");
+
+            // 7. Mark on rail K for K' when aligned (within 54px tolerance)
+            Vector2 alignedPosKp = ctrl.CenterO - ctrl.AxisU * rK;
+            ctrl.PlatformK.transform.position = new Vector3(alignedPosKp.x, alignedPosKp.y, 0f);
+            player.SetGroundedForTest(true, ctrl.PlatformK);
+            ctrl.AttemptCapture();
+            AssertTrue(ctrl.CurrentStep == NewtonFinaleStep.Reveal, "Newton_AlignedKp_Accepted", "Aligned mark on K' advances to Reveal");
+            AssertTrue(ctrl.MarkerCount == 3, "Newton_MarkerKp_Locked", "Marker K' successfully locked (3 total markers)");
+            AssertTrue(ctrl.HasKp, "Newton_HasKp_True", "HasKp flag is true");
+            AssertTrue(ctrl.IsRevealActive, "Newton_IsRevealActive_True", "IsRevealActive is true");
+
+            // Clean up
+            ctrl.Teardown();
+            UnityEngine.Object.DestroyImmediate(newtonGo);
+            UnityEngine.Object.DestroyImmediate(playerGo);
+        }
+
+        private sealed class MockControlledInputAdapter : IPlatformInputAdapter
+        {
+            public float Axis;
+            public bool Jump;
+            public bool FastFall;
+            public float PhaseTuneAxis;
+            public bool NewtonMark;
+            public int ColorStep;
+            public bool HasDirectColor;
+            public LogicalColor DirectColor;
+
+            public float GetHorizontalAxis() => Axis;
+            public bool GetJumpDown() => Jump;
+            public bool GetFastFall() => FastFall;
+            public float GetPhaseTuneAxis() => PhaseTuneAxis;
+            public bool GetNewtonMarkDown() => NewtonMark;
+            public int GetColorChunkStep() => ColorStep;
+            public bool TryGetDirectColor(out LogicalColor color)
+            {
+                color = DirectColor;
+                return HasDirectColor;
+            }
+            public void ResetFrameState()
+            {
+                Jump = false;
+                FastFall = false;
+                PhaseTuneAxis = 0f;
+                NewtonMark = false;
+                ColorStep = 0;
+                HasDirectColor = false;
+            }
         }
     }
 }

@@ -43,10 +43,45 @@ namespace Contrast.Camera
             hasBoundary = false;
         }
 
+        private bool isOverridden = false;
+        private Vector3 overridePosition;
+        private float overrideOrthoSize = 5f;
+        private float overrideLerpSpeed = 3f;
+
+        public bool IsOverridden => isOverridden;
+
+        public void SetOverride(Vector3 position, float orthoSize, float lerpSpeed = 3f)
+        {
+            isOverridden = true;
+            overridePosition = position;
+            overrideOrthoSize = orthoSize;
+            overrideLerpSpeed = lerpSpeed;
+        }
+
+        public void ClearOverride()
+        {
+            isOverridden = false;
+            if (cam != null && cam.orthographic)
+                cam.orthographicSize = 5f;
+        }
+
         public void ProcessCameraUpdate()
         {
-            if (target == null) return;
             if (cam == null) cam = GetComponent<UnityEngine.Camera>();
+
+            if (isOverridden)
+            {
+                float dt = Time.deltaTime;
+                float smoothT = 1f - Mathf.Exp(-overrideLerpSpeed * dt);
+                transform.position = Vector3.Lerp(transform.position, new Vector3(overridePosition.x, overridePosition.y, transform.position.z), smoothT);
+                if (cam != null && cam.orthographic)
+                {
+                    cam.orthographicSize = Mathf.Lerp(cam.orthographicSize, overrideOrthoSize, smoothT);
+                }
+                return;
+            }
+
+            if (target == null) return;
 
             Vector3 targetPos = target.position;
             float desiredX = targetPos.x;

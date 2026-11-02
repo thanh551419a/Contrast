@@ -64,6 +64,16 @@ namespace Contrast.Data
                     data.spawnPoint = null;
                 }
 
+                if (!IsFieldPresentAndNonNull(rawJson, "newton"))
+                {
+                    data.newton = null;
+                }
+
+                if (!IsFieldPresentAndNonNull(rawJson, "collectibles"))
+                {
+                    data.collectibles = null;
+                }
+
                 // Check for single object "checkPoint": { ... } vs array "checkPoint": [ ... ]
                 if ((data.checkPoint == null || data.checkPoint.Length == 0) && IsFieldPresentAndNonNull(rawJson, "checkPoint"))
                 {
@@ -819,6 +829,47 @@ namespace Contrast.Data
             {
                 if (hasPrevious) sb.AppendLine(",");
                 sb.Append("  \"platforms\": []");
+                hasPrevious = true;
+            }
+
+            // 6. newton
+            if (data.newton != null)
+            {
+                if (hasPrevious) sb.AppendLine(",");
+                string newtonJson = ToJsonSafe(data.newton);
+                sb.Append("  \"newton\": ").Append(IndentJson(newtonJson, 2));
+                hasPrevious = true;
+            }
+
+            // 7. collectibles
+            if (data.collectibles != null && data.collectibles.Length > 0)
+            {
+                if (hasPrevious) sb.AppendLine(",");
+                sb.AppendLine("  \"collectibles\": [");
+                for (int i = 0; i < data.collectibles.Length; i++)
+                {
+                    string cJson = ToJsonSafe(data.collectibles[i]);
+                    sb.Append(IndentJson(cJson, 4));
+                    if (i < data.collectibles.Length - 1)
+                        sb.AppendLine(",");
+                    else
+                        sb.AppendLine();
+                }
+                sb.Append("  ]");
+                hasPrevious = true;
+            }
+
+            // 8. levelId / levelName
+            if (!string.IsNullOrEmpty(data.levelId))
+            {
+                if (hasPrevious) sb.AppendLine(",");
+                sb.Append($"  \"levelId\": \"{data.levelId}\"");
+                hasPrevious = true;
+            }
+            if (!string.IsNullOrEmpty(data.levelName))
+            {
+                if (hasPrevious) sb.AppendLine(",");
+                sb.Append($"  \"levelName\": \"{data.levelName}\"");
                 hasPrevious = true;
             }
 

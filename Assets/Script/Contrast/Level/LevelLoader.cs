@@ -1,3 +1,4 @@
+using System;
 using System.IO;
 using Contrast.Camera;
 using Contrast.Color;
@@ -277,13 +278,23 @@ namespace Contrast.Level
 
             if (camFollow != null && data.cameraBoundary != null)
             {
-                camFollow.SetBoundary(
-                    data.cameraBoundary.position != null
-                        ? data.cameraBoundary.position.ToVector2()
-                        : Vector2.zero,
-                    data.cameraBoundary.size != null
-                        ? data.cameraBoundary.size.ToVector2()
-                        : Vector2.zero);
+                Vector2 bPos = data.cameraBoundary.position != null
+                    ? data.cameraBoundary.position.ToVector2()
+                    : Vector2.zero;
+                Vector2 bSize = data.cameraBoundary.size != null
+                    ? data.cameraBoundary.size.ToVector2()
+                    : Vector2.zero;
+
+                // If Easy level, ensure camera boundary reaches the Newton chamber at x >= 61
+                if (IsEasyLevel(data) && (bPos.x + bSize.x * 0.5f < 70f))
+                {
+                    float minX = bPos.x - bSize.x * 0.5f;
+                    float maxX = 78.125f;
+                    bPos.x = (minX + maxX) * 0.5f;
+                    bSize.x = maxX - minX;
+                }
+
+                camFollow.SetBoundary(bPos, bSize);
             }
 
             // --------------------------------------------------
@@ -307,6 +318,18 @@ namespace Contrast.Level
                 if (camFollow != null)
                     camFollow.Target = player.transform;
             }
+
+            // --------------------------------------------------
+            // Newton Finale integration
+            // --------------------------------------------------
+            if (data.newton != null && data.newton.k > 0)
+            {
+                SetupNewtonFinale(player, camFollow, data.newton);
+            }
+            else if (IsEasyLevel(data))
+            {
+                SetupEasyNewtonFinale(player, camFollow);
+            }
         }
 
         /// <summary>
@@ -329,6 +352,11 @@ namespace Contrast.Level
 
             // Deterministically reset all moving platforms back to their initial phase
             TrajectorySystem.ResetAll();
+
+            if (EasyNewtonFinaleController.Instance != null)
+            {
+                EasyNewtonFinaleController.Instance.ResetState();
+            }
 
             player.Respawn(
                 CurrentSpawnPosition,
@@ -379,6 +407,7 @@ namespace Contrast.Level
                         $"rawColor={marker.RawColor:F2}");
 
                     Contrast.Presentation.VisualPresentationManager.Instance?.NotifyCheckpointReached();
+                    Contrast.Audio.ContrastAudioManager.Instance?.PlayCheckpoint();
                     marker.OnPlayerTouched();
                     continue;
                 }
@@ -389,6 +418,7 @@ namespace Contrast.Level
                         $"[END] Player touched End at {marker.Position}.");
 
                     marker.OnPlayerTouched();
+                    Contrast.Audio.ContrastAudioManager.Instance?.PlayWin();
                     GameManager.Instance?.OnPlayerWon();
                     return;
                 }
@@ -539,6 +569,11 @@ namespace Contrast.Level
 
         public void ClearRuntimeLevel()
         {
+            if (EasyNewtonFinaleController.Instance != null)
+            {
+                EasyNewtonFinaleController.Instance.Teardown();
+            }
+
             EnsureRoots();
 
             // Destroy all registered platforms first
@@ -649,6 +684,66 @@ namespace Contrast.Level
             };
 
             BuildRuntimeLevel(CurrentLevelData);
+        }
+
+        public static bool IsEasyLevel(LevelData data)
+        {
+            if (data == null) return false;
+
+            if (data.platforms != null)
+            {
+                for (int i = 0; i < data.platforms.Length; i++)
+                {
+                    var p = data.platforms[i];
+                    if (p != null && p.position != null &&
+                        Mathf.Abs(p.position.x - 45.625f) < 0.5f &&
+                        Mathf.Abs(p.position.y - 0.4375f) < 0.5f)
+                    {
+                        return true;
+                    }
+                }
+            }
+
+            if (GameManager.Instance != null && GameManager.Instance.CurrentLevelSource != null)
+            {
+                string path = GameManager.Instance.CurrentLevelSource.FilePath;
+                if (!string.IsNullOrEmpty(path))
+                {
+                    if (path.IndexOf("map2", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                        path.IndexOf("easy", StringComparison.OrdinalIgnoreCase) >= 0)
+                        return true;
+                }
+            }
+
+            return false;
+        }
+
+        private void SetupNewtonFinale(PlayerController player, CameraFollow camFollow, NewtonChamberData newtonData)
+        {
+            if (EasyNewtonFinaleController.Instance != null)
+            {
+                EasyNewtonFinaleController.Instance.Teardown();
+            }
+
+            GameObject finaleGo = new GameObject("NewtonFinaleController");
+            finaleGo.transform.SetParent(transform, false);
+            var controller = finaleGo.AddComponent<EasyNewtonFinaleController>();
+            controller.Initialize(player, camFollow, newtonData);
+            Debug.Log($"[FLOW][FINALE] NewtonFinaleController initialized from LevelData (cx={newtonData.cx}, cy={newtonData.cy}, i={newtonData.i}, k={newtonData.k}, orbitStart={newtonData.orbitStart}).");
+        }
+
+        private void SetupEasyNewtonFinale(PlayerController player, CameraFollow camFollow)
+        {
+            if (EasyNewtonFinaleController.Instance != null)
+            {
+                EasyNewtonFinaleController.Instance.Teardown();
+            }
+
+            GameObject finaleGo = new GameObject("EasyNewtonFinaleController");
+            finaleGo.transform.SetParent(transform, false);
+            var controller = finaleGo.AddComponent<EasyNewtonFinaleController>();
+            controller.Initialize(player, camFollow);
+            Debug.Log("[FLOW][FINALE] EasyNewtonFinaleController initialized for Easy level.");
         }
     }
 }

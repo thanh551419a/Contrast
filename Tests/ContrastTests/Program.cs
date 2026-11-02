@@ -7,6 +7,7 @@ using Contrast.Level;
 using Contrast.Level.EditorInteraction;
 using Contrast.UI;
 using Contrast.Color;
+using Contrast.Player;
 using UnityEngine;
 
 namespace ContrastTests
@@ -53,6 +54,7 @@ namespace ContrastTests
             Test_FitMapAndWhitePlatformCalculations();
             Test_ResetLevel_Functionality();
             Test_GhostPlatform_Prevention_And_ResetCleanup();
+            Test_EasyNewtonFinale_OrbitalTrajectories_And_CaptureMath();
 
             Console.WriteLine("================================================================================");
             Console.WriteLine($"RESULTS: {passed} PASSED, {failed} FAILED");
@@ -1334,6 +1336,142 @@ namespace ContrastTests
                 Assert(iterativeData.platforms.Length == 2, "GhostPrevention", $"Return to edit after cycle #{session} preserves platform count");
                 AssertVecApprox(new Vector2(10f, 2f), iterativeData.platforms[1].position.ToVector2(), 1e-4f, "GhostPrevention", $"Return to edit after cycle #{session} restores position to (10, 2)");
             }
+        }
+
+        private static void Test_EasyNewtonFinale_OrbitalTrajectories_And_CaptureMath()
+        {
+            Vector2 centerO = new Vector2(61.0f, 0.625f);
+            float ringScale = 3.4375f; // 220 px / 64
+            float rK = ringScale * Mathf.Sqrt(4f); // 6.875
+            float rI = ringScale * Mathf.Sqrt(2f); // ~4.861337
+
+            // 1. Platform A Trajectory (k = 4, period 10.8s, angle 180 -> 540 deg)
+            TrajectoryData cfgK = new TrajectoryData
+            {
+                enabled = true,
+                curveType = TrajectoryCurveType.Circle,
+                playbackMode = TrajectoryPlaybackMode.Loop,
+                originX = centerO.x,
+                originY = centerO.y,
+                radius = rK,
+                paramMin = 180f,
+                paramMax = 540f,
+                duration = 10.8f
+            };
+
+            Vector2 posK0 = Trajectory.EvaluateWorldPoint(cfgK, 0f);
+            AssertVecApprox(new Vector2(54.125f, 0.625f), posK0, 1e-4f, "EasyNewtonFinale", "Platform A phase 0 at x = 54.125 facing vestibule");
+
+            Vector2 posK_quarter = Trajectory.EvaluateWorldPoint(cfgK, 0.25f); // 270 deg (bottom)
+            AssertVecApprox(new Vector2(61.0f, 0.625f - 6.875f), posK_quarter, 1e-4f, "EasyNewtonFinale", "Platform A phase 0.25 at bottom (y = -6.25)");
+
+            Vector2 posK_half = Trajectory.EvaluateWorldPoint(cfgK, 0.5f); // 360 deg (rightmost)
+            AssertVecApprox(new Vector2(61.0f + 6.875f, 0.625f), posK_half, 1e-4f, "EasyNewtonFinale", "Platform A phase 0.5 at rightmost (x = 67.875)");
+
+            // 2. Platform B Trajectory (i = 2, period 8.6s, angle 234 -> 594 deg)
+            TrajectoryData cfgI = new TrajectoryData
+            {
+                enabled = true,
+                curveType = TrajectoryCurveType.Circle,
+                playbackMode = TrajectoryPlaybackMode.Loop,
+                originX = centerO.x,
+                originY = centerO.y,
+                radius = rI,
+                paramMin = 234f,
+                paramMax = 594f,
+                duration = 8.6f
+            };
+
+            Vector2 posI0 = Trajectory.EvaluateWorldPoint(cfgI, 0f);
+            float expIx = centerO.x + Mathf.Cos(234f * Mathf.Deg2Rad) * rI;
+            float expIy = centerO.y + Mathf.Sin(234f * Mathf.Deg2Rad) * rI;
+            AssertVecApprox(new Vector2(expIx, expIy), posI0, 1e-4f, "EasyNewtonFinale", "Platform B phase 0 at initial angle 234 deg");
+
+            // 3. Dynamic Axis and Geometry: K captured on outer orbit
+            // Suppose player captures K at angle 150 deg (5/6 pi)
+            float testAngleRad = 150f * Mathf.Deg2Rad;
+            Vector2 u = new Vector2(Mathf.Cos(testAngleRad), Mathf.Sin(testAngleRad));
+            Vector2 pointK = centerO + u * rK;
+            Vector2 pointI = centerO - u * rI;
+            Vector2 pointKp = centerO - u * rK;
+
+            // Verify diametric opposition of K and K'
+            Vector2 midKKp = (pointK + pointKp) * 0.5f;
+            AssertVecApprox(centerO, midKKp, 1e-4f, "EasyNewtonFinale", "Center O is exact midpoint of K and K'");
+
+            // Verify collinearity: (I - O) is antiparallel to (K - O)
+            Vector2 dirKO = (pointK - centerO).normalized;
+            Vector2 dirIO = (pointI - centerO).normalized;
+            AssertVecApprox(-dirKO, dirIO, 1e-4f, "EasyNewtonFinale", "I lies strictly on the K-O axis opposite to K");
+
+            // 4. Capture tolerance checks: I tolerance = 0.75, K' tolerance = 0.84375
+            float tolI = 0.75f;
+            float tolKp = 0.84375f;
+
+            Vector2 nearI = pointI + new Vector2(0.3f, 0.4f); // dist = 0.5 <= 0.75
+            Assert(Vector2.Distance(nearI, pointI) <= tolI, "EasyNewtonFinale", "Candidate within I tolerance passes");
+
+            Vector2 farI = pointI + new Vector2(0.8f, 0.6f); // dist = 1.0 > 0.75
+            Assert(Vector2.Distance(farI, pointI) > tolI, "EasyNewtonFinale", "Candidate outside I tolerance fails");
+
+            Vector2 nearKp = pointKp + new Vector2(0.4f, 0.5f); // dist ~ 0.64 <= 0.84375
+            Assert(Vector2.Distance(nearKp, pointKp) <= tolKp, "EasyNewtonFinale", "Candidate within K' tolerance passes");
+
+            Vector2 farKp = pointKp + new Vector2(0.8f, 0.8f); // dist ~ 1.13 > 0.84375
+            Assert(Vector2.Distance(farKp, pointKp) > tolKp, "EasyNewtonFinale", "Candidate outside K' tolerance fails");
+
+            // 5. Scientific Wavelength Calculation
+            // B = |I - K| = rK + rI, b = |K' - I| = rK - rI
+            float B_units = Vector2.Distance(pointK, pointI);
+            float b_units = Vector2.Distance(pointI, pointKp);
+            AssertApprox(rK + rI, B_units, 1e-4f, "EasyNewtonFinale", "Measured B equals rK + rI");
+            AssertApprox(rK - rI, b_units, 1e-4f, "EasyNewtonFinale", "Measured b equals rK - rI");
+
+            float Rmm = 855f;
+            float lambdaRefMm = 550e-6f;
+            float physicalR1Mm = Mathf.Sqrt(lambdaRefMm * Rmm); // ~0.685747767 mm
+            float mmPerUnit = physicalR1Mm / ringScale; // ~0.19949026 mm/unit
+
+            float Bmm = B_units * mmPerUnit;
+            float bmm = b_units * mmPerUnit;
+            int orderDelta = Mathf.Abs(4 - 2); // |k - i| = 2
+            float lambdaOutMm = (Bmm * bmm) / (orderDelta * Rmm);
+            float lambdaOutNm = lambdaOutMm * 1e6f;
+
+            AssertApprox(550.0f, lambdaOutNm, 0.1f, "EasyNewtonFinale", "Calculated lambda from physical parameters is 550.0 nm (+/- 0.1 nm)");
+
+            // 6. Input Mapping Rules: IsNewtonFinaleActive remapping
+            PlayerInput.IsNewtonFinaleActive = true;
+            Assert(PlayerInput.IsNewtonFinaleActive, "EasyNewtonFinale", "PlayerInput.IsNewtonFinaleActive flag toggled on");
+
+            // When finale active: Space does NOT jump; W jumps
+            Assert(!PlayerInput.IsJumpInputPressed(false, true), "EasyNewtonFinale", "Space alone does NOT trigger jump during finale");
+            Assert(PlayerInput.IsJumpInputPressed(true, false), "EasyNewtonFinale", "W triggers jump during finale");
+
+            // When finale inactive: both Space and W jump
+            PlayerInput.IsNewtonFinaleActive = false;
+            Assert(PlayerInput.IsJumpInputPressed(false, true), "EasyNewtonFinale", "Space triggers jump outside finale");
+            Assert(PlayerInput.IsJumpInputPressed(true, false), "EasyNewtonFinale", "W triggers jump outside finale");
+
+            // 7. Easy Level Recognition and Camera Boundary Extension
+            LevelData easyData = new LevelData
+            {
+                cameraBoundary = new CameraBoundaryData { position = new Vector2Data(0f, 0f), size = new Vector2Data(106.25f, 18.75f) },
+                platforms = new ColorPlatformData[]
+                {
+                    new ColorPlatformData { position = new Vector2Data(45.625f, 0.4375f), size = new Vector2Data(13.125f, 0.375f) }
+                }
+            };
+            Assert(LevelLoader.IsEasyLevel(easyData), "EasyNewtonFinale", "LevelLoader recognizes Easy level with vestibule platform");
+
+            LevelData nonEasyData = new LevelData
+            {
+                platforms = new ColorPlatformData[]
+                {
+                    new ColorPlatformData { position = new Vector2Data(10f, 1f), size = new Vector2Data(4f, 1f) }
+                }
+            };
+            Assert(!LevelLoader.IsEasyLevel(nonEasyData), "EasyNewtonFinale", "LevelLoader rejects non-Easy level without vestibule platform");
         }
 
         private static LevelData DeserializeLevelData(string json)

@@ -21,6 +21,55 @@ namespace Contrast.Data
 
         public CameraBoundaryData cameraBoundary;
         public ColorPlatformData[] platforms;
+
+        // Newton measurement chamber configuration
+        public NewtonChamberData newton;
+
+        // Collectibles (Quang Điểm)
+        public CollectibleData[] collectibles;
+
+        // Level metadata
+        public string levelId;
+        public string levelName;
+    }
+
+    [System.Serializable]
+    public class NewtonChamberData
+    {
+        public bool enabled = true;
+        public float cx;
+        public float cy;
+        public string vestibuleId;
+        public int i = 2;
+        public int k = 4;
+        public string orbitStart = "auto"; // "auto" or "dock"
+        public NewtonRailsConfigData rails;
+    }
+
+    [System.Serializable]
+    public class NewtonRailsConfigData
+    {
+        public NewtonRailData K;
+        public NewtonRailData I;
+    }
+
+    [System.Serializable]
+    public class NewtonRailData
+    {
+        public float width = 136f;
+        public float height = 22f;
+        public float period = 10.8f;
+        public float angleDeg = 0f;
+        public int direction = 1; // 1 = clockwise/forward, -1 = counterclockwise
+    }
+
+    [System.Serializable]
+    public class CollectibleData
+    {
+        public string id;
+        public string kind = "collectible";
+        public Vector2Data position;
+        public Vector2Data size;
     }
 
     [System.Serializable]
