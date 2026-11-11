@@ -27,7 +27,7 @@ namespace Contrast.Tests
         private static int failedCount = 0;
         private static readonly List<string> testFailures = new List<string>();
 
-        [InitializeOnLoadMethod]
+        [MenuItem("Contrast/Tests/Run All Editor Tests")]
         public static void RunAllEditorTests()
         {
             passedCount = 0;
@@ -2336,7 +2336,7 @@ namespace Contrast.Tests
             mainMenu.OpenPlaySubMenu();
             AssertTrue(mainMenu.IsPlaySubMenuOpen, "Task8_OpenPlaySubMenu_OpensPanel", "OpenPlaySubMenu activates PlaySubMenuPanel");
             mainMenu.ClosePlaySubMenu();
-            AssertTrue(!mainMenu.IsPlaySubMenuOpen, "Task8_ClosePlaySubMenu_ClosesPanel", "ClosePlaySubMenu hides PlaySubMenuPanel");
+            AssertTrue(mainMenu.IsPlaySubMenuOpen, "Task8_ClosePlaySubMenu_KeepsSinglePlayMenu", "PlaySubMenuPanel stays active as the sole 3-level gameplay menu");
 
             // Verify direct loading of L02 and L03 spawns their collectibles and Newton chambers
             LevelSource srcL02 = LevelSource.FromResource("Levels/L02");
@@ -4396,6 +4396,54 @@ namespace Contrast.Tests
             newtonCtrl.AttemptCapture();
             AssertTrue(newtonCtrl.HasK && newtonCtrl.HasI && newtonCtrl.HasKp && newtonCtrl.IsRevealActive,
                 "Runtime_H_04_L02MarkKpCompletesNewton", "L02 Target 3 (K') marked via PRESS-X and enters Reveal");
+
+            // ----------------------------------------------------------------------------
+            // Task I: Newton Bottom UI Clearance, Wavelength Color Mapping, & Direct Main Menu
+            // ----------------------------------------------------------------------------
+            // 1. Verify Newton BottomBar and CalculationPanel are anchored at top-left (never covering bottom of rings)
+            RectTransform bottomBarRt = newtonCtrl.BottomBarGo != null ? newtonCtrl.BottomBarGo.GetComponent<RectTransform>() : null;
+            RectTransform calcPanelRt = newtonCtrl.CalculationPanelGo != null ? newtonCtrl.CalculationPanelGo.GetComponent<RectTransform>() : null;
+            AssertTrue(bottomBarRt != null && bottomBarRt.anchorMin == new Vector2(0f, 1f) && bottomBarRt.anchorMax == new Vector2(0f, 1f),
+                "NewtonUI_01_BottomBarDockedTopLeft", "Newton control bar is docked at top-left below ObjectiveCard so bottom of rings is clear");
+            AssertTrue(calcPanelRt != null && calcPanelRt.anchorMin == new Vector2(0f, 1f) && calcPanelRt.anchorMax == new Vector2(0f, 1f),
+                "NewtonUI_02_CalcPanelDockedTopLeft", "Newton calculation panel is docked at top-left below ObjectiveCard so bottom of rings is clear");
+
+            // 2. Verify PhaseTunerUI slides left during Newton framing and hides ControlHintCard
+            GameObject tunerTestGo = new GameObject("NewtonTunerLayoutTest");
+            Contrast.Presentation.PhaseTunerUI tunerUi = tunerTestGo.AddComponent<Contrast.Presentation.PhaseTunerUI>();
+            tunerUi.EnsureInitialized();
+            tunerUi.UpdateNewtonFramingLayout(true, 0f, true);
+            AssertApproximately(-680f, tunerUi.TunerPanelRect.anchoredPosition.x, 1e-2f,
+                "NewtonUI_03_PhaseTunerSlidesLeftInNewton", "PhaseTunerPanel slides to bottom-left (-680px) during Newton framing");
+            AssertTrue(tunerUi.HintPanelObject != null && !tunerUi.HintPanelObject.activeSelf,
+                "NewtonUI_04_HintCardHiddenInNewton", "ControlHintCard is hidden while inside Newton Ring zone");
+            tunerUi.UpdateNewtonFramingLayout(false, 0f, true);
+            AssertApproximately(0f, tunerUi.TunerPanelRect.anchoredPosition.x, 1e-2f,
+                "NewtonUI_05_PhaseTunerReturnsCenterOutsideNewton", "PhaseTunerPanel returns to bottom-center (0px) outside Newton framing");
+            UnityEngine.Object.DestroyImmediate(tunerTestGo);
+
+            // 3. Verify Wavelength-to-RGB spectral color mapping & ring geometry invariance
+            UnityEngine.Color col550 = Contrast.Presentation.NewtonRingsPresentation.WavelengthToRgb(550f);
+            UnityEngine.Color col633 = Contrast.Presentation.NewtonRingsPresentation.WavelengthToRgb(633f);
+            UnityEngine.Color col470 = Contrast.Presentation.NewtonRingsPresentation.WavelengthToRgb(470f);
+            AssertTrue(col550.g > col550.r && col550.g > col550.b && col550.g > 0.9f,
+                "NewtonColor_01_550nmIsGreen", $"550 nm maps to monochromatic green (R={col550.r:F2}, G={col550.g:F2}, B={col550.b:F2})");
+            AssertTrue(col633.r > col633.g && col633.r > col633.b && col633.r > 0.9f,
+                "NewtonColor_02_633nmIsRed", $"633 nm maps to monochromatic red (R={col633.r:F2}, G={col633.g:F2}, B={col633.b:F2})");
+            AssertTrue(col470.b > col470.r && col470.b > 0.9f,
+                "NewtonColor_03_470nmIsBlue", $"470 nm maps to monochromatic blue (R={col470.r:F2}, G={col470.g:F2}, B={col470.b:F2})");
+            AssertTrue(Contrast.Presentation.NewtonRingsPresentation.GetWavelengthColorNameVi(550f) == "Lục",
+                "NewtonColor_04_550nmLabelVi", "550 nm Vietnamese spectral band label is 'Lục'");
+
+            // 4. Verify MainMenuUI directly opens the single Gameplay panel (no CHƠI THỬ / EDIT LEVEL chooser)
+            GameObject directMenuGo = new GameObject("DirectGameplayMainMenuTest");
+            Contrast.UI.MainMenuUI directMenu = directMenuGo.AddComponent<Contrast.UI.MainMenuUI>();
+            directMenu.EnsureInitialized();
+            directMenu.Show(true);
+            Transform cardsRootTr = directMenuGo.transform.Find("Canvas/Panel/MainCardsRoot");
+            AssertTrue(directMenu.IsPlaySubMenuOpen && (cardsRootTr == null || !cardsRootTr.gameObject.activeSelf),
+                "MainMenu_01_DirectGameplayOnly", "MainMenuUI directly shows only the Gameplay selection screen with MainCardsRoot hidden");
+            UnityEngine.Object.DestroyImmediate(directMenuGo);
 
             if (EasyNewtonFinaleController.Instance != null)
                 EasyNewtonFinaleController.Instance.Teardown();

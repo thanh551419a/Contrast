@@ -22,6 +22,37 @@ namespace Contrast.Build
         public const string GameScenePath = "Assets/Scenes/SampleScene.unity";
         public const string EditorScenePath = "Assets/Scenes/LevelEditorScene.unity";
 
+        [InitializeOnLoadMethod]
+        private static void EnsureMainGameSceneOpenedInEditor()
+        {
+            if (Application.isBatchMode)
+                return;
+
+            EditorApplication.delayCall += () =>
+            {
+                if (Application.isBatchMode || EditorApplication.isCompiling || EditorApplication.isUpdating)
+                    return;
+
+                if (EditorSettings.enterPlayModeOptionsEnabled)
+                {
+                    EditorSettings.enterPlayModeOptionsEnabled = false;
+                }
+
+                if (EditorApplication.isPlayingOrWillChangePlaymode)
+                    return;
+
+                Scene activeScene = SceneManager.GetActiveScene();
+                if (string.IsNullOrEmpty(activeScene.path) || activeScene.path != GameScenePath)
+                {
+                    if (File.Exists(GameScenePath))
+                    {
+                        Debug.Log($"[EDITOR_BOOT] Automatically opening main gameplay scene: {GameScenePath}");
+                        EditorSceneManager.OpenScene(GameScenePath, OpenSceneMode.Single);
+                    }
+                }
+            };
+        }
+
         public static readonly string ProjectRoot = Path.GetFullPath(Path.Combine(Application.dataPath, ".."));
         public static readonly string ReleaseRoot = Path.Combine(ProjectRoot, "Release");
         public static readonly string WindowsContrastWindowsDir = Path.Combine(ReleaseRoot, "Windows", "CONTRAST_Windows");

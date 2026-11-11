@@ -63,6 +63,22 @@ namespace Contrast.Core
         public VirtualControlsUI VirtualControlsUI => virtualControlsUI;
         public InGameMenuUI InGameMenuUI => inGameMenuUI;
 
+        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
+        private static void ResetStaticInstance()
+        {
+            Instance = null;
+        }
+
+        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
+        private static void EnsureGameplaySceneLoaded()
+        {
+            if (FindAnyObjectByType<GameManager>(FindObjectsInactive.Include) == null)
+            {
+                Debug.Log("[FLOW][BOOT] No GameManager in active scene -> loading SampleScene automatically.");
+                UnityEngine.SceneManagement.SceneManager.LoadScene("SampleScene");
+            }
+        }
+
         private void Awake()
         {
             if (Instance != null && Instance != this)
@@ -80,11 +96,8 @@ namespace Contrast.Core
             gameControlUI ??= FindAnyObjectByType<GameControlUI>(FindObjectsInactive.Include);
             inGameMenuUI ??= FindAnyObjectByType<InGameMenuUI>(FindObjectsInactive.Include);
             mainMenuUI ??= FindAnyObjectByType<MainMenuUI>(FindObjectsInactive.Include);
-            levelSelectUI ??= FindAnyObjectByType<LevelSelectUI>(FindObjectsInactive.Include);
             loadingOverlayUI ??= FindAnyObjectByType<LoadingOverlayUI>(FindObjectsInactive.Include);
             virtualControlsUI ??= FindAnyObjectByType<VirtualControlsUI>(FindObjectsInactive.Include);
-            levelEditorUI ??= FindAnyObjectByType<LevelEditorUI>(FindObjectsInactive.Include);
-            levelEditor ??= FindAnyObjectByType<LevelEditorController>(FindObjectsInactive.Include);
 
             if (gameOverUI == null)
                 gameOverUI = new GameObject("GameOverUI").AddComponent<GameOverUI>();
@@ -101,17 +114,21 @@ namespace Contrast.Core
             if (mainMenuUI == null)
                 mainMenuUI = new GameObject("MainMenuUI").AddComponent<MainMenuUI>();
 
-            if (levelSelectUI == null)
-                levelSelectUI = new GameObject("LevelSelectUI").AddComponent<LevelSelectUI>();
-
             if (loadingOverlayUI == null)
                 loadingOverlayUI = new GameObject("LoadingOverlayUI").AddComponent<LoadingOverlayUI>();
 
-            if (levelEditor == null)
-                levelEditor = new GameObject("LevelEditorController").AddComponent<LevelEditorController>();
+            // Ensure Load Level from JSON and Level Editor UI/Controller are disabled if present
+            levelSelectUI ??= FindAnyObjectByType<LevelSelectUI>(FindObjectsInactive.Include);
+            if (levelSelectUI != null)
+                levelSelectUI.Show(false);
 
-            if (levelEditorUI == null)
-                levelEditorUI = new GameObject("LevelEditorUI").AddComponent<LevelEditorUI>();
+            levelEditor ??= FindAnyObjectByType<LevelEditorController>(FindObjectsInactive.Include);
+            if (levelEditor != null)
+                levelEditor.StopEditing();
+
+            levelEditorUI ??= FindAnyObjectByType<LevelEditorUI>(FindObjectsInactive.Include);
+            if (levelEditorUI != null)
+                levelEditorUI.Show(false);
 
             testModeUI ??= FindAnyObjectByType<TestModeUI>(FindObjectsInactive.Include);
             if (testModeUI == null)
@@ -119,9 +136,6 @@ namespace Contrast.Core
 
             if (player != null)
                 player.gameObject.SetActive(false);
-
-            // Ensure persistent level directory and default level template exist on first launch
-            LevelRepository.EnsureDefaultLevelFile();
         }
 
         private void Start()
@@ -334,17 +348,8 @@ namespace Contrast.Core
 
         public void OpenLevelSelect()
         {
-            Debug.Log("[FLOW][LOAD_LEVEL] opening external level select screen");
-            CurrentCampaignIndex = -1;
-            CurrentEntryContext = GameplayEntryContext.CustomLevel;
-            levelEditor?.StopEditing();
-            levelEditorUI?.Show(false);
-
-            if (player != null)
-                player.gameObject.SetActive(false);
-
-            SetState(GameState.LevelSelect);
-            levelSelectUI?.OpenForPlay();
+            Debug.Log("[FLOW][LOAD_LEVEL] Load level from JSON mode is disabled -> returning to 3-level Main Menu");
+            ReturnToMainMenu();
         }
 
         public void StartGame() => StartCampaign();
@@ -522,18 +527,8 @@ namespace Contrast.Core
 
         public void OpenEditor()
         {
-            Debug.Log("[FLOW][OPEN_EDITOR] entering edit flow");
-            levelSelectUI?.Show(false);
-            loadingOverlayUI?.Show(false);
-            inGameMenuUI?.Show(false);
-
-            SetState(GameState.Editing);
-
-            if (player != null)
-                player.gameObject.SetActive(false);
-
-            levelEditor?.StartEditing();
-            levelEditorUI?.Show(true);
+            Debug.Log("[FLOW][OPEN_EDITOR] Level Editor mode is disabled -> returning to 3-level Main Menu");
+            ReturnToMainMenu();
         }
 
         public void ReturnToMainMenu()
@@ -572,23 +567,13 @@ namespace Contrast.Core
         }
 
         /// <summary>
-        /// Exits gameplay and returns to the appropriate destination based on how gameplay started:
-        /// - MainMenuGameplay / Campaign / CustomLevel -> returns to top-level MainMenuUI.
-        /// - EditorTestPlay -> returns directly to the LevelEditor session, restoring the working copy.
+        /// Exits gameplay and returns to the 3-level MainMenuUI.
         /// </summary>
         public void ReturnFromGameplay()
         {
             Debug.Log($"[FLOW][RETURN_GAMEPLAY] returning from gameplay session with context={CurrentEntryContext}");
             inGameMenuUI?.Show(false);
-
-            if (CurrentEntryContext == GameplayEntryContext.EditorTestPlay)
-            {
-                OpenEditor();
-            }
-            else
-            {
-                ReturnToMainMenu();
-            }
+            ReturnToMainMenu();
         }
 
         public void SetPlayer(PlayerController pc)
@@ -671,10 +656,7 @@ namespace Contrast.Core
 
             if (CurrentLevelSource == null)
             {
-                LevelRepository.EnsureDefaultLevelFile();
-                string[] files = LevelRepository.ListLevelFiles();
-                if (files != null && files.Length > 0)
-                    CurrentLevelSource = LevelSource.FromFile(files[0]);
+                CurrentLevelSource = LevelSource.FromResource(CampaignLevelResources[0], CampaignLevelTitles[0]);
             }
 
             if (CurrentLevelSource == null)

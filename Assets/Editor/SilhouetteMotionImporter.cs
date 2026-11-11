@@ -30,7 +30,7 @@ namespace Contrast.Editor
         {
             EditorApplication.delayCall += () =>
             {
-                if (EditorApplication.isCompiling || EditorApplication.isUpdating)
+                if (EditorApplication.isCompiling || EditorApplication.isUpdating || EditorApplication.isPlayingOrWillChangePlaymode)
                     return;
                 EnsureAssetsNow();
             };

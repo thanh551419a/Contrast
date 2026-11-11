@@ -45,6 +45,7 @@ namespace Contrast.Data
         public string vestibuleId;
         public int i = 2;
         public int k = 4;
+        public float lambda = 550f;
         public string orbitStart = "auto"; // "auto" or "dock"
         public NewtonRailsConfigData rails;
     }

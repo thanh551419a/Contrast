@@ -103,10 +103,16 @@ namespace Contrast.Level
         public float MeasuredB_mm { get; private set; }
         public float Measuredb_mm { get; private set; }
         public float CalculatedLambda_nm { get; private set; }
+        public float SourceLambda => sourceLambda;
+        public bool IsZoneActive => isZoneActive;
+        public NewtonRingsPresentation ApparatusVisuals => apparatusVisuals;
+        public GameObject BottomBarGo => bottomBarGo;
+        public GameObject CalculationPanelGo => calculationPanelGo;
 
         // Presentation & UI
         private GameObject hudCanvasGo;
         private Canvas hudCanvas;
+        private Text objectiveInfoText;
         private Text objectiveTitleText;
         private Text objectiveSubText;
         private Text feedbackText;
@@ -118,6 +124,7 @@ namespace Contrast.Level
         private Text calcValuesText;
         private Text calcEquationText;
         private Text calcResultText;
+        private Text completionDetailText;
         private GameObject completionPanelGo;
 
         // In-world visual markers & lines
@@ -278,6 +285,8 @@ namespace Contrast.Level
                 centerO = new Vector2(newtonData.cx / 64f, -newtonData.cy / 64f);
                 fringeOrderK = newtonData.k;
                 fringeOrderI = newtonData.i;
+                if (newtonData.lambda > 0f)
+                    sourceLambda = newtonData.lambda;
                 orbitStartMode = string.IsNullOrEmpty(newtonData.orbitStart) ? "auto" : newtonData.orbitStart.ToLowerInvariant();
 
                 if (newtonData.rails?.K != null)
@@ -338,7 +347,8 @@ namespace Contrast.Level
 
         public float GetRadiusForOrder(int order)
         {
-            return ringScale * Mathf.Sqrt(order * (sourceLambda / referenceLambda));
+            if (order <= 0) return 0f;
+            return ringScale * Mathf.Sqrt(order);
         }
 
         private void SpawnOrbitPlatforms()
@@ -718,45 +728,62 @@ namespace Contrast.Level
 
             hudCanvasGo.AddComponent<GraphicRaycaster>();
 
+            Color spectralCol = NewtonRingsPresentation.WavelengthToRgb(sourceLambda);
+            string colorNameVi = NewtonRingsPresentation.GetWavelengthColorNameVi(sourceLambda);
+            Color spectralAccent = Color.Lerp(spectralCol, Color.white, 0.30f);
+
             // Objective Card (Top Left)
             GameObject objCard = new GameObject("ObjectiveCard");
             objCard.transform.SetParent(hudCanvasGo.transform, false);
             Image objBg = objCard.AddComponent<Image>();
             objBg.color = new Color(0.02f, 0.04f, 0.07f, 0.85f);
             Outline objOut = objCard.AddComponent<Outline>();
-            objOut.effectColor = new Color(0.75f, 0.85f, 0.95f, 0.22f);
+            objOut.effectColor = new Color(spectralAccent.r, spectralAccent.g, spectralAccent.b, 0.28f);
             objOut.effectDistance = new Vector2(1f, -1f);
             RectTransform objRt = objCard.GetComponent<RectTransform>();
             objRt.anchorMin = new Vector2(0f, 1f);
             objRt.anchorMax = new Vector2(0f, 1f);
             objRt.pivot = new Vector2(0f, 1f);
-            objRt.anchoredPosition = new Vector2(40f, -40f);
-            objRt.sizeDelta = new Vector2(480f, 130f);
+            objRt.anchoredPosition = new Vector2(28f, -24f);
+            objRt.sizeDelta = new Vector2(460f, 136f);
 
             GameObject headerGo = new GameObject("Header");
             headerGo.transform.SetParent(objCard.transform, false);
             Text header = headerGo.AddComponent<Text>();
             header.font = GetFont();
             header.text = "NHIỆM VỤ · ĐO VÂN NEWTON";
-            header.fontSize = 13;
+            header.fontSize = 12;
             header.fontStyle = FontStyle.Bold;
             header.color = new Color(0.85f, 0.92f, 0.98f, 0.85f);
             RectTransform hrt = headerGo.GetComponent<RectTransform>();
-            hrt.anchoredPosition = new Vector2(20f, -18f);
-            hrt.sizeDelta = new Vector2(440f, 24f);
+            hrt.anchoredPosition = new Vector2(18f, -14f);
+            hrt.sizeDelta = new Vector2(424f, 20f);
             header.alignment = TextAnchor.UpperLeft;
+
+            GameObject infoGo = new GameObject("ProblemInfo");
+            infoGo.transform.SetParent(objCard.transform, false);
+            objectiveInfoText = infoGo.AddComponent<Text>();
+            objectiveInfoText.font = GetFont();
+            objectiveInfoText.text = $"ĐỀ BÀI: i = {fringeOrderI}   k = {fringeOrderK}   ·   Vân sáng {colorNameVi} (λ = {sourceLambda:F0} nm)";
+            objectiveInfoText.fontSize = 13;
+            objectiveInfoText.fontStyle = FontStyle.Bold;
+            objectiveInfoText.color = new Color(spectralAccent.r, spectralAccent.g, spectralAccent.b, 0.95f);
+            RectTransform irt = infoGo.GetComponent<RectTransform>();
+            irt.anchoredPosition = new Vector2(18f, -36f);
+            irt.sizeDelta = new Vector2(424f, 22f);
+            objectiveInfoText.alignment = TextAnchor.UpperLeft;
 
             GameObject titleGo = new GameObject("Title");
             titleGo.transform.SetParent(objCard.transform, false);
             objectiveTitleText = titleGo.AddComponent<Text>();
             objectiveTitleText.font = GetFont();
             objectiveTitleText.text = $"CHỌN K TRÊN VÂN k = {fringeOrderK}";
-            objectiveTitleText.fontSize = 19;
+            objectiveTitleText.fontSize = 18;
             objectiveTitleText.fontStyle = FontStyle.Bold;
             objectiveTitleText.color = new Color(0.96f, 0.98f, 1f, 1f);
             RectTransform trt = titleGo.GetComponent<RectTransform>();
-            trt.anchoredPosition = new Vector2(20f, -48f);
-            trt.sizeDelta = new Vector2(440f, 32f);
+            trt.anchoredPosition = new Vector2(18f, -62f);
+            trt.sizeDelta = new Vector2(424f, 28f);
             objectiveTitleText.alignment = TextAnchor.UpperLeft;
 
             GameObject subGo = new GameObject("Sub");
@@ -764,20 +791,20 @@ namespace Contrast.Level
             objectiveSubText = subGo.AddComponent<Text>();
             objectiveSubText.font = GetFont();
             objectiveSubText.text = "Đứng trên thanh K và nhấn X để đánh dấu";
-            objectiveSubText.fontSize = 14;
-            objectiveSubText.color = new Color(0.72f, 0.82f, 0.90f, 0.75f);
+            objectiveSubText.fontSize = 13;
+            objectiveSubText.color = new Color(0.72f, 0.82f, 0.90f, 0.78f);
             RectTransform srt = subGo.GetComponent<RectTransform>();
-            srt.anchoredPosition = new Vector2(20f, -84f);
-            srt.sizeDelta = new Vector2(440f, 34f);
+            srt.anchoredPosition = new Vector2(18f, -94f);
+            srt.sizeDelta = new Vector2(424f, 30f);
             objectiveSubText.alignment = TextAnchor.UpperLeft;
 
-            // Feedback Text (Center screen)
+            // Feedback Text (Top-center so it never covers the rings)
             GameObject fbGo = new GameObject("FeedbackText");
             fbGo.transform.SetParent(hudCanvasGo.transform, false);
             feedbackText = fbGo.AddComponent<Text>();
             feedbackText.font = GetFont();
             feedbackText.text = string.Empty;
-            feedbackText.fontSize = 24;
+            feedbackText.fontSize = 22;
             feedbackText.fontStyle = FontStyle.Bold;
             feedbackText.alignment = TextAnchor.MiddleCenter;
             feedbackText.color = new Color(0.95f, 0.98f, 1f, 1f);
@@ -785,30 +812,33 @@ namespace Contrast.Level
             fbOut.effectColor = new Color(0f, 0f, 0f, 0.8f);
             fbOut.effectDistance = new Vector2(2f, -2f);
             RectTransform fbrt = fbGo.GetComponent<RectTransform>();
-            fbrt.anchoredPosition = new Vector2(0f, 180f);
-            fbrt.sizeDelta = new Vector2(800f, 60f);
+            fbrt.anchorMin = new Vector2(0.5f, 1f);
+            fbrt.anchorMax = new Vector2(0.5f, 1f);
+            fbrt.pivot = new Vector2(0.5f, 1f);
+            fbrt.anchoredPosition = new Vector2(0f, -24f);
+            fbrt.sizeDelta = new Vector2(720f, 48f);
 
-            // Bottom Control Bar
+            // Control Bar docked directly under ObjectiveCard on Top-Left so bottom Newton rings stay 100% clear
             bottomBarGo = new GameObject("BottomBar");
             bottomBarGo.transform.SetParent(hudCanvasGo.transform, false);
             Image barBg = bottomBarGo.AddComponent<Image>();
-            barBg.color = new Color(0.02f, 0.04f, 0.07f, 0.85f);
+            barBg.color = new Color(0.02f, 0.04f, 0.07f, 0.82f);
             Outline barOut = bottomBarGo.AddComponent<Outline>();
-            barOut.effectColor = new Color(0.75f, 0.85f, 0.95f, 0.20f);
+            barOut.effectColor = new Color(0.75f, 0.85f, 0.95f, 0.18f);
             barOut.effectDistance = new Vector2(1f, -1f);
             RectTransform brt = bottomBarGo.GetComponent<RectTransform>();
-            brt.anchorMin = new Vector2(0.5f, 0f);
-            brt.anchorMax = new Vector2(0.5f, 0f);
-            brt.pivot = new Vector2(0.5f, 0f);
-            brt.anchoredPosition = new Vector2(0f, 30f);
-            brt.sizeDelta = new Vector2(840f, 52f);
+            brt.anchorMin = new Vector2(0f, 1f);
+            brt.anchorMax = new Vector2(0f, 1f);
+            brt.pivot = new Vector2(0f, 1f);
+            brt.anchoredPosition = new Vector2(28f, -168f);
+            brt.sizeDelta = new Vector2(460f, 42f);
 
             GameObject barTextGo = new GameObject("Controls");
             barTextGo.transform.SetParent(bottomBarGo.transform, false);
             Text barText = barTextGo.AddComponent<Text>();
             barText.font = GetFont();
-            barText.text = "A / D  DI CHUYỂN   ·   W / SPACE  NHẢY   ·   S  FALL   ·   ← / →  ĐỔI PHA   ·   X  ĐO / KHÓA ĐIỂM";
-            barText.fontSize = 15;
+            barText.text = "A/D: Di chuyển · SPACE: Nhảy · ←/→: Đổi pha · X: Đánh dấu";
+            barText.fontSize = 13;
             barText.fontStyle = FontStyle.Bold;
             barText.alignment = TextAnchor.MiddleCenter;
             barText.color = new Color(0.85f, 0.92f, 0.98f, 0.9f);
@@ -828,50 +858,55 @@ namespace Contrast.Level
 
         private void BuildCalculationPanel()
         {
+            Color spectralCol = NewtonRingsPresentation.WavelengthToRgb(sourceLambda);
+            string colorNameVi = NewtonRingsPresentation.GetWavelengthColorNameVi(sourceLambda);
+            Color spectralAccent = Color.Lerp(spectralCol, Color.white, 0.25f);
+
             calculationPanelGo = new GameObject("CalculationPanel");
             calculationPanelGo.transform.SetParent(hudCanvasGo.transform, false);
             Image bg = calculationPanelGo.AddComponent<Image>();
-            bg.color = new Color(0.015f, 0.03f, 0.055f, 0.92f);
+            bg.color = new Color(0.015f, 0.03f, 0.055f, 0.90f);
             Outline outl = calculationPanelGo.AddComponent<Outline>();
-            outl.effectColor = new Color(0.75f, 0.88f, 0.98f, 0.35f);
+            outl.effectColor = new Color(spectralAccent.r, spectralAccent.g, spectralAccent.b, 0.38f);
             outl.effectDistance = new Vector2(1.5f, -1.5f);
 
             calcCanvasGroup = calculationPanelGo.AddComponent<CanvasGroup>();
             calcCanvasGroup.alpha = 0f;
 
+            // Docked on Top-Left below ObjectiveCard so it never covers the Newton rings
             RectTransform rt = calculationPanelGo.GetComponent<RectTransform>();
-            rt.anchorMin = new Vector2(0.5f, 0f);
-            rt.anchorMax = new Vector2(0.5f, 0f);
-            rt.pivot = new Vector2(0.5f, 0f);
-            rt.anchoredPosition = new Vector2(0f, 60f);
-            rt.sizeDelta = new Vector2(880f, 180f);
+            rt.anchorMin = new Vector2(0f, 1f);
+            rt.anchorMax = new Vector2(0f, 1f);
+            rt.pivot = new Vector2(0f, 1f);
+            rt.anchoredPosition = new Vector2(28f, -168f);
+            rt.sizeDelta = new Vector2(460f, 168f);
 
             // 1. Formula line
             GameObject fGo = new GameObject("FormulaText");
             fGo.transform.SetParent(calculationPanelGo.transform, false);
             calcFormulaText = fGo.AddComponent<Text>();
             calcFormulaText.font = GetFont();
-            calcFormulaText.text = "B = KI = r_k + r_i        b = IK′ = r_k − r_i";
-            calcFormulaText.fontSize = 18;
+            calcFormulaText.text = "B = KI = r_k + r_i      b = IK′ = r_k − r_i";
+            calcFormulaText.fontSize = 15;
             calcFormulaText.fontStyle = FontStyle.Bold;
             calcFormulaText.alignment = TextAnchor.MiddleCenter;
             calcFormulaText.color = new Color(0.88f, 0.94f, 0.98f, 0.95f);
             RectTransform frt = fGo.GetComponent<RectTransform>();
-            frt.anchoredPosition = new Vector2(0f, 55f);
-            frt.sizeDelta = new Vector2(840f, 30f);
+            frt.anchoredPosition = new Vector2(0f, 52f);
+            frt.sizeDelta = new Vector2(436f, 26f);
 
             // 2. Measured values line
             GameObject vGo = new GameObject("ValuesText");
             vGo.transform.SetParent(calculationPanelGo.transform, false);
             calcValuesText = vGo.AddComponent<Text>();
             calcValuesText.font = GetFont();
-            calcValuesText.text = "B = 0.000 mm    b = 0.000 mm    R = 855 mm    i = 2    k = 4";
-            calcValuesText.fontSize = 15;
+            calcValuesText.text = $"B = 0.000 mm   b = 0.000 mm   R = {radiusOfCurvatureMm:F0} mm   i = {fringeOrderI}   k = {fringeOrderK}";
+            calcValuesText.fontSize = 13;
             calcValuesText.alignment = TextAnchor.MiddleCenter;
-            calcValuesText.color = new Color(0.72f, 0.84f, 0.92f, 0.85f);
+            calcValuesText.color = new Color(0.72f, 0.84f, 0.92f, 0.88f);
             RectTransform vrt = vGo.GetComponent<RectTransform>();
-            vrt.anchoredPosition = new Vector2(0f, 24f);
-            vrt.sizeDelta = new Vector2(840f, 26f);
+            vrt.anchoredPosition = new Vector2(0f, 22f);
+            vrt.sizeDelta = new Vector2(436f, 24f);
 
             // 3. Equation line
             GameObject eGo = new GameObject("EquationText");
@@ -879,30 +914,30 @@ namespace Contrast.Level
             calcEquationText = eGo.AddComponent<Text>();
             calcEquationText.font = GetFont();
             calcEquationText.text = "λ = (B × b) / [|k − i| × R]";
-            calcEquationText.fontSize = 20;
+            calcEquationText.fontSize = 17;
             calcEquationText.fontStyle = FontStyle.Bold;
             calcEquationText.alignment = TextAnchor.MiddleCenter;
             calcEquationText.color = new Color(0.92f, 0.96f, 1f, 1f);
             RectTransform ert = eGo.GetComponent<RectTransform>();
             ert.anchoredPosition = new Vector2(0f, -8f);
-            ert.sizeDelta = new Vector2(840f, 30f);
+            ert.sizeDelta = new Vector2(436f, 26f);
 
             // 4. Result line
             GameObject rGo = new GameObject("ResultText");
             rGo.transform.SetParent(calculationPanelGo.transform, false);
             calcResultText = rGo.AddComponent<Text>();
             calcResultText.font = GetFont();
-            calcResultText.text = "λ ≈ 550.0 nm";
-            calcResultText.fontSize = 28;
+            calcResultText.text = $"λ ≈ {sourceLambda:F1} nm · Ánh sáng {colorNameVi}";
+            calcResultText.fontSize = 22;
             calcResultText.fontStyle = FontStyle.Bold;
             calcResultText.alignment = TextAnchor.MiddleCenter;
-            calcResultText.color = new Color(0.96f, 0.98f, 1f, 1f);
+            calcResultText.color = spectralAccent;
             Outline rOut = rGo.AddComponent<Outline>();
-            rOut.effectColor = new Color(0.4f, 0.75f, 1f, 0.5f);
-            rOut.effectDistance = new Vector2(2f, -2f);
+            rOut.effectColor = new Color(spectralCol.r * 0.5f, spectralCol.g * 0.5f, spectralCol.b * 0.5f, 0.65f);
+            rOut.effectDistance = new Vector2(1.5f, -1.5f);
             RectTransform rrt = rGo.GetComponent<RectTransform>();
-            rrt.anchoredPosition = new Vector2(0f, -48f);
-            rrt.sizeDelta = new Vector2(840f, 40f);
+            rrt.anchoredPosition = new Vector2(0f, -46f);
+            rrt.sizeDelta = new Vector2(436f, 36f);
 
             calculationPanelGo.SetActive(false);
         }
@@ -961,15 +996,16 @@ namespace Contrast.Level
             srt.sizeDelta = new Vector2(800f, 32f);
 
             // Detail line
+            string compColorNameVi = NewtonRingsPresentation.GetWavelengthColorNameVi(sourceLambda);
             GameObject detGo = new GameObject("Detail");
             detGo.transform.SetParent(box.transform, false);
-            Text det = detGo.AddComponent<Text>();
-            det.font = GetFont();
-            det.text = "Xác lập trục K–O · Đo đối xứng qua tâm · Tính bước sóng λ ≈ 550.0 nm";
-            det.fontSize = 16;
-            det.fontStyle = FontStyle.Italic;
-            det.alignment = TextAnchor.MiddleCenter;
-            det.color = new Color(0.85f, 0.92f, 0.98f, 0.95f);
+            completionDetailText = detGo.AddComponent<Text>();
+            completionDetailText.font = GetFont();
+            completionDetailText.text = $"Xác lập trục K–O · Đo đối xứng qua tâm · Bước sóng λ ≈ {sourceLambda:F1} nm (Ánh sáng {compColorNameVi})";
+            completionDetailText.fontSize = 16;
+            completionDetailText.fontStyle = FontStyle.Italic;
+            completionDetailText.alignment = TextAnchor.MiddleCenter;
+            completionDetailText.color = Color.Lerp(NewtonRingsPresentation.WavelengthToRgb(sourceLambda), Color.white, 0.35f);
             RectTransform drt = detGo.GetComponent<RectTransform>();
             drt.anchoredPosition = new Vector2(0f, 35f);
             drt.sizeDelta = new Vector2(800f, 30f);
@@ -1487,8 +1523,8 @@ namespace Contrast.Level
             // In reference Easy configuration: ringScale = 220 px / 64 = 3.4375 units
             // physical r_1 = sqrt(lambda_ref * R) = sqrt(550e-6 mm * 855 mm) ~ 0.685747767 mm
             // mmPerUnit = physical r_1 / ringScale = 0.685747767 / 3.4375 ~ 0.19949026 mm/unit
-            float lambdaRefMm = referenceLambda * 1e-6f;
-            float physicalR1Mm = Mathf.Sqrt(lambdaRefMm * radiusOfCurvatureMm);
+            float lambdaSourceMm = sourceLambda * 1e-6f;
+            float physicalR1Mm = Mathf.Sqrt(lambdaSourceMm * radiusOfCurvatureMm);
             float mmPerUnit = physicalR1Mm / ringScale;
 
             MeasuredB_mm = MeasuredB_units * mmPerUnit;
@@ -1546,12 +1582,13 @@ namespace Contrast.Level
 
                 if (calcValuesText != null)
                 {
-                    calcValuesText.text = $"B = {MeasuredB_mm:F3} mm    b = {Measuredb_mm:F3} mm    R = {radiusOfCurvatureMm:F0} mm    i = {fringeOrderI}    k = {fringeOrderK}";
+                    calcValuesText.text = $"B = {MeasuredB_mm:F3} mm   b = {Measuredb_mm:F3} mm   R = {radiusOfCurvatureMm:F0} mm   i = {fringeOrderI}   k = {fringeOrderK}";
                 }
 
                 if (calcResultText != null)
                 {
-                    calcResultText.text = $"λ ≈ {CalculatedLambda_nm:F1} nm";
+                    string colorNameVi = NewtonRingsPresentation.GetWavelengthColorNameVi(CalculatedLambda_nm);
+                    calcResultText.text = $"λ ≈ {CalculatedLambda_nm:F1} nm · Ánh sáng {colorNameVi}";
                 }
             }
 

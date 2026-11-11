@@ -34,6 +34,13 @@ namespace Contrast.Presentation
 
         public RectTransform[] PhaseDividers => phaseDividers;
         public RectTransform CursorMarker => cursorMarker;
+        public RectTransform TunerPanelRect => tunerPanel != null ? tunerPanel.GetComponent<RectTransform>() : null;
+        public GameObject HintPanelObject => hintPanel;
+
+        private static readonly Vector2 NormalTunerAnchoredPos = new Vector2(0f, 18f);
+        private static readonly Vector2 NewtonTunerAnchoredPos = new Vector2(-680f, 14f);
+        private const float NormalTunerScale = 1.0f;
+        private const float NewtonTunerScale = 0.82f;
 
         private Text stateBadgeTitle;
         private Text stateBadgeRelation;
@@ -53,6 +60,7 @@ namespace Contrast.Presentation
         private Text quangHudValueText;
 
         private PlayerController player;
+        private Contrast.Camera.CameraFollow cachedCameraFollow;
         private float simulatedPhase = 0f;
 
         private void Awake()
@@ -454,6 +462,38 @@ namespace Contrast.Presentation
             rt.sizeDelta = new Vector2(320f, 22f);
         }
 
+        public void UpdateNewtonFramingLayout(bool isNewtonFramingActive, float dt, bool instant = false)
+        {
+            if (tunerPanel != null)
+            {
+                RectTransform rt = tunerPanel.GetComponent<RectTransform>();
+                if (rt != null)
+                {
+                    Vector2 targetPos = isNewtonFramingActive ? NewtonTunerAnchoredPos : NormalTunerAnchoredPos;
+                    float targetScale = isNewtonFramingActive ? NewtonTunerScale : NormalTunerScale;
+                    if (instant || dt <= 0f)
+                    {
+                        rt.anchoredPosition = targetPos;
+                        rt.localScale = Vector3.one * targetScale;
+                    }
+                    else
+                    {
+                        float alpha = 1f - Mathf.Exp(-7.5f * dt); // Matches HTML smooth(7.5, dt)
+                        rt.anchoredPosition = Vector2.Lerp(rt.anchoredPosition, targetPos, alpha);
+                        float s = Mathf.Lerp(rt.localScale.x, targetScale, alpha);
+                        rt.localScale = Vector3.one * s;
+                    }
+                }
+            }
+
+            if (hintPanel != null)
+            {
+                GameManager gm = GameManager.Instance;
+                bool isPlaying = gm == null || gm.State == GameState.Playing;
+                hintPanel.SetActive(isPlaying && !isNewtonFramingActive);
+            }
+        }
+
         private void Update()
         {
             if (player == null)
@@ -463,10 +503,20 @@ namespace Contrast.Presentation
             GameManager gm = GameManager.Instance;
             bool isPlaying = gm != null && gm.State == GameState.Playing;
 
+            if (cachedCameraFollow == null)
+                cachedCameraFollow = FindAnyObjectByType<Contrast.Camera.CameraFollow>();
+            var newtonCtrl = Contrast.Level.EasyNewtonFinaleController.Instance;
+            var camFollow = cachedCameraFollow;
+            bool isNewtonFramingActive =
+                (newtonCtrl != null && newtonCtrl.IsZoneActive) ||
+                (camFollow != null &&
+                 (camFollow.CurrentMode == Contrast.Camera.CameraMode.NewtonFixed ||
+                  camFollow.CurrentMode == Contrast.Camera.CameraMode.NewtonResultReveal));
+
             if (tunerPanel != null)
                 tunerPanel.SetActive(isPlaying);
             if (hintPanel != null)
-                hintPanel.SetActive(isPlaying);
+                hintPanel.SetActive(isPlaying && !isNewtonFramingActive);
             if (quangHudCard != null)
             {
                 bool showQuang = isPlaying && Contrast.Level.QuangDiemItem.TotalCount > 0;
@@ -479,6 +529,8 @@ namespace Contrast.Presentation
 
             if (!isPlaying)
                 return;
+
+            UpdateNewtonFramingLayout(isNewtonFramingActive, Time.unscaledDeltaTime, false);
 
             if (player == null)
                 player = FindAnyObjectByType<PlayerController>();

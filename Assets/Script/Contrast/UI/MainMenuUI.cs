@@ -52,8 +52,7 @@ namespace Contrast.UI
 
             if (visible)
             {
-                ClosePlaySubMenu();
-                SelectCard(0);
+                OpenPlaySubMenu();
             }
         }
 
@@ -69,10 +68,10 @@ namespace Contrast.UI
         public void ClosePlaySubMenu()
         {
             EnsureInitialized();
-            if (playSubPanel != null)
-                playSubPanel.SetActive(false);
             if (cardsRoot != null)
-                cardsRoot.SetActive(true);
+                cardsRoot.SetActive(false);
+            if (playSubPanel != null)
+                playSubPanel.SetActive(true);
         }
 
         public void SelectPlayFromBeginning()
@@ -90,79 +89,31 @@ namespace Contrast.UI
             if (panel == null || !panel.activeInHierarchy)
                 return;
 
-            if (IsPlaySubMenuOpen)
-            {
-                if (IsEscapePressed())
-                {
-                    ClosePlaySubMenu();
-                    return;
-                }
-
-                if (IsKey1Pressed())
-                {
-                    SelectDirectLevel(0);
-                    return;
-                }
-
-                if (IsKey2Pressed())
-                {
-                    SelectDirectLevel(1);
-                    return;
-                }
-
-                if (IsKey3Pressed())
-                {
-                    SelectDirectLevel(2);
-                    return;
-                }
-
-                if (IsConfirmPressed())
-                {
-                    SelectPlayFromBeginning();
-                    return;
-                }
-
-                return;
-            }
+            if (playSubPanel != null && !playSubPanel.activeSelf)
+                playSubPanel.SetActive(true);
 
             if (IsKey1Pressed())
             {
-                SelectCard(0);
-                OpenPlaySubMenu();
+                SelectDirectLevel(0);
                 return;
             }
 
             if (IsKey2Pressed())
             {
-                SelectCard(1);
-                OnLoadLevel();
+                SelectDirectLevel(1);
                 return;
             }
 
             if (IsKey3Pressed())
             {
-                SelectCard(2);
-                OnEdit();
-                return;
-            }
-
-            if (IsLeftPressed())
-            {
-                SelectCard((selectedIndex + 2) % 3);
-                return;
-            }
-
-            if (IsRightPressed())
-            {
-                SelectCard((selectedIndex + 1) % 3);
+                SelectDirectLevel(2);
                 return;
             }
 
             if (IsConfirmPressed())
             {
-                if (selectedIndex == 0) OpenPlaySubMenu();
-                else if (selectedIndex == 1) OnLoadLevel();
-                else if (selectedIndex == 2) OnEdit();
+                SelectPlayFromBeginning();
+                return;
             }
         }
 
@@ -233,75 +184,12 @@ namespace Contrast.UI
             subTitle.GetComponent<RectTransform>().sizeDelta = new Vector2(1000f, 40f);
             subTitle.GetComponent<RectTransform>().anchoredPosition = new Vector2(0f, 250f);
 
-            // Root container for the 3 top-level cards
+            // Build the 3-level Gameplay Menu directly (LOAD LEVEL and EDIT LEVEL removed)
             cardsRoot = NewUI("MainCardsRoot", panel.transform);
-            Stretch(cardsRoot.GetComponent<RectTransform>());
+            cardsRoot.SetActive(false);
 
-            // Card 1: CHƠI THỬ (Built-in Campaign + Direct Level Selection)
-            CreateMenuCard(
-                cardsRoot.transform,
-                "CHƠI THỬ",
-                "CHIẾN DỊCH GỐC & CHỌN MÀN (L01 · L02 · L03)",
-                new string[]
-                {
-                    "— Chơi từ đầu (L01 → L02 → L03) hoặc Chọn màn trực tiếp",
-                    "— L01: Cánh cửa không phải vật cản",
-                    "— L02: Cầu thang ma  |  L03: Giếng ba tầng"
-                },
-                new Vector2(-480f, -20f),
-                "NHẤN HOẶC PHÍM 1",
-                0,
-                OpenPlaySubMenu);
-
-            // Card 2: LOAD LEVEL (External Custom Levels)
-            CreateMenuCard(
-                cardsRoot.transform,
-                "LOAD LEVEL",
-                "MÀN CHƠI TÙY CHỌN TỪ BỘ NHỚ",
-                new string[]
-                {
-                    "— Tải và trải nghiệm các file JSON ngoài",
-                    "— Tự động kiểm tra & sửa lỗi định dạng",
-                    "— Khám phá các màn do cộng đồng thiết kế"
-                },
-                new Vector2(0f, -20f),
-                "NHẤN HOẶC PHÍM 2",
-                1,
-                OnLoadLevel);
-
-            // Card 3: EDIT LEVEL (Level Editor)
-            CreateMenuCard(
-                cardsRoot.transform,
-                "EDIT LEVEL",
-                "TRÌNH THIẾT KẾ MÀN CHƠI",
-                new string[]
-                {
-                    "— Đặt, chọn, kéo thả và co giãn thanh",
-                    "— Tùy chỉnh màu sắc, Checkpoint & Đích",
-                    "— Thiết lập chuyển động quỹ đạo & Xuất JSON"
-                },
-                new Vector2(480f, -20f),
-                "NHẤN HOẶC PHÍM 3",
-                2,
-                OnEdit);
-
-            // Footer instructions
-            GameObject footer = NewUI("Footer", cardsRoot.transform);
-            Text footerText = footer.AddComponent<Text>();
-            footerText.font = GetFont();
-            footerText.text = "1: CHƠI THỬ      2: LOAD LEVEL      3: EDIT LEVEL      ← / →  CHỌN      ENTER / SPACE  MỞ";
-            footerText.fontSize = 14;
-            footerText.fontStyle = FontStyle.Normal;
-            footerText.alignment = TextAnchor.MiddleCenter;
-            footerText.color = new Color(0.75f, 0.85f, 0.92f, 0.55f);
-            footer.GetComponent<RectTransform>().sizeDelta = new Vector2(1400f, 40f);
-            footer.GetComponent<RectTransform>().anchoredPosition = new Vector2(0f, -380f);
-
-            // Build the Play Sub-Menu (CHƠI TỪ ĐẦU + CHỌN MÀN L01/L02/L03 + QUAY LẠI)
             BuildPlaySubMenu(panel.transform);
-            playSubPanel.SetActive(false);
-
-            SelectCard(0);
+            playSubPanel.SetActive(true);
         }
 
         private void BuildPlaySubMenu(Transform parent)
@@ -322,7 +210,7 @@ namespace Contrast.UI
             CreateSubLabel(
                 playSubPanel.transform,
                 "Header",
-                "CHƠI THỬ · CHỌN CHẾ ĐỘ CHƠI",
+                "CHỌN CHẾ ĐỘ CHƠI · 3 MÀN CHƠI (L01 · L02 · L03)",
                 new Vector2(0f, 226f),
                 new Vector2(960f, 36f),
                 22,
@@ -359,7 +247,7 @@ namespace Contrast.UI
                 playSubPanel.transform,
                 "SelectLevel_L01",
                 "L01 — Cánh cửa không phải vật cản",
-                "Vật cản pha tĩnh · 2 Quang Điểm · Thí nghiệm vân tròn Newton (k = 4, i = 2)",
+                "Vật cản pha tĩnh · 2 Quang Điểm · Thí nghiệm vân tròn Newton (k = 6, i = 3, λ = 550 nm)",
                 new Vector2(0f, 10f),
                 new Vector2(960f, 64f),
                 new Color(0.07f, 0.11f, 0.17f, 0.95f),
@@ -371,7 +259,7 @@ namespace Contrast.UI
                 playSubPanel.transform,
                 "SelectLevel_L02",
                 "L02 — Cầu thang ma",
-                "Cầu thang lệch pha · 2 Quang Điểm · Quỹ đạo Newton tự động (k = 4, i = 2)",
+                "Cầu thang lệch pha · 2 Quang Điểm · Quỹ đạo Newton tự động (k = 4, i = 2, λ = 550 nm)",
                 new Vector2(0f, -64f),
                 new Vector2(960f, 64f),
                 new Color(0.07f, 0.11f, 0.17f, 0.95f),
@@ -383,39 +271,25 @@ namespace Contrast.UI
                 playSubPanel.transform,
                 "SelectLevel_L03",
                 "L03 — Giếng ba tầng",
-                "Giếng ba tầng & bệ di động · 3 Quang Điểm · Thí nghiệm vân tròn Newton (k = 5, i = 2)",
+                "Giếng ba tầng & bệ di động · 3 Quang Điểm · Thí nghiệm vân tròn Newton (k = 7, i = 2, λ = 550 nm)",
                 new Vector2(0f, -138f),
                 new Vector2(960f, 64f),
                 new Color(0.07f, 0.11f, 0.17f, 0.95f),
                 new Color(0.75f, 0.85f, 0.95f, 0.38f),
                 () => SelectDirectLevel(2));
 
-            // Back Button
             GameObject backGo = NewUI("BackToMainMenuButton", playSubPanel.transform);
-            Image backImg = backGo.AddComponent<Image>();
-            backImg.color = new Color(0.14f, 0.18f, 0.24f, 0.92f);
-
-            Outline backOutline = backGo.AddComponent<Outline>();
-            backOutline.effectColor = new Color(0.80f, 0.88f, 0.95f, 0.40f);
-            backOutline.effectDistance = new Vector2(1.2f, -1.2f);
-
-            Button backBtn = backGo.AddComponent<Button>();
-            backBtn.targetGraphic = backImg;
-            backBtn.onClick.AddListener(ClosePlaySubMenu);
-
-            RectTransform backRt = backGo.GetComponent<RectTransform>();
-            backRt.sizeDelta = new Vector2(280f, 46f);
-            backRt.anchoredPosition = new Vector2(0f, -218f);
+            backGo.SetActive(false);
 
             CreateSubLabel(
-                backGo.transform,
-                "Label",
-                "←   QUAY LẠI MENU CHÍNH (ESC)",
-                Vector2.zero,
-                new Vector2(280f, 46f),
+                playSubPanel.transform,
+                "GameplayFooter",
+                "ENTER / SPACE: CHƠI TỪ ĐẦU      ·      PHÍM 1 / 2 / 3: CHỌN NHANH MÀN L01 / L02 / L03",
+                new Vector2(0f, -218f),
+                new Vector2(960f, 32f),
                 14,
                 FontStyle.Bold,
-                new Color(0.92f, 0.96f, 1f, 0.95f),
+                new Color(0.75f, 0.86f, 0.95f, 0.72f),
                 TextAnchor.MiddleCenter);
         }
 
