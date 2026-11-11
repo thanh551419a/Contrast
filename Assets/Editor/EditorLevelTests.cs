@@ -1360,7 +1360,7 @@ namespace Contrast.Tests
                 if (p.gameObject.name.Contains("OrbitPlatform_K_White"))
                 {
                     foundK = true;
-                    AssertApproximately(255f, p.RawGrayscaleColor, 0.01f, "FinalePlat_WhiteColor", "Platform K has white color 255");
+                    AssertApproximately(0f, p.RawGrayscaleColor, 0.01f, "FinalePlat_WhiteColor", "Platform K has white color 0 (LogicalColor.White)");
                     var traj = p.GetTrajectory();
                     AssertTrue(traj != null && traj.Config != null && traj.Config.curveType == TrajectoryCurveType.Circle, "FinalePlat_WhiteTrajectoryCircle", "Platform K has Circle trajectory");
                     AssertApproximately(6.875f, traj.Config.radius, 0.001f, "FinalePlat_WhiteTrajectoryRadius", "Platform K radius is 6.875");
@@ -2257,15 +2257,15 @@ namespace Contrast.Tests
             AssertTrue(centerUni.b > centerUni.r && centerUni.r < 0.25f, "Task5_Universal_GrayBlueTexture", $"Universal surface texture is dark gray-blue (R={centerUni.r:F3}, G={centerUni.g:F3}, B={centerUni.b:F3})");
             AssertApproximately(0.835f, uniBorder.color.r, 0.03f, "Task5_Universal_BorderColorR", "Universal border matches cool gray-blue rgba(213,225,232,0.55)");
 
-            // Verify OrbitPlatform_K remains visually White while LogicalColor is Universal
+            // Verify OrbitPlatform_K is visually White AND LogicalColor.White (passable by White player)
             GameObject kGo = new GameObject("OrbitPlatform_K_White");
             ColorPlatform kPlat = kGo.AddComponent<ColorPlatform>();
-            kPlat.Initialize(new Vector2(0f, 0f), new Vector2(1.4f, 0.28f), 255f);
+            kPlat.Initialize(new Vector2(0f, 0f), new Vector2(1.4f, 0.28f), 0f);
             PlatformVisualPresentation kVis = kGo.AddComponent<PlatformVisualPresentation>();
             kVis.InitializeVisuals();
             SpriteRenderer kSurf = kGo.transform.Find("PlatformVisualPresentationRoot/Surface")?.GetComponent<SpriteRenderer>();
             UnityEngine.Color kCenter = kSurf.sprite.texture.GetPixel(32, 32);
-            AssertTrue(kPlat.Logical == LogicalColor.Universal, "Task5_OrbitK_AlwaysSolid", "OrbitPlatform_K is LogicalColor.Universal (always solid)");
+            AssertTrue(kPlat.Logical == LogicalColor.White && !kPlat.IsUniversal, "Task5_OrbitK_PassableByWhitePlayer", "OrbitPlatform_K is LogicalColor.White (passable by White player)");
             AssertTrue(kCenter.r > 0.85f && kCenter.g > 0.85f && kCenter.b > 0.85f, "Task5_OrbitK_RemainsWhiteVisual", "OrbitPlatform_K retains bright White visual appearance");
 
             // ── TASK 6: Quang Diem Collectibles Instantiation & Collection ────────
@@ -3866,8 +3866,8 @@ namespace Contrast.Tests
                 pc.SetGroundedForTest(true, ctrl.PlatformK);
                 ctrl.AttemptCapture();
 
-                AssertTrue(ctrl.CurrentTargetIndex == 3 && ctrl.IsRevealActive && Mathf.Abs(ctrl.CalculatedLambda_nm - 550f) < 1.0f,
-                    $"Cross_D5_{lvl}_FullSequenceCompletes550nm", $"{lvl} full 1->2->3 sequence completes and calculates 550nm wavelength");
+                AssertTrue(ctrl.CurrentTargetIndex == 3 && ctrl.IsRevealActive && Mathf.Abs(ctrl.CalculatedLambda_nm - data.newton.lambda) < 1.0f,
+                    $"Cross_D5_{lvl}_FullSequenceCompletesTargetLambda", $"{lvl} full 1->2->3 sequence completes and calculates {data.newton.lambda:F0}nm wavelength");
 
                 ctrl.Teardown();
                 UnityEngine.Object.DestroyImmediate(newtonGo);
@@ -4400,13 +4400,17 @@ namespace Contrast.Tests
             // ----------------------------------------------------------------------------
             // Task I: Newton Bottom UI Clearance, Wavelength Color Mapping, & Direct Main Menu
             // ----------------------------------------------------------------------------
-            // 1. Verify Newton BottomBar and CalculationPanel are anchored at top-left (never covering bottom of rings)
+            // 1. Verify Newton BottomBar and CalculationPanel are anchored at top-left, and ObjectiveCard is hidden after 3 measurements
             RectTransform bottomBarRt = newtonCtrl.BottomBarGo != null ? newtonCtrl.BottomBarGo.GetComponent<RectTransform>() : null;
             RectTransform calcPanelRt = newtonCtrl.CalculationPanelGo != null ? newtonCtrl.CalculationPanelGo.GetComponent<RectTransform>() : null;
             AssertTrue(bottomBarRt != null && bottomBarRt.anchorMin == new Vector2(0f, 1f) && bottomBarRt.anchorMax == new Vector2(0f, 1f),
                 "NewtonUI_01_BottomBarDockedTopLeft", "Newton control bar is docked at top-left below ObjectiveCard so bottom of rings is clear");
             AssertTrue(calcPanelRt != null && calcPanelRt.anchorMin == new Vector2(0f, 1f) && calcPanelRt.anchorMax == new Vector2(0f, 1f),
                 "NewtonUI_02_CalcPanelDockedTopLeft", "Newton calculation panel is docked at top-left below ObjectiveCard so bottom of rings is clear");
+            AssertTrue(newtonCtrl.ObjectiveCardGo != null && !newtonCtrl.ObjectiveCardGo.activeSelf,
+                "NewtonUI_02b_ObjectiveCardHiddenAfterCompletion", "ObjectiveCard (i = ? k = ? requirement) is hidden after completing all 3 measurements");
+            AssertTrue(newtonCtrl.PlatformK != null && newtonCtrl.PlatformK.Logical == LogicalColor.White && !newtonCtrl.PlatformK.IsUniversal,
+                "NewtonPlat_01_OrbitKPassableByWhite", "OrbitPlatform_K is LogicalColor.White and allows White player to pass through");
 
             // 2. Verify PhaseTunerUI slides left during Newton framing and hides ControlHintCard
             GameObject tunerTestGo = new GameObject("NewtonTunerLayoutTest");
@@ -4424,16 +4428,18 @@ namespace Contrast.Tests
 
             // 3. Verify Wavelength-to-RGB spectral color mapping & ring geometry invariance
             UnityEngine.Color col550 = Contrast.Presentation.NewtonRingsPresentation.WavelengthToRgb(550f);
-            UnityEngine.Color col633 = Contrast.Presentation.NewtonRingsPresentation.WavelengthToRgb(633f);
+            UnityEngine.Color col650 = Contrast.Presentation.NewtonRingsPresentation.WavelengthToRgb(650f);
             UnityEngine.Color col470 = Contrast.Presentation.NewtonRingsPresentation.WavelengthToRgb(470f);
             AssertTrue(col550.g > col550.r && col550.g > col550.b && col550.g > 0.9f,
                 "NewtonColor_01_550nmIsGreen", $"550 nm maps to monochromatic green (R={col550.r:F2}, G={col550.g:F2}, B={col550.b:F2})");
-            AssertTrue(col633.r > col633.g && col633.r > col633.b && col633.r > 0.9f,
-                "NewtonColor_02_633nmIsRed", $"633 nm maps to monochromatic red (R={col633.r:F2}, G={col633.g:F2}, B={col633.b:F2})");
+            AssertTrue(col650.r > col650.g && col650.r > col650.b && col650.r > 0.9f,
+                "NewtonColor_02_650nmIsRed", $"650 nm maps to monochromatic red (R={col650.r:F2}, G={col650.g:F2}, B={col650.b:F2})");
             AssertTrue(col470.b > col470.r && col470.b > 0.9f,
                 "NewtonColor_03_470nmIsBlue", $"470 nm maps to monochromatic blue (R={col470.r:F2}, G={col470.g:F2}, B={col470.b:F2})");
-            AssertTrue(Contrast.Presentation.NewtonRingsPresentation.GetWavelengthColorNameVi(550f) == "Lục",
-                "NewtonColor_04_550nmLabelVi", "550 nm Vietnamese spectral band label is 'Lục'");
+            AssertTrue(Contrast.Presentation.NewtonRingsPresentation.GetWavelengthColorNameVi(550f) == "Lục" &&
+                       Contrast.Presentation.NewtonRingsPresentation.GetWavelengthColorNameVi(650f) == "Đỏ" &&
+                       Contrast.Presentation.NewtonRingsPresentation.GetWavelengthColorNameVi(470f) == "Xanh dương",
+                "NewtonColor_04_SpectralLabelsVi", "550/650/470 nm Vietnamese spectral band labels are 'Lục', 'Đỏ', and 'Xanh dương'");
 
             // 4. Verify MainMenuUI directly opens the single Gameplay panel (no CHƠI THỬ / EDIT LEVEL chooser)
             GameObject directMenuGo = new GameObject("DirectGameplayMainMenuTest");

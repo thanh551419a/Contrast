@@ -106,12 +106,14 @@ namespace Contrast.Level
         public float SourceLambda => sourceLambda;
         public bool IsZoneActive => isZoneActive;
         public NewtonRingsPresentation ApparatusVisuals => apparatusVisuals;
+        public GameObject ObjectiveCardGo => objectiveCardGo;
         public GameObject BottomBarGo => bottomBarGo;
         public GameObject CalculationPanelGo => calculationPanelGo;
 
         // Presentation & UI
         private GameObject hudCanvasGo;
         private Canvas hudCanvas;
+        private GameObject objectiveCardGo;
         private Text objectiveInfoText;
         private Text objectiveTitleText;
         private Text objectiveSubText;
@@ -286,7 +288,15 @@ namespace Contrast.Level
                 fringeOrderK = newtonData.k;
                 fringeOrderI = newtonData.i;
                 if (newtonData.lambda > 0f)
+                {
                     sourceLambda = newtonData.lambda;
+                }
+                else
+                {
+                    sourceLambda = (fringeOrderK == 4 && fringeOrderI == 2) ? 650f
+                        : (fringeOrderK == 7 && fringeOrderI == 2) ? 470f
+                        : 550f;
+                }
                 orbitStartMode = string.IsNullOrEmpty(newtonData.orbitStart) ? "auto" : newtonData.orbitStart.ToLowerInvariant();
 
                 if (newtonData.rails?.K != null)
@@ -369,7 +379,7 @@ namespace Contrast.Level
                 rK * Mathf.Cos(startAngleKDeg * Mathf.Deg2Rad),
                 rK * Mathf.Sin(startAngleKDeg * Mathf.Deg2Rad));
 
-            platformK.Initialize(initPosK, platformSizeK, 255f); // White
+            platformK.Initialize(initPosK, platformSizeK, 0f); // White (0 = LogicalColor.White, passable by White player)
             presK.InitializeVisuals();
 
             trajK = platKGo.AddComponent<Trajectory>();
@@ -734,6 +744,7 @@ namespace Contrast.Level
 
             // Objective Card (Top Left)
             GameObject objCard = new GameObject("ObjectiveCard");
+            objectiveCardGo = objCard;
             objCard.transform.SetParent(hudCanvasGo.transform, false);
             Image objBg = objCard.AddComponent<Image>();
             objBg.color = new Color(0.02f, 0.04f, 0.07f, 0.85f);
@@ -1509,9 +1520,30 @@ namespace Contrast.Level
 
             ComputePhysicalWavelength();
 
+            string colorNameVi = NewtonRingsPresentation.GetWavelengthColorNameVi(CalculatedLambda_nm);
+            if (calcValuesText != null)
+            {
+                calcValuesText.text = $"B = {MeasuredB_mm:F3} mm   b = {Measuredb_mm:F3} mm   R = {radiusOfCurvatureMm:F0} mm   i = {fringeOrderI}   k = {fringeOrderK}";
+            }
+            if (calcResultText != null)
+            {
+                calcResultText.text = $"λ ≈ {CalculatedLambda_nm:F1} nm · Ánh sáng {colorNameVi}";
+            }
+            if (completionDetailText != null)
+            {
+                completionDetailText.text = $"B = {MeasuredB_mm:F3} mm · b = {Measuredb_mm:F3} mm · Bước sóng λ ≈ {CalculatedLambda_nm:F1} nm (Ánh sáng {colorNameVi})";
+            }
+
             if (targetICrosshair != null) targetICrosshair.SetActive(false);
             if (targetKpCrosshair != null) targetKpCrosshair.SetActive(false);
+            if (objectiveCardGo != null) objectiveCardGo.SetActive(false);
             if (bottomBarGo != null) bottomBarGo.SetActive(false);
+            if (calculationPanelGo != null)
+            {
+                RectTransform calcRt = calculationPanelGo.GetComponent<RectTransform>();
+                if (calcRt != null)
+                    calcRt.anchoredPosition = new Vector2(28f, -24f);
+            }
         }
 
         public void ComputePhysicalWavelength()
@@ -1661,7 +1693,14 @@ namespace Contrast.Level
             if (markerKpGo != null) markerKpGo.SetActive(false);
             if (targetICrosshair != null) targetICrosshair.SetActive(false);
             if (targetKpCrosshair != null) targetKpCrosshair.SetActive(false);
-            if (calculationPanelGo != null) calculationPanelGo.SetActive(false);
+            if (objectiveCardGo != null) objectiveCardGo.SetActive(true);
+            if (calculationPanelGo != null)
+            {
+                calculationPanelGo.SetActive(false);
+                RectTransform calcRt = calculationPanelGo.GetComponent<RectTransform>();
+                if (calcRt != null)
+                    calcRt.anchoredPosition = new Vector2(28f, -168f);
+            }
             if (completionPanelGo != null) completionPanelGo.SetActive(false);
             if (bottomBarGo != null) bottomBarGo.SetActive(true);
 
@@ -1753,6 +1792,8 @@ namespace Contrast.Level
         private bool IsPlayerStandingOn(ColorPlatform plat)
         {
             if (player == null || plat == null) return false;
+            if (!plat.IsUniversal && plat.Logical == player.CurrentColor)
+                return false;
             Rect platRect = plat.GetAabb();
             Vector2 pPos = player.transform.position;
             Vector2 pSize = player.PlayerSize;

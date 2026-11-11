@@ -100,8 +100,7 @@ namespace Contrast.Presentation
         public static string GetWavelengthColorNameVi(float wavelengthNm)
         {
             if (wavelengthNm < 435f) return "Tím";
-            if (wavelengthNm < 460f) return "Chàm";
-            if (wavelengthNm < 495f) return "Lam";
+            if (wavelengthNm < 495f) return "Xanh dương";
             if (wavelengthNm < 570f) return "Lục";
             if (wavelengthNm < 590f) return "Vàng";
             if (wavelengthNm < 620f) return "Cam";

@@ -336,8 +336,17 @@ namespace Contrast.Player
                 SetColor(input.RequestedColor);
             }
 
-            // Re-evaluate ground support if color/phase change made underlying platform solid
-            if (!isGrounded && !(jumpMotion != null && jumpMotion.IsJumping))
+            // Re-evaluate ground support if color/phase change made underlying platform passable or solid
+            if (isGrounded && GroundedPlatform != null && !GroundedPlatform.IsUniversal &&
+                GroundedPlatform.Logical == currentColor)
+            {
+                isGrounded = false;
+                GroundedPlatform = null;
+                riderDisplacement = Vector2.zero;
+                coyoteTimer = 0f;
+                RefreshGroundedStateImmediate();
+            }
+            else if (!isGrounded && !(jumpMotion != null && jumpMotion.IsJumping))
             {
                 RefreshGroundedStateImmediate();
             }

@@ -252,7 +252,7 @@
     "i": 2,
     "k": 4,
     "R": 1500.0,
-    "lambda": 550.0,
+    "lambda": 650.0,
     "orbitStart": "auto",
     "rails": {
       "K": {
