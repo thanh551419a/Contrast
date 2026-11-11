@@ -29,16 +29,19 @@ namespace Contrast.UI
 
         private void OnMenuClicked()
         {
+            EventSystem.current?.SetSelectedGameObject(null);
             GameManager.Instance?.OpenInGameMenu();
         }
 
         private void OnRestartClicked()
         {
+            EventSystem.current?.SetSelectedGameObject(null);
             GameManager.Instance?.Restart();
         }
 
         private void OnRetryClicked()
         {
+            EventSystem.current?.SetSelectedGameObject(null);
             GameManager.Instance?.Retry();
         }
 
@@ -111,6 +114,7 @@ namespace Contrast.UI
             outline.effectDistance = new Vector2(1f, -1f);
 
             Button button = buttonGo.AddComponent<Button>();
+            button.navigation = new Navigation { mode = Navigation.Mode.None };
             button.targetGraphic = image;
             button.onClick.AddListener(callback);
 

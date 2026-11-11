@@ -1,0 +1,139 @@
+{
+  "workspaceWriteVerified": true,
+  "validation": "Python JSON parse and source field/geometry assertions; not Unity runtime execution",
+  "levels": [
+    {
+      "levelId": "L01",
+      "platforms": 16,
+      "checkpointsExcludingSpawn": 5,
+      "collectibles": 2,
+      "geometryAndColors": "PASS source assertions executed",
+      "parseAndReadback": "PASS",
+      "changes": [
+        {
+          "id": "item_mvnivkti_1",
+          "position": {
+            "x": 27.328125,
+            "y": -13.390625
+          },
+          "size": {
+            "x": 0.40625,
+            "y": 0.40625
+          }
+        },
+        {
+          "id": "item_mvnivvcv_2",
+          "position": {
+            "x": 48.140625,
+            "y": -10.53125
+          },
+          "size": {
+            "x": 0.40625,
+            "y": 0.40625
+          }
+        }
+      ],
+      "newtonAdded": {
+        "enabled": true,
+        "vestibuleId": "item_mvhtg97m_h"
+      },
+      "beforeSha256": "1a4e4de26f9befb9b71e1f11bca18fd67cdaade80bd92d03b303c7e924a3fb8a",
+      "afterSha256": "ecb8d5a68db28f8f2c7dbed0b2ef7c80d44cf2c54df8bdff5bf5b13556d87f18"
+    },
+    {
+      "levelId": "L02",
+      "platforms": 15,
+      "checkpointsExcludingSpawn": 4,
+      "collectibles": 2,
+      "geometryAndColors": "PASS source assertions executed",
+      "parseAndReadback": "PASS",
+      "changes": [
+        {
+          "id": "item_mvni3tly_1",
+          "position": {
+            "x": 16.484375,
+            "y": -8.859375
+          },
+          "size": {
+            "x": 0.40625,
+            "y": 0.40625
+          }
+        },
+        {
+          "id": "L02_QD02_SECRET_UNDER_BLACK",
+          "position": {
+            "x": 54.109375,
+            "y": -5.59375
+          },
+          "size": {
+            "x": 0.40625,
+            "y": 0.40625
+          }
+        }
+      ],
+      "newtonAdded": {
+        "enabled": true,
+        "vestibuleId": null
+      },
+      "beforeSha256": "35df394d867ee408de3b9b2f71e24562ec514511ec2c512deb820965ff660d80",
+      "afterSha256": "e2ecfe3c750ae0284fff47ea6540a713a480e20f64bc4fd227d8acb8b70f65d9"
+    },
+    {
+      "levelId": "L03",
+      "platforms": 27,
+      "checkpointsExcludingSpawn": 8,
+      "collectibles": 3,
+      "geometryAndColors": "PASS source assertions executed",
+      "parseAndReadback": "PASS",
+      "changes": [
+        {
+          "id": "L03_QD01_NGACH_GRAY",
+          "position": {
+            "x": 10.515625,
+            "y": -22.015625
+          },
+          "size": {
+            "x": 0.40625,
+            "y": 0.40625
+          }
+        },
+        {
+          "id": "item_mvnod5fd_9",
+          "position": {
+            "x": 18.0,
+            "y": -28.28125
+          },
+          "size": {
+            "x": 0.40625,
+            "y": 0.40625
+          }
+        },
+        {
+          "id": "item_mvnopbeo_e",
+          "position": {
+            "x": 33.921875,
+            "y": -24.265625
+          },
+          "size": {
+            "x": 0.40625,
+            "y": 0.40625
+          }
+        }
+      ],
+      "newtonAdded": {
+        "enabled": true,
+        "vestibuleId": null
+      },
+      "beforeSha256": "f68d97923a2616847b000e310dba6cc07b73fa367bfe2f4040ed0fa97322e147",
+      "afterSha256": "a0464f0882f8d6fe593a97e6aebfde3efc8fc47ea57ce780b05eddf5e33453f3"
+    }
+  ],
+  "unsupported": [
+    "Collectibles have no LevelLoader construction consumer",
+    "Raw collectible x/y/w/h retained as authored evidence; JsonUtility ignores them",
+    "Newton R/lambda are not declared in LevelData",
+    "Checkpoint zone and respawn position share one schema position; distinct source zone centers cannot be represented",
+    "L03 smooth easing is not represented by existing linear PingPong trajectories",
+    "Platform ids/material strings and world deathY are not schema fields"
+  ]
+}

@@ -1,0 +1,321 @@
+{
+  "startPos": {
+    "position": {
+      "x": -8.625,
+      "y": -14.6875
+    },
+    "size": {
+      "x": 0.59375,
+      "y": 1.0
+    },
+    "color": 127.0
+  },
+  "checkPoint": [
+    {
+      "position": {
+        "x": 2.6875,
+        "y": -14.6875
+      },
+      "size": {
+        "x": 1.5625,
+        "y": 1.640625
+      },
+      "color": 0.0
+    },
+    {
+      "position": {
+        "x": 21.84375,
+        "y": -16.109375
+      },
+      "size": {
+        "x": 1.5625,
+        "y": 1.640625
+      },
+      "color": 0.0
+    },
+    {
+      "position": {
+        "x": 33.078125,
+        "y": -12.390625
+      },
+      "size": {
+        "x": 1.5625,
+        "y": 1.640625
+      },
+      "color": 127.0
+    },
+    {
+      "position": {
+        "x": 44.046875,
+        "y": -11.515625
+      },
+      "size": {
+        "x": 1.5625,
+        "y": 1.640625
+      },
+      "color": 127.0
+    },
+    {
+      "position": {
+        "x": 68.53125,
+        "y": -11.515625
+      },
+      "size": {
+        "x": 1.5625,
+        "y": 1.640625
+      },
+      "color": 127.0
+    }
+  ],
+  "end": null,
+  "spawnPoint": null,
+  "cameraBoundary": {
+    "position": {
+      "x": 29.758,
+      "y": -12.664
+    },
+    "size": {
+      "x": 96.203,
+      "y": 22.172
+    }
+  },
+  "platforms": [
+    {
+      "position": {
+        "x": -6.679688,
+        "y": -15.726562
+      },
+      "size": {
+        "x": 7.328125,
+        "y": 1.078125
+      },
+      "rawGrayscaleColor": 212.0
+    },
+    {
+      "position": {
+        "x": -3.578125,
+        "y": -12.601562
+      },
+      "size": {
+        "x": 1.125,
+        "y": 5.171875
+      },
+      "rawGrayscaleColor": 0.0
+    },
+    {
+      "position": {
+        "x": 0.765625,
+        "y": -15.726562
+      },
+      "size": {
+        "x": 7.5625,
+        "y": 1.078125
+      },
+      "rawGrayscaleColor": 127.0
+    },
+    {
+      "position": {
+        "x": 10.148438,
+        "y": -15.726562
+      },
+      "size": {
+        "x": 11.203125,
+        "y": 1.078125
+      },
+      "rawGrayscaleColor": 212.0
+    },
+    {
+      "position": {
+        "x": 15.25,
+        "y": -12.601562
+      },
+      "size": {
+        "x": 1.0,
+        "y": 5.171875
+      },
+      "rawGrayscaleColor": 212.0
+    },
+    {
+      "position": {
+        "x": 20.078125,
+        "y": -17.179688
+      },
+      "size": {
+        "x": 4.65625,
+        "y": 1.140625
+      },
+      "rawGrayscaleColor": 127.0
+    },
+    {
+      "position": {
+        "x": 27.15625,
+        "y": -15.085938
+      },
+      "size": {
+        "x": 4.40625,
+        "y": 1.078125
+      },
+      "rawGrayscaleColor": 0.0
+    },
+    {
+      "position": {
+        "x": 35.140625,
+        "y": -13.546875
+      },
+      "size": {
+        "x": 6.4375,
+        "y": 1.3125
+      },
+      "rawGrayscaleColor": 0.0
+    },
+    {
+      "position": {
+        "x": 37.734375,
+        "y": -10.234375
+      },
+      "size": {
+        "x": 1.25,
+        "y": 5.3125
+      },
+      "rawGrayscaleColor": 212.0
+    },
+    {
+      "position": {
+        "x": 42.804688,
+        "y": -12.625
+      },
+      "size": {
+        "x": 4.734375,
+        "y": 1.21875
+      },
+      "rawGrayscaleColor": 0.0
+    },
+    {
+      "position": {
+        "x": 54.234375,
+        "y": -12.625
+      },
+      "size": {
+        "x": 4.96875,
+        "y": 1.21875
+      },
+      "rawGrayscaleColor": 212.0
+    },
+    {
+      "position": {
+        "x": 57.4375,
+        "y": -10.40625
+      },
+      "size": {
+        "x": 1.4375,
+        "y": 5.65625
+      },
+      "rawGrayscaleColor": 0.0
+    },
+    {
+      "position": {
+        "x": 61.976562,
+        "y": -12.625
+      },
+      "size": {
+        "x": 7.640625,
+        "y": 1.21875
+      },
+      "rawGrayscaleColor": 0.0
+    },
+    {
+      "position": {
+        "x": 48.460938,
+        "y": -12.625
+      },
+      "size": {
+        "x": 6.578125,
+        "y": 1.21875
+      },
+      "rawGrayscaleColor": 127.0
+    },
+    {
+      "position": {
+        "x": 68.414062,
+        "y": -12.625
+      },
+      "size": {
+        "x": 2.890625,
+        "y": 1.21875
+      },
+      "rawGrayscaleColor": 255.0
+    },
+    {
+      "position": {
+        "x": 7.71875,
+        "y": -12.601562
+      },
+      "size": {
+        "x": 1.0625,
+        "y": 5.171875
+      },
+      "rawGrayscaleColor": 127.0
+    }
+  ],
+  "newton": {
+    "cx": 5135.0,
+    "cy": 659.0,
+    "i": 3,
+    "k": 6,
+    "R": 1500.0,
+    "lambda": 550.0,
+    "orbitStart": "auto",
+    "rails": {
+      "K": {
+        "width": 136.0,
+        "period": 10.8,
+        "angleDeg": 24.4,
+        "direction": -1
+      },
+      "I": {
+        "width": 126.0,
+        "period": 8.6,
+        "angleDeg": 135.0,
+        "direction": 1
+      }
+    },
+    "enabled": true,
+    "vestibuleId": "item_mvhtg97m_h"
+  },
+  "collectibles": [
+    {
+      "id": "item_mvnivkti_1",
+      "kind": "collectible",
+      "x": 1736.0,
+      "y": 844.0,
+      "w": 26.0,
+      "h": 26.0,
+      "position": {
+        "x": 27.328125,
+        "y": -13.390625
+      },
+      "size": {
+        "x": 0.40625,
+        "y": 0.40625
+      }
+    },
+    {
+      "id": "item_mvnivvcv_2",
+      "kind": "collectible",
+      "x": 3068.0,
+      "y": 661.0,
+      "w": 26.0,
+      "h": 26.0,
+      "position": {
+        "x": 48.140625,
+        "y": -10.53125
+      },
+      "size": {
+        "x": 0.40625,
+        "y": 0.40625
+      }
+    }
+  ],
+  "levelId": "L01",
+  "levelName": "Cánh cửa không phải vật cản"
+}

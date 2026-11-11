@@ -71,12 +71,12 @@
   "spawnPoint": null,
   "cameraBoundary": {
     "position": {
-      "x": 48.195312,
-      "y": -13.226562
+      "x": 29.758,
+      "y": -12.664
     },
     "size": {
-      "x": 96.390625,
-      "y": 26.453125
+      "x": 96.203,
+      "y": 22.172
     }
   },
   "platforms": [
@@ -278,7 +278,9 @@
         "angleDeg": 135.0,
         "direction": 1
       }
-    }
+    },
+    "enabled": true,
+    "vestibuleId": "item_mvhtg97m_h"
   },
   "collectibles": [
     {
@@ -287,7 +289,15 @@
       "x": 1736.0,
       "y": 844.0,
       "w": 26.0,
-      "h": 26.0
+      "h": 26.0,
+      "position": {
+        "x": 27.328125,
+        "y": -13.390625
+      },
+      "size": {
+        "x": 0.40625,
+        "y": 0.40625
+      }
     },
     {
       "id": "item_mvnivvcv_2",
@@ -295,9 +305,18 @@
       "x": 3068.0,
       "y": 661.0,
       "w": 26.0,
-      "h": 26.0
+      "h": 26.0,
+      "position": {
+        "x": 48.140625,
+        "y": -10.53125
+      },
+      "size": {
+        "x": 0.40625,
+        "y": 0.40625
+      }
     }
   ],
+  "deathY": -24.75,
   "levelId": "L01",
   "levelName": "Cánh cửa không phải vật cản"
 }

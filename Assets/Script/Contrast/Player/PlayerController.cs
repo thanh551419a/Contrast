@@ -13,14 +13,47 @@ namespace Contrast.Player
     {
         [Header("Movement")]
         [SerializeField, Min(0f)]
-        private float moveSpeed = 6f;
+        private float moveSpeed = 5.625f; // HTML parity: 360 px/s / 64 px/unit = 5.625 units/s
+
+        public float MoveSpeed => moveSpeed;
 
         [Header("Player Geometry")]
         [SerializeField] private Vector2 playerSize = Vector2.one;
         [SerializeField] private Vector2 playerOffset = Vector2.zero;
-        [Header("Void Fall")]
-        [SerializeField] private float voidGraceUnits = 3.75f;
+        [Header("Vertical Fall Death (Fixed World-Space deathY)")]
+        [SerializeField] private float levelDeathY = -50f;
+        private float customDeathY = float.NaN;
         private float lastSupportedFeet = float.NegativeInfinity;
+
+        public float EffectiveDeathY => GetEffectiveDeathY();
+
+        public void SetLevelDeathY(float y)
+        {
+            if (!float.IsNaN(y) && !float.IsInfinity(y))
+                levelDeathY = y;
+        }
+
+        public void SetCustomDeathY(float y)
+        {
+            customDeathY = y;
+        }
+
+        public void ClearCustomDeathY()
+        {
+            customDeathY = float.NaN;
+        }
+
+        public float GetEffectiveDeathY()
+        {
+            if (!float.IsNaN(customDeathY) && !float.IsInfinity(customDeathY))
+                return customDeathY;
+
+            GameManager gm = GameManager.Instance;
+            if (gm != null)
+                return gm.DeathY;
+
+            return levelDeathY;
+        }
 
         [Header("Color & Phase")]
         [SerializeField] private LogicalColor currentColor = LogicalColor.White;
@@ -41,16 +74,41 @@ namespace Contrast.Player
 
         public Vector2 PlayerSize => playerSize;
         public Vector2 PlayerOffset => playerOffset;
+
+        public void SetRuntimeGeometry(Vector2 size)
+        {
+            playerSize = new Vector2(
+                Mathf.Max(0.0001f, Mathf.Abs(size.x)),
+                Mathf.Max(0.0001f, Mathf.Abs(size.y)));
+            GetComponent<Contrast.Presentation.PlayerVisualPresentation>()?.SyncVisualsNow();
+        }
         public ColorPlatform GroundedPlatform { get; private set; }
         public bool IsGrounded => isGrounded;
+        public bool IsJumping => jumpMotion != null && jumpMotion.IsJumping;
+        public float CurrentVerticalVelocity => jumpMotion != null ? jumpMotion.CurrentVerticalVelocity : 0f;
+        public float LastMoveInputX { get; private set; }
+
+        public const float HtmlJumpBufferDuration = 0.12f;
+        public const float HtmlCoyoteTimeDuration = 0.10f;
 
         private SpriteRenderer sr;
         private PlayerInput inputReader;
         private PlayerMovementResolver movementResolver;
+        private PlayerCollisionResolver collisionResolver;
         private PlayerJumpMotion jumpMotion;
         private bool isGrounded;
         private Vector2 riderDisplacement;
         private bool inputEnabled = true;
+        private float jumpBufferTimer;
+        private float coyoteTimer;
+        private int jumpSequenceCounter;
+
+        public float JumpBufferTimer => jumpBufferTimer;
+        public float CoyoteTimer => coyoteTimer;
+        public int TotalJumpRequests { get; private set; }
+        public int TotalJumpsExecuted { get; private set; }
+        public string LastJumpRequestId { get; private set; } = string.Empty;
+        public string LastJumpRejectionReason { get; private set; } = "NONE";
 
         public void SetInputEnabled(bool enabled)
         {
@@ -62,6 +120,20 @@ namespace Contrast.Player
         {
             isGrounded = grounded;
             GroundedPlatform = platform;
+            coyoteTimer = grounded ? HtmlCoyoteTimeDuration : 0f;
+            if (grounded)
+            {
+                if (platform != null)
+                {
+                    Rect platRect = platform.GetAabb();
+                    transform.position = new Vector3(
+                        platform.transform.position.x,
+                        platRect.yMax + playerSize.y * 0.5f,
+                        transform.position.z);
+                }
+                State = PlayerState.Grounded;
+                jumpMotion?.NotifyGrounded(true);
+            }
         }
 #endif
 
@@ -70,11 +142,53 @@ namespace Contrast.Player
             riderDisplacement = disp;
         }
 
+        public bool IsTestModeActive { get; private set; }
+        public static System.Func<Vector2> CustomMouseDeltaReader { get; set; }
+
+        public void SetTestMode(bool enabled)
+        {
+            IsTestModeActive = enabled;
+            jumpBufferTimer = 0f;
+            coyoteTimer = 0f;
+            if (enabled)
+            {
+                jumpMotion?.ResetMotion();
+                isGrounded = false;
+                GroundedPlatform = null;
+                riderDisplacement = Vector2.zero;
+                Cursor.lockState = CursorLockMode.Locked;
+                Cursor.visible = false;
+            }
+            else
+            {
+                Cursor.lockState = CursorLockMode.None;
+                Cursor.visible = true;
+                jumpMotion?.ResetMotion();
+                State = PlayerState.Falling;
+                RefreshGroundedStateImmediate();
+            }
+        }
+
+        public static Vector2 ReadMouseDelta()
+        {
+            if (CustomMouseDeltaReader != null)
+                return CustomMouseDeltaReader();
+
+#if ENABLE_INPUT_SYSTEM
+            if (UnityEngine.InputSystem.Mouse.current != null)
+                return UnityEngine.InputSystem.Mouse.current.delta.ReadValue();
+            return Vector2.zero;
+#else
+            return new Vector2(UnityEngine.Input.GetAxisRaw("Mouse X"), UnityEngine.Input.GetAxisRaw("Mouse Y"));
+#endif
+        }
+
         private void Awake()
         {
             transform.localScale = new Vector3(0.3f, 0.3f, 1f);
             inputReader = GetComponent<PlayerInput>();
             movementResolver = GetComponent<PlayerMovementResolver>();
+            collisionResolver = GetComponent<PlayerCollisionResolver>();
             jumpMotion = GetComponent<PlayerJumpMotion>();
             sr = GetComponent<SpriteRenderer>();
 
@@ -106,15 +220,85 @@ namespace Contrast.Player
 
             deltaTime = Mathf.Max(0f, deltaTime);
 
+            inputReader ??= GetComponent<PlayerInput>();
+            jumpMotion ??= GetComponent<PlayerJumpMotion>();
+            movementResolver ??= GetComponent<PlayerMovementResolver>();
+            collisionResolver ??= GetComponent<PlayerCollisionResolver>();
+
+            if (IsTestModeActive)
+            {
+                NewtonMarkRequested = false;
+
+                // 1. Arrow keys phase tuning / color changes still allowed (HTML lines 1549-1552)
+                if (inputReader != null)
+                {
+                    PlayerInputIntent testInput = inputReader.ReadInput(deltaTime, moveSpeed, false);
+                    if (Mathf.Abs(testInput.PhaseTuneDelta) > Mathf.Epsilon)
+                    {
+                        TunePhase(testInput.PhaseTuneDelta);
+                    }
+                    else if (testInput.ColorChunkStep != 0)
+                    {
+                        StepColorChunk(testInput.ColorChunkStep);
+                    }
+                    else if (testInput.HasColorChange)
+                    {
+                        SetColor(testInput.RequestedColor);
+                    }
+                }
+
+                // 2. Relative mouse movement displacement (HTML lines 1554-1576)
+                Vector2 mouseDelta = ReadMouseDelta();
+                UnityEngine.Camera cam = UnityEngine.Camera.main;
+                float orthoSize = cam != null && cam.orthographic ? cam.orthographicSize : 5f;
+                float screenH = Screen.height > 0 ? (float)Screen.height : 1080f;
+                float unitsPerPixel = (2f * orthoSize) / screenH;
+                float sensitivity = 1.0f;
+
+                Vector2 worldDisplacement = new Vector2(
+                    mouseDelta.x * unitsPerPixel * sensitivity,
+                    mouseDelta.y * unitsPerPixel * sensitivity);
+
+                if (worldDisplacement != Vector2.zero)
+                {
+                    transform.position = new Vector3(
+                        transform.position.x + worldDisplacement.x,
+                        transform.position.y + worldDisplacement.y,
+                        transform.position.z);
+                }
+
+                // 3. Keep physics & velocities zeroed
+                jumpMotion?.ResetMotion();
+                isGrounded = false;
+                GroundedPlatform = null;
+                riderDisplacement = Vector2.zero;
+                jumpBufferTimer = 0f;
+                coyoteTimer = 0f;
+
+                return;
+            }
+
             NewtonMarkRequested = false;
+
+            // Synchronize grounded state from geometry before reading input if not actively ascending
+            if (!isGrounded && !(jumpMotion != null && jumpMotion.IsJumping))
+            {
+                RefreshGroundedStateImmediate();
+            }
 
             PlayerInputIntent input =
                 inputReader.ReadInput(deltaTime, moveSpeed, isGrounded);
 
             if (!inputEnabled)
             {
+                if (input.JumpPressed)
+                {
+                    LastJumpRejectionReason = "INPUT_DISABLED";
+                }
                 input = new PlayerInputIntent(Vector2.zero, false, false, currentColor, 0);
             }
+
+            LastMoveInputX = deltaTime > 0.00001f ? (input.Move.x / deltaTime) : input.Move.x;
 
             if (input.NewtonMarkRequested)
             {
@@ -129,6 +313,7 @@ namespace Contrast.Player
                     $"pos={transform.position} " +
                     $"inputMove={input.Move} " +
                     $"jumpRequested={input.JumpRequested} " +
+                    $"jumpPressed={input.JumpPressed} " +
                     $"fastFall={input.FastFall} " +
                     $"phaseTuneDelta={input.PhaseTuneDelta:F3} " +
                     $"newtonMark={NewtonMarkRequested} " +
@@ -151,10 +336,54 @@ namespace Contrast.Player
                 SetColor(input.RequestedColor);
             }
 
-            if (input.JumpRequested)
+            // Re-evaluate ground support if color/phase change made underlying platform solid
+            if (!isGrounded && !(jumpMotion != null && jumpMotion.IsJumping))
+            {
+                RefreshGroundedStateImmediate();
+            }
+
+            if (input.JumpPressed || input.JumpRequested)
+            {
+                jumpSequenceCounter++;
+                TotalJumpRequests++;
+                LastJumpRequestId = $"JUMP_{jumpSequenceCounter:D4}";
+                jumpBufferTimer = HtmlJumpBufferDuration;
+            }
+            else
+            {
+                jumpBufferTimer = Mathf.Max(0f, jumpBufferTimer - deltaTime);
+            }
+
+            if (isGrounded && !(jumpMotion != null && jumpMotion.IsJumping))
+            {
+                coyoteTimer = HtmlCoyoteTimeDuration;
+            }
+            else
+            {
+                coyoteTimer = Mathf.Max(0f, coyoteTimer - deltaTime);
+            }
+
+            bool canExecuteJump = (input.JumpRequested || jumpBufferTimer > 0f) &&
+                                  (isGrounded || coyoteTimer > 0f) &&
+                                  !(jumpMotion != null && jumpMotion.IsJumping && jumpMotion.CurrentVerticalVelocity > 0f);
+
+            if (canExecuteJump)
             {
                 jumpMotion?.RequestJump();
+                jumpBufferTimer = 0f;
+                coyoteTimer = 0f;
+                isGrounded = false;
+                GroundedPlatform = null;
+                State = PlayerState.Falling;
+                TotalJumpsExecuted++;
+                LastJumpRejectionReason = "NONE";
                 Contrast.Audio.ContrastAudioManager.Instance?.PlayJump();
+            }
+            else if (input.JumpPressed)
+            {
+                LastJumpRejectionReason = !isGrounded && coyoteTimer <= 0f
+                    ? "AIRBORNE_BUFFERED"
+                    : "ALREADY_ASCENDING";
             }
 
             Vector2 jumpIntent = jumpMotion != null
@@ -194,17 +423,24 @@ namespace Contrast.Player
 
             ApplyMove(result.FinalMove);
 
+            if (result.BlockedY && jumpIntent.y > 0f && !result.IsGrounded)
+            {
+                jumpMotion?.NotifyCeilingBlocked();
+            }
+
             isGrounded = result.IsGrounded;
             GroundedPlatform = isGrounded ? result.GroundedPlatform : null;
 
             if (result.IsStuck)
             {
                 jumpMotion?.ResetMotion();
+                coyoteTimer = 0f;
                 State = PlayerState.Stuck;
             }
             else if (isGrounded)
             {
                 lastSupportedFeet = transform.position.y - playerSize.y * 0.5f;
+                coyoteTimer = HtmlCoyoteTimeDuration;
                 State = PlayerState.Grounded;
                 jumpMotion?.NotifyGrounded(true);
             }
@@ -212,44 +448,17 @@ namespace Contrast.Player
             {
                 State = PlayerState.Falling;
                 jumpMotion?.NotifyGrounded(false);
-
-                // Authoritative HTML free-world void death:
-                // If the player drops beyond void grace distance with no potential reachable landing below, trigger death.
-                float currentFeet = transform.position.y - playerSize.y * 0.5f;
-                if (!float.IsNegativeInfinity(lastSupportedFeet) &&
-                    currentFeet < lastSupportedFeet - voidGraceUnits &&
-                    !HasPotentialLandingBelow())
-                {
-                    Die();
-                }
             }
 
-            GameManager gm = GameManager.Instance;
-            if (gm != null && transform.position.y < gm.KillY)
-                Die();
-        }
-
-        private bool HasPotentialLandingBelow()
-        {
-            float feet = transform.position.y - playerSize.y * 0.5f;
-            float left = transform.position.x - playerSize.x * 0.5f;
-            float right = transform.position.x + playerSize.x * 0.5f;
-
-            for (int i = 0; i < ColorPlatform.All.Count; i++)
+            float effectiveDeathY = GetEffectiveDeathY();
+            if (!float.IsNaN(effectiveDeathY) && transform.position.y < effectiveDeathY)
             {
-                ColorPlatform p = ColorPlatform.All[i];
-                if (p == null || !p.gameObject.activeInHierarchy || !p.enabled) continue;
-                Rect aabb = p.GetAabb();
-                float deltaY = feet - aabb.yMax;
-                if (deltaY < -0.05f) continue; // Platform top is above player feet
-
-                // Optimistic freefall reach
-                float airborneTime = Mathf.Sqrt(2f * Mathf.Max(0f, deltaY) / 20f) + 0.28f;
-                float horizontalReach = Mathf.Max(3.28f, moveSpeed * airborneTime) + playerSize.x;
-                if (aabb.xMin <= right + horizontalReach && aabb.xMax >= left - horizontalReach)
-                    return true;
+                if (logFlow)
+                {
+                    Debug.Log($"[DEATHY] playerY={transform.position.y:F3} deathY={effectiveDeathY:F3} triggered=True");
+                }
+                Die();
             }
-            return false;
         }
 
         /// <summary>
@@ -390,6 +599,8 @@ namespace Contrast.Player
             SetSpawnPosition(worldPosition);
             SetPhase(phase);
             ResetState();
+            RefreshGroundedStateImmediate();
+            GetComponent<Contrast.Presentation.PlayerVisualPresentation>()?.OnPlayerRespawned();
         }
 
         public void SetColorValue(float value)
@@ -423,23 +634,59 @@ namespace Contrast.Player
             SetColor(color);
             SetSpawnPosition(worldPosition);
             ResetState();
+            RefreshGroundedStateImmediate();
+            GetComponent<Contrast.Presentation.PlayerVisualPresentation>()?.OnPlayerRespawned();
         }
 
         public void ResetState()
         {
+            jumpMotion ??= GetComponent<PlayerJumpMotion>();
             isGrounded = false;
             GroundedPlatform = null;
             riderDisplacement = Vector2.zero;
+            jumpBufferTimer = 0f;
+            coyoteTimer = 0f;
+            LastMoveInputX = 0f;
             inputEnabled = true;
             jumpMotion?.ResetMotion();
             State = PlayerState.Falling;
         }
 
+        public void RefreshGroundedStateImmediate()
+        {
+            collisionResolver ??= GetComponent<PlayerCollisionResolver>();
+            jumpMotion ??= GetComponent<PlayerJumpMotion>();
+            if (collisionResolver == null)
+                return;
+
+            Vector2 safeSize = new Vector2(
+                Mathf.Max(0.0001f, Mathf.Abs(playerSize.x)),
+                Mathf.Max(0.0001f, Mathf.Abs(playerSize.y)));
+
+            Aabb bounds = Aabb.FromCenter(
+                (Vector2)transform.position + playerOffset,
+                safeSize);
+
+            if (collisionResolver.TryGetGroundSupport(bounds, currentColor, out ColorPlatform supportPlatform))
+            {
+                isGrounded = true;
+                GroundedPlatform = supportPlatform;
+                coyoteTimer = HtmlCoyoteTimeDuration;
+                lastSupportedFeet = transform.position.y - safeSize.y * 0.5f;
+                State = PlayerState.Grounded;
+                jumpMotion?.NotifyGrounded(true);
+            }
+        }
+
         public void StopMovement()
         {
+            jumpMotion ??= GetComponent<PlayerJumpMotion>();
             isGrounded = false;
             GroundedPlatform = null;
             riderDisplacement = Vector2.zero;
+            jumpBufferTimer = 0f;
+            coyoteTimer = 0f;
+            LastMoveInputX = 0f;
             jumpMotion?.ResetMotion();
 
             if (State != PlayerState.Dead)
@@ -448,11 +695,19 @@ namespace Contrast.Player
 
         private void Die()
         {
+            if (IsTestModeActive)
+                return;
+
             State = PlayerState.Dead;
             isGrounded = false;
             GroundedPlatform = null;
             riderDisplacement = Vector2.zero;
+            jumpBufferTimer = 0f;
+            coyoteTimer = 0f;
+            LastMoveInputX = 0f;
+            jumpMotion ??= GetComponent<PlayerJumpMotion>();
             jumpMotion?.ResetMotion();
+            GetComponent<Contrast.Presentation.PlayerVisualPresentation>()?.SyncVisualsNow();
             Contrast.Audio.ContrastAudioManager.Instance?.PlayDeath();
             Contrast.Presentation.VisualPresentationManager.Instance?.NotifyPlayerDied();
             GameManager.Instance?.OnPlayerDied();
@@ -460,11 +715,13 @@ namespace Contrast.Player
 
         private void ApplyColorVisual()
         {
-            if (sr == null)
-                return;
+            if (sr != null)
+            {
+                float value = ColorClassifier.ToValue(currentColor);
+                sr.color = new UnityEngine.Color(value, value, value, 1f);
+            }
 
-            float value = ColorClassifier.ToValue(currentColor);
-            sr.color = new UnityEngine.Color(value, value, value, 1f);
+            GetComponent<Contrast.Presentation.PlayerVisualPresentation>()?.SyncVisualsNow();
         }
 
         private void OnDrawGizmosSelected()

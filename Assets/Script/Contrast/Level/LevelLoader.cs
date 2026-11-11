@@ -28,6 +28,7 @@ namespace Contrast.Level
 
         public LevelData CurrentLevelData { get; private set; }
         public float KillY { get; private set; } = -10f;
+        public float DeathY => KillY;
 
         public Vector2 CurrentSpawnPosition { get; private set; }
         public LogicalColor CurrentSpawnColor { get; private set; } = LogicalColor.Black;
@@ -258,16 +259,59 @@ namespace Contrast.Level
             }
 
             // --------------------------------------------------
+            // Collectibles (Quang Điểm).
+            // --------------------------------------------------
+            int validCollectibleCount = 0;
+            if (data.collectibles != null)
+            {
+                for (int i = 0; i < data.collectibles.Length; i++)
+                {
+                    CollectibleData colData = data.collectibles[i];
+                    if (colData != null && colData.position != null)
+                        validCollectibleCount++;
+                }
+            }
+            QuangDiemItem.ResetLevelProgress(validCollectibleCount);
+
+            if (data.collectibles != null)
+            {
+                for (int i = 0; i < data.collectibles.Length; i++)
+                {
+                    CollectibleData colData = data.collectibles[i];
+                    if (colData == null || colData.position == null)
+                        continue;
+
+                    GameObject qGo = new GameObject($"QuangDiem_{colData.id ?? (i + 1).ToString()}");
+                    qGo.transform.SetParent(levelObjectsRoot, false);
+
+                    QuangDiemItem item = qGo.AddComponent<QuangDiemItem>();
+                    item.Initialize(colData.id, colData.position.ToVector2(), 0.25f, i * 0.9f);
+
+                    var qPres = qGo.AddComponent<Contrast.Presentation.QuangDiemVisualPresentation>();
+                    qPres.InitializeVisuals();
+                }
+            }
+
+            // --------------------------------------------------
             // End-game rectangle.
+            // When a level includes a Newton finale, the measurement sequence
+            // is the required completion path; do not create a skipping End marker.
             // --------------------------------------------------
             if (data.end != null &&
                 data.end.position != null &&
                 data.end.size != null)
             {
-                CreateMarker(
-                    LevelMarkerType.End,
-                    data.end.position.ToVector2(),
-                    data.end.size.ToVector2());
+                if (data.newton == null || data.newton.k <= 0)
+                {
+                    CreateMarker(
+                        LevelMarkerType.End,
+                        data.end.position.ToVector2(),
+                        data.end.size.ToVector2());
+                }
+                else
+                {
+                    Debug.Log("[FLOW][LEVEL_LOAD] Suppressed End marker creation because Newton finale is active.");
+                }
             }
 
             // --------------------------------------------------
@@ -285,14 +329,45 @@ namespace Contrast.Level
                     ? data.cameraBoundary.size.ToVector2()
                     : Vector2.zero;
 
-                // If Easy level, ensure camera boundary reaches the Newton chamber at x >= 61
-                if (IsEasyLevel(data) && (bPos.x + bSize.x * 0.5f < 70f))
+                float minX = bPos.x - bSize.x * 0.5f;
+                float maxX = bPos.x + bSize.x * 0.5f;
+                float minY = bPos.y - bSize.y * 0.5f;
+                float maxY = bPos.y + bSize.y * 0.5f;
+
+                // Ensure camera boundary includes the player's spawn position with margin
+                float spawnX = startData.position != null ? startData.position.x : 0f;
+                if (spawnX - 8f < minX)
                 {
-                    float minX = bPos.x - bSize.x * 0.5f;
-                    float maxX = 78.125f;
-                    bPos.x = (minX + maxX) * 0.5f;
-                    bSize.x = maxX - minX;
+                    minX = spawnX - 8f;
                 }
+
+                // If level has Newton chamber, ensure camera boundary encompasses entire chamber & orbital tracks
+                if (data.newton != null && data.newton.k > 0)
+                {
+                    float newtonCx = data.newton.cx / 64f;
+                    float newtonCy = -data.newton.cy / 64f;
+                    float maxOrbitRadius = 3.4375f * Mathf.Sqrt(data.newton.k + 1.5f) + 4f;
+                    float margin = 16f; // Accommodates camera viewport half-size with comfortable room
+
+                    float nMinX = newtonCx - maxOrbitRadius - margin;
+                    float nMaxX = newtonCx + maxOrbitRadius + margin;
+                    float nMinY = newtonCy - maxOrbitRadius - margin;
+                    float nMaxY = newtonCy + maxOrbitRadius + margin;
+
+                    minX = Mathf.Min(minX, nMinX);
+                    maxX = Mathf.Max(maxX, nMaxX);
+                    minY = Mathf.Min(minY, nMinY);
+                    maxY = Mathf.Max(maxY, nMaxY);
+                }
+                else if (IsEasyLevel(data) && maxX < 78.125f)
+                {
+                    maxX = 78.125f;
+                }
+
+                bPos.x = (minX + maxX) * 0.5f;
+                bSize.x = maxX - minX;
+                bPos.y = (minY + maxY) * 0.5f;
+                bSize.y = maxY - minY;
 
                 camFollow.SetBoundary(bPos, bSize);
             }
@@ -301,15 +376,21 @@ namespace Contrast.Level
             // Initial player state = StartPos position + color.
             // --------------------------------------------------
             PlayerController player =
-                GameManager.Instance != null
+                GameManager.Instance != null && GameManager.Instance.Player != null
                     ? GameManager.Instance.Player
-                    : FindAnyObjectByType<PlayerController>();
+                    : FindAnyObjectByType<PlayerController>(FindObjectsInactive.Include);
 
             if (player != null)
             {
                 Debug.Log(
                     $"[FLOW][SPAWN_INITIAL] position={CurrentSpawnPosition} " +
-                    $"color={CurrentSpawnColor}");
+                    $"color={CurrentSpawnColor} deathY={KillY:F3}");
+
+                player.SetLevelDeathY(KillY);
+                player.SetRuntimeGeometry(
+                    startData.size != null
+                        ? startData.size.ToVector2()
+                        : Vector2.one);
 
                 player.Respawn(
                     CurrentSpawnPosition,
@@ -339,9 +420,9 @@ namespace Contrast.Level
         public void RetryCurrentSpawn()
         {
             PlayerController player =
-                GameManager.Instance != null
+                GameManager.Instance != null && GameManager.Instance.Player != null
                     ? GameManager.Instance.Player
-                    : FindAnyObjectByType<PlayerController>();
+                    : FindAnyObjectByType<PlayerController>(FindObjectsInactive.Include);
 
             if (player == null)
                 return;
@@ -355,7 +436,7 @@ namespace Contrast.Level
 
             if (EasyNewtonFinaleController.Instance != null)
             {
-                EasyNewtonFinaleController.Instance.ResetState();
+                EasyNewtonFinaleController.Instance.ResetState(preserveCameraInFlight: true);
             }
 
             player.Respawn(
@@ -366,7 +447,10 @@ namespace Contrast.Level
                 FindAnyObjectByType<CameraFollow>();
 
             if (camFollow != null)
+            {
                 camFollow.Target = player.transform;
+                camFollow.OnPlayerRespawned();
+            }
         }
 
         /// <summary>
@@ -375,7 +459,7 @@ namespace Contrast.Level
         /// </summary>
         public void ProcessPlayerInteractions(PlayerController player)
         {
-            if (player == null)
+            if (player == null || player.IsTestModeActive)
                 return;
 
             Aabb playerBounds = Aabb.FromCenter(
@@ -385,6 +469,18 @@ namespace Contrast.Level
                 new Vector2(
                     Mathf.Max(0.0001f, Mathf.Abs(player.PlayerSize.x)),
                     Mathf.Max(0.0001f, Mathf.Abs(player.PlayerSize.y))));
+
+            for (int i = QuangDiemItem.All.Count - 1; i >= 0; i--)
+            {
+                QuangDiemItem qItem = QuangDiemItem.All[i];
+                if (qItem == null || qItem.IsCollected)
+                    continue;
+
+                if (qItem.Overlaps(playerBounds))
+                {
+                    qItem.Collect();
+                }
+            }
 
             for (int i = LevelMarker.All.Count - 1; i >= 0; i--)
             {
@@ -414,6 +510,12 @@ namespace Contrast.Level
 
                 if (marker.Type == LevelMarkerType.End)
                 {
+                    if (EasyNewtonFinaleController.Instance != null)
+                    {
+                        Debug.Log("[END] Ignored End marker touch because Newton Finale is active.");
+                        return;
+                    }
+
                     Debug.Log(
                         $"[END] Player touched End at {marker.Position}.");
 
@@ -518,38 +620,15 @@ namespace Contrast.Level
             }
         }
 
-        private static float ComputeKillY(LevelData data)
+        public static float ComputeKillY(LevelData data)
         {
-            if (data.cameraBoundary != null &&
-                data.cameraBoundary.position != null &&
-                data.cameraBoundary.size != null)
-            {
-                return data.cameraBoundary.position.y
-                       - data.cameraBoundary.size.y * 0.5f
-                       - 1f;
-            }
+            if (data == null)
+                return -50f;
 
-            if (data.platforms != null && data.platforms.Length > 0)
-            {
-                float lowest = float.MaxValue;
+            if (!float.IsNaN(data.deathY) && !float.IsInfinity(data.deathY) && Mathf.Abs(data.deathY - (-50f)) > 0.001f)
+                return data.deathY;
 
-                foreach (ColorPlatformData p in data.platforms)
-                {
-                    if (p != null &&
-                        p.position != null &&
-                        p.size != null)
-                    {
-                        lowest = Mathf.Min(
-                            lowest,
-                            p.position.y - p.size.y * 0.5f);
-                    }
-                }
-
-                if (lowest != float.MaxValue)
-                    return lowest - 10f;
-            }
-
-            return -50f;
+            return LevelDataSanitizer.CalculateDefaultDeathY(data);
         }
 
         public void ClearLevel(bool preserveCameraBoundary = true)
@@ -593,6 +672,15 @@ namespace Contrast.Level
                     SafeDestroy(m.gameObject);
             }
             LevelMarker.ClearRegistry();
+
+            // Destroy all registered Quang Điểm collectibles
+            for (int i = QuangDiemItem.All.Count - 1; i >= 0; i--)
+            {
+                QuangDiemItem q = QuangDiemItem.All[i];
+                if (q != null && q.gameObject != null)
+                    SafeDestroy(q.gameObject);
+            }
+            QuangDiemItem.ResetLevelProgress(0);
 
             // Destroy any remaining children under platformsRoot
             if (platformsRoot != null)

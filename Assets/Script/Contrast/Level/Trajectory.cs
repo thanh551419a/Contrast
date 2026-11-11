@@ -97,6 +97,35 @@ namespace Contrast.Level
             initialized = true;
         }
 
+        /// <summary>
+        /// Dynamically enable or disable this trajectory at runtime (e.g. Newton docking).
+        /// Synchronizes both the component state and the underlying TrajectoryData config.
+        /// </summary>
+        public void SetTrajectoryEnabled(bool isEnabled)
+        {
+            if (config != null)
+            {
+                config.enabled = isEnabled;
+            }
+            enabled = isEnabled;
+
+            if (isEnabled)
+            {
+                if (!initialized)
+                {
+                    ResetPhase();
+                }
+                else
+                {
+                    previousWorldPosition = transform.position;
+                }
+            }
+            else
+            {
+                FrameDisplacement = Vector2.zero;
+            }
+        }
+
         // ── Runtime update (called by TrajectorySystem) ────────────
 
         /// <summary>

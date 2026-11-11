@@ -30,6 +30,10 @@ namespace Contrast.Presentation
         private RawImage ombreStripImage;
         private Texture2D ombreTexture;
         private RectTransform cursorMarker;
+        private readonly RectTransform[] phaseDividers = new RectTransform[4];
+
+        public RectTransform[] PhaseDividers => phaseDividers;
+        public RectTransform CursorMarker => cursorMarker;
 
         private Text stateBadgeTitle;
         private Text stateBadgeRelation;
@@ -44,12 +48,23 @@ namespace Contrast.Presentation
         private CanvasGroup checkpointToastGroup;
         private float checkpointFlashTimer = 0f;
 
+        // Quang Điểm HUD counter card
+        private GameObject quangHudCard;
+        private Text quangHudValueText;
+
         private PlayerController player;
         private float simulatedPhase = 0f;
 
         private void Awake()
         {
             instance = this;
+            EnsureInitialized();
+        }
+
+        public void EnsureInitialized()
+        {
+            if (tunerPanel != null)
+                return;
             BuildUI();
         }
 
@@ -82,6 +97,57 @@ namespace Contrast.Presentation
             BuildTunerPanel(canvasGo.transform);
             BuildControlHint(canvasGo.transform);
             BuildCheckpointToast(canvasGo.transform);
+            BuildQuangDiemHud(canvasGo.transform);
+        }
+
+        private void BuildQuangDiemHud(Transform parent)
+        {
+            quangHudCard = new GameObject("QuangDiemHUDCard", typeof(RectTransform));
+            quangHudCard.transform.SetParent(parent, false);
+
+            Image bg = quangHudCard.AddComponent<Image>();
+            bg.color = new Color(0.027f, 0.043f, 0.071f, 0.80f); // rgba(7,11,18,0.80)
+
+            Outline outline = quangHudCard.AddComponent<Outline>();
+            outline.effectColor = new Color(1.000f, 0.863f, 0.580f, 0.34f); // rgba(255,220,148,0.34)
+            outline.effectDistance = new Vector2(1f, -1f);
+
+            RectTransform rt = quangHudCard.GetComponent<RectTransform>();
+            rt.anchorMin = new Vector2(1f, 1f);
+            rt.anchorMax = new Vector2(1f, 1f);
+            rt.pivot = new Vector2(1f, 1f);
+            rt.anchoredPosition = new Vector2(-24f, -96f);
+            rt.sizeDelta = new Vector2(210f, 40f);
+
+            GameObject starGo = new GameObject("StarLabel", typeof(RectTransform));
+            starGo.transform.SetParent(quangHudCard.transform, false);
+            Text starText = starGo.AddComponent<Text>();
+            starText.font = GetFont();
+            starText.text = "✦  QUANG ĐIỂM";
+            starText.fontSize = 12;
+            starText.fontStyle = FontStyle.Bold;
+            starText.color = new Color(1.000f, 0.851f, 0.541f, 0.95f); // #ffd98a
+            starText.alignment = TextAnchor.MiddleLeft;
+            RectTransform starRt = starGo.GetComponent<RectTransform>();
+            starRt.anchorMin = new Vector2(0f, 0f);
+            starRt.anchorMax = new Vector2(0.7f, 1f);
+            starRt.offsetMin = new Vector2(14f, 0f);
+            starRt.offsetMax = Vector2.zero;
+
+            GameObject valGo = new GameObject("CountValue", typeof(RectTransform));
+            valGo.transform.SetParent(quangHudCard.transform, false);
+            quangHudValueText = valGo.AddComponent<Text>();
+            quangHudValueText.font = GetFont();
+            quangHudValueText.text = "0 / 0";
+            quangHudValueText.fontSize = 15;
+            quangHudValueText.fontStyle = FontStyle.Bold;
+            quangHudValueText.color = new Color(1.000f, 0.961f, 0.839f, 0.98f);
+            quangHudValueText.alignment = TextAnchor.MiddleRight;
+            RectTransform valRt = valGo.GetComponent<RectTransform>();
+            valRt.anchorMin = new Vector2(0.55f, 0f);
+            valRt.anchorMax = new Vector2(1f, 1f);
+            valRt.offsetMin = Vector2.zero;
+            valRt.offsetMax = new Vector2(-14f, 0f);
         }
 
         private void BuildTunerPanel(Transform parent)
@@ -207,25 +273,26 @@ namespace Contrast.Presentation
             const int ombreW = 240;
             ombreTexture = new Texture2D(ombreW, 1, TextureFormat.RGBA32, false)
             {
-                filterMode = FilterMode.Bilinear,
+                filterMode = FilterMode.Point,
                 wrapMode = TextureWrapMode.Repeat,
                 hideFlags = HideFlags.DontSave
             };
 
-            // Fill cyclic ombre gradient
+            // Fill cyclic ombre gradient matching HTML stripColorForPhase(localPhase)
             Color[] ombreColors = new Color[ombreW];
             for (int i = 0; i < ombreW; i++)
             {
-                float t = (float)i / ombreW;
+                float t = (i + 0.5f) / ombreW;
                 float angle = t * Mathf.PI * 2f;
-                // Interference intensity: (1 + cos(angle)) / 2
-                float intensity = 0.5f + 0.5f * Mathf.Cos(angle);
-                float v = Mathf.Lerp(0.08f, 0.96f, intensity);
-                ombreColors[i] = new Color(v, v, Mathf.Min(1f, v + 0.05f), 1f);
+                ombreColors[i] = EvaluateHtmlStripColor(angle);
             }
             ombreTexture.SetPixels(ombreColors);
             ombreTexture.Apply();
             ombreStripImage.texture = ombreTexture;
+
+            Outline ombreOutline = ombreGo.AddComponent<Outline>();
+            ombreOutline.effectColor = new Color(0.922f, 0.945f, 0.957f, 0.22f); // rgba(235,241,244,0.22)
+            ombreOutline.effectDistance = new Vector2(1f, -1f);
 
             RectTransform ombreRt = ombreGo.GetComponent<RectTransform>();
             ombreRt.anchorMin = new Vector2(0f, 0f);
@@ -234,20 +301,70 @@ namespace Contrast.Presentation
             ombreRt.anchoredPosition = new Vector2(110f, 14f);
             ombreRt.sizeDelta = new Vector2(240f, 12f);
 
+            // Phase zone boundary divider lines (BRIGHT / TUNING / DARK / TUNING)
+            // Transitions occur at I = 0.78 (cos(phi) = 0.56) and I = 0.22 (cos(phi) = -0.56)
+            float t1 = Mathf.Acos(0.56f) / (Mathf.PI * 2f);   // ~0.155401 (BRIGHT -> TUNING)
+            float t2 = Mathf.Acos(-0.56f) / (Mathf.PI * 2f);  // ~0.344599 (TUNING -> DARK)
+            float t3 = 1f - t2;                               // ~0.655401 (DARK -> TUNING)
+            float t4 = 1f - t1;                               // ~0.844599 (TUNING -> BRIGHT)
+            float[] dividerNormalized = { t1, t2, t3, t4 };
+
+            for (int d = 0; d < dividerNormalized.Length; d++)
+            {
+                GameObject divGo = new GameObject($"PhaseDivider_{d}", typeof(RectTransform));
+                divGo.transform.SetParent(ombreGo.transform, false);
+                Image divImg = divGo.AddComponent<Image>();
+                divImg.color = new Color(0.961f, 0.973f, 0.980f, 0.48f); // Crisp optical boundary divider
+
+                RectTransform divRt = divGo.GetComponent<RectTransform>();
+                divRt.anchorMin = new Vector2(0f, 0.5f);
+                divRt.anchorMax = new Vector2(0f, 0.5f);
+                divRt.pivot = new Vector2(0.5f, 0.5f);
+                divRt.sizeDelta = new Vector2(1.5f, 14f);
+                divRt.anchoredPosition = new Vector2(dividerNormalized[d] * ombreW, 0f);
+                phaseDividers[d] = divRt;
+            }
+
             // Cursor on ombre strip
             GameObject cursorGo = new GameObject("CursorMarker", typeof(RectTransform));
             cursorGo.transform.SetParent(ombreGo.transform, false);
             Image cursorImg = cursorGo.AddComponent<Image>();
-            cursorImg.color = Color.white;
+            cursorImg.color = new Color(0.969f, 0.980f, 0.984f, 1f); // #f7fafb
 
             cursorMarker = cursorGo.GetComponent<RectTransform>();
             cursorMarker.anchorMin = new Vector2(0f, 0.5f);
             cursorMarker.anchorMax = new Vector2(0f, 0.5f);
             cursorMarker.pivot = new Vector2(0.5f, 0.5f);
-            cursorMarker.sizeDelta = new Vector2(3f, 18f);
+            cursorMarker.sizeDelta = new Vector2(3f, 20f);
 
-            CreateLabel(tunerPanel.transform, "SÁNG · ĐIỀU PHA · TỐI · ĐIỀU PHA", new Vector2(110f, 2f), 8, FontStyle.Normal, new Color(0.85f, 0.90f, 0.95f, 0.45f));
+            CreateLabel(tunerPanel.transform, "SÁNG · ĐIỀU PHA · TỐI · ĐIỀU PHA · LẶP", new Vector2(110f, 2f), 8, FontStyle.Normal, new Color(0.85f, 0.90f, 0.95f, 0.45f));
             CreateLabel(tunerPanel.transform, "← / → ĐỔI PHA TUẦN HOÀN", new Vector2(370f, 14f), 9, FontStyle.Bold, new Color(0.88f, 0.92f, 0.95f, 0.55f));
+        }
+
+        public static Color EvaluateHtmlStripColor(float localPhase)
+        {
+            float I = Mathf.Clamp01(0.5f + 0.5f * Mathf.Cos(localPhase));
+            float v = Mathf.Round(18f + I * 226f);
+            float r = v, g = v, b = v;
+            if (I >= 0.78f)
+            {
+                r = Mathf.Min(245f, r + 6f);
+                g = Mathf.Min(247f, g + 6f);
+                b = Mathf.Min(248f, b + 6f);
+            }
+            else if (I <= 0.22f)
+            {
+                r = Mathf.Max(10f, r - 6f);
+                g = Mathf.Max(12f, g - 6f);
+                b = Mathf.Max(14f, b - 6f);
+            }
+            else
+            {
+                r = Mathf.Round(v * 0.92f + 8f);
+                g = Mathf.Round(v * 0.95f + 10f);
+                b = Mathf.Round(v * 1.02f + 18f);
+            }
+            return new Color(r / 255f, g / 255f, b / 255f, 1f);
         }
 
         private void BuildControlHint(Transform parent)
@@ -350,6 +467,15 @@ namespace Contrast.Presentation
                 tunerPanel.SetActive(isPlaying);
             if (hintPanel != null)
                 hintPanel.SetActive(isPlaying);
+            if (quangHudCard != null)
+            {
+                bool showQuang = isPlaying && Contrast.Level.QuangDiemItem.TotalCount > 0;
+                quangHudCard.SetActive(showQuang);
+                if (showQuang && quangHudValueText != null)
+                {
+                    quangHudValueText.text = $"{Contrast.Level.QuangDiemItem.CollectedCount} / {Contrast.Level.QuangDiemItem.TotalCount}";
+                }
+            }
 
             if (!isPlaying)
                 return;
@@ -444,6 +570,13 @@ namespace Contrast.Presentation
             }
         }
 
+        public void SyncPhaseNow(float phase, LogicalColor color)
+        {
+            UpdateWaveTexture(phase);
+            UpdateStatusBadge(color, phase);
+            UpdateOmbreCursor(phase);
+        }
+
         private void UpdateOmbreCursor(float phase)
         {
             if (cursorMarker == null)
@@ -451,7 +584,7 @@ namespace Contrast.Presentation
 
             float normalized = Mathf.Repeat(phase / (Mathf.PI * 2f), 1f);
             float posX = normalized * 240f;
-            cursorMarker.anchoredPosition = new Vector2(posX, 6f);
+            cursorMarker.anchoredPosition = new Vector2(posX, 0f);
         }
 
         private void UpdateCheckpointToast()

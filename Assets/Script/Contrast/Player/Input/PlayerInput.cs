@@ -62,7 +62,8 @@ namespace Contrast.Player
                 float axis = Mathf.Clamp(customAdapter.GetHorizontalAxis(), -1f, 1f);
                 moveIntent = Vector2.right * axis * moveSpeed * deltaTime;
 
-                if (customAdapter.GetJumpDown() && isGrounded)
+                bool customJumpPressed = customAdapter.GetJumpDown();
+                if (customJumpPressed && isGrounded)
                     jumpRequested = true;
 
                 fastFall = customAdapter.GetFastFall();
@@ -83,7 +84,8 @@ namespace Contrast.Player
                     newtonMark,
                     hasColorChange,
                     requestedColor,
-                    colorChunkStep);
+                    colorChunkStep,
+                    customJumpPressed);
             }
 
             // 1. Read from physical keyboard adapter (Windows Desktop)
@@ -164,7 +166,8 @@ namespace Contrast.Player
                 newtonMark,
                 hasColorChange,
                 requestedColor,
-                colorChunkStep);
+                colorChunkStep,
+                jumpPressed);
         }
     }
 
@@ -172,6 +175,7 @@ namespace Contrast.Player
     {
         public readonly Vector2 Move;
         public readonly bool JumpRequested;
+        public readonly bool JumpPressed;
         public readonly bool FastFall;
         public readonly float PhaseTuneDelta;
         public readonly bool NewtonMarkRequested;
@@ -187,10 +191,12 @@ namespace Contrast.Player
             bool newtonMarkRequested,
             bool hasColorChange,
             LogicalColor requestedColor,
-            int colorChunkStep = 0)
+            int colorChunkStep = 0,
+            bool jumpPressed = false)
         {
             Move = move;
             JumpRequested = jumpRequested;
+            JumpPressed = jumpPressed || jumpRequested;
             FastFall = fastFall;
             PhaseTuneDelta = phaseTuneDelta;
             NewtonMarkRequested = newtonMarkRequested;
@@ -206,7 +212,7 @@ namespace Contrast.Player
             bool hasColorChange,
             LogicalColor requestedColor,
             int colorChunkStep = 0)
-            : this(move, jumpRequested, false, 0f, false, hasColorChange, requestedColor, colorChunkStep)
+            : this(move, jumpRequested, false, 0f, false, hasColorChange, requestedColor, colorChunkStep, jumpRequested)
         {
         }
     }

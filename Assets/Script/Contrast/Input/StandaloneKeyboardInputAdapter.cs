@@ -13,6 +13,9 @@ namespace Contrast.Input
     /// </summary>
     public sealed class StandaloneKeyboardInputAdapter : IPlatformInputAdapter
     {
+        private bool prevWPressed;
+        private bool prevSpacePressed;
+
         public float GetHorizontalAxis()
         {
 #if ENABLE_INPUT_SYSTEM
@@ -45,9 +48,13 @@ namespace Contrast.Input
             if (kb == null)
                 return false;
 
-            return kb.wKey.wasPressedThisFrame || kb.spaceKey.wasPressedThisFrame;
+            bool wEdge = kb.wKey.wasPressedThisFrame || (kb.wKey.isPressed && !prevWPressed);
+            bool spaceEdge = kb.spaceKey.wasPressedThisFrame || (kb.spaceKey.isPressed && !prevSpacePressed);
+            return wEdge || spaceEdge;
 #else
-            return UnityEngine.Input.GetKeyDown(KeyCode.W) || UnityEngine.Input.GetKeyDown(KeyCode.Space);
+            bool wEdge = UnityEngine.Input.GetKeyDown(KeyCode.W) || (UnityEngine.Input.GetKey(KeyCode.W) && !prevWPressed);
+            bool spaceEdge = UnityEngine.Input.GetKeyDown(KeyCode.Space) || (UnityEngine.Input.GetKey(KeyCode.Space) && !prevSpacePressed);
+            return wEdge || spaceEdge;
 #endif
         }
 
@@ -170,7 +177,22 @@ namespace Contrast.Input
 
         public void ResetFrameState()
         {
-            // Unity hardware polling is automatically updated per frame.
+#if ENABLE_INPUT_SYSTEM
+            Keyboard kb = Keyboard.current;
+            if (kb != null)
+            {
+                prevWPressed = kb.wKey.isPressed;
+                prevSpacePressed = kb.spaceKey.isPressed;
+            }
+            else
+            {
+                prevWPressed = false;
+                prevSpacePressed = false;
+            }
+#else
+            prevWPressed = UnityEngine.Input.GetKey(KeyCode.W);
+            prevSpacePressed = UnityEngine.Input.GetKey(KeyCode.Space);
+#endif
         }
     }
 }

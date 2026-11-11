@@ -6,11 +6,12 @@ namespace Contrast.Data
     public enum LevelSourceType
     {
         FilePath,
-        InMemoryJson
+        InMemoryJson,
+        PackagedResource
     }
 
     /// <summary>
-    /// Represents the origin of an active level (either a disk file or in-memory JSON snapshot).
+    /// Represents the origin of an active level (disk file, in-memory JSON snapshot, or built-in packaged resource).
     /// Used by Restart and the loading pipeline to deterministically reload the exact source.
     /// </summary>
     [Serializable]
@@ -18,6 +19,7 @@ namespace Contrast.Data
     {
         public LevelSourceType SourceType { get; private set; }
         public string FilePath { get; private set; }
+        public string ResourcePath { get; private set; }
         public string InMemoryJson { get; private set; }
 
         public static LevelSource FromFile(string path)
@@ -29,6 +31,21 @@ namespace Contrast.Data
             {
                 SourceType = LevelSourceType.FilePath,
                 FilePath = path,
+                ResourcePath = null,
+                InMemoryJson = null
+            };
+        }
+
+        public static LevelSource FromResource(string resourcePath, string levelName = null)
+        {
+            if (string.IsNullOrEmpty(resourcePath))
+                throw new ArgumentException("Resource path cannot be null or empty.", nameof(resourcePath));
+
+            return new LevelSource
+            {
+                SourceType = LevelSourceType.PackagedResource,
+                ResourcePath = resourcePath,
+                FilePath = levelName ?? Path.GetFileName(resourcePath),
                 InMemoryJson = null
             };
         }
@@ -39,12 +56,27 @@ namespace Contrast.Data
             {
                 SourceType = LevelSourceType.InMemoryJson,
                 FilePath = null,
+                ResourcePath = null,
                 InMemoryJson = json ?? string.Empty
             };
         }
 
         public string LoadRawJson()
         {
+            if (SourceType == LevelSourceType.PackagedResource)
+            {
+                string cleanPath = ResourcePath;
+                if (!string.IsNullOrEmpty(cleanPath) && cleanPath.EndsWith(".json", StringComparison.OrdinalIgnoreCase))
+                {
+                    cleanPath = cleanPath.Substring(0, cleanPath.Length - 5);
+                }
+                UnityEngine.TextAsset asset = UnityEngine.Resources.Load<UnityEngine.TextAsset>(cleanPath);
+                if (asset == null)
+                    throw new FileNotFoundException($"Packaged level resource not found: {ResourcePath} (attempted: {cleanPath})");
+
+                return asset.text;
+            }
+
             if (SourceType == LevelSourceType.FilePath)
             {
                 if (string.IsNullOrEmpty(FilePath) || !File.Exists(FilePath))
@@ -58,9 +90,12 @@ namespace Contrast.Data
 
         public override string ToString()
         {
-            return SourceType == LevelSourceType.FilePath
-                ? $"[FilePath] {FilePath}"
-                : "[InMemoryJson]";
+            return SourceType switch
+            {
+                LevelSourceType.PackagedResource => $"[PackagedResource] {ResourcePath}",
+                LevelSourceType.FilePath => $"[FilePath] {FilePath}",
+                _ => "[InMemoryJson]"
+            };
         }
     }
 }

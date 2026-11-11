@@ -155,7 +155,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: b114cde4398cb5b468a21a715f8dd4f6, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::Contrast.Player.PlayerController
-  moveSpeed: 6
+  moveSpeed: 5.625
   playerSize: {x: 1, y: 1}
   playerOffset: {x: 0, y: 0}
   currentColor: 1
@@ -261,8 +261,8 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 7d3e6a3af1c24b8b8e4a4e1a9f4f2b31, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::Contrast.Player.PlayerJumpMotion
-  jumpHeight: 3
-  maxFallSpeed: 16
+  jumpHeight: 3.183712
+  maxFallSpeed: 16.40625
   logMotion: 0
 --- !u!50 &331062057
 Rigidbody2D:
@@ -279,7 +279,7 @@ Rigidbody2D:
   m_Mass: 1
   m_LinearDamping: 0
   m_AngularDamping: 0.05
-  m_GravityScale: 1
+  m_GravityScale: 2.628058
   m_Material: {fileID: 0}
   m_IncludeLayers:
     serializedVersion: 2
@@ -607,7 +607,6 @@ GameObject:
   - component: {fileID: 680530471}
   - component: {fileID: 680530470}
   - component: {fileID: 680530469}
-  - component: {fileID: 680530468}
   m_Layer: 0
   m_Name: GameSystems
   m_TagString: Untagged
@@ -615,18 +614,6 @@ GameObject:
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
   m_IsActive: 1
---- !u!114 &680530468
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 680530467}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 797f4f9bbeb9abe48868f6ec62002cb9, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: Assembly-CSharp::Contrast.UI.UIManager
 --- !u!114 &680530469
 MonoBehaviour:
   m_ObjectHideFlags: 0

@@ -34,11 +34,27 @@ namespace Contrast.Core
         [SerializeField] private PlayerController player;
         [SerializeField] private LevelLoader levelLoader;
         [SerializeField] private CameraFollow cameraFollow;
+        [SerializeField] private TestModeUI testModeUI;
 
         public GameState State { get; private set; } = GameState.MainMenu;
         public LevelSource CurrentLevelSource { get; private set; }
         public GameplayEntryContext CurrentEntryContext { get; private set; } = GameplayEntryContext.MainMenuGameplay;
+        public static readonly string[] CampaignLevelResources = new string[]
+        {
+            "Levels/L01",
+            "Levels/L02",
+            "Levels/L03"
+        };
+        public static readonly string[] CampaignLevelTitles = new string[]
+        {
+            "L01 — Cánh cửa không phải vật cản",
+            "L02 — Cầu thang ma",
+            "L03 — Giếng ba tầng"
+        };
+        public int CurrentCampaignIndex { get; private set; } = -1;
+        public bool IsCampaignActive => CurrentEntryContext == GameplayEntryContext.Campaign && CurrentCampaignIndex >= 0;
         public float KillY => levelLoader != null ? levelLoader.KillY : -50f;
+        public float DeathY => levelLoader != null ? levelLoader.DeathY : -50f;
         public PlayerController Player => player;
         public LevelLoader LevelLoader => levelLoader;
         public CameraFollow CameraFollow => cameraFollow;
@@ -57,9 +73,9 @@ namespace Contrast.Core
 
             Instance = this;
 
-            player ??= FindAnyObjectByType<PlayerController>();
-            levelLoader ??= FindAnyObjectByType<LevelLoader>();
-            cameraFollow ??= FindAnyObjectByType<CameraFollow>();
+            player ??= FindAnyObjectByType<PlayerController>(FindObjectsInactive.Include);
+            levelLoader ??= FindAnyObjectByType<LevelLoader>(FindObjectsInactive.Include);
+            cameraFollow ??= FindAnyObjectByType<CameraFollow>(FindObjectsInactive.Include);
             gameOverUI ??= FindAnyObjectByType<GameOverUI>(FindObjectsInactive.Include);
             gameControlUI ??= FindAnyObjectByType<GameControlUI>(FindObjectsInactive.Include);
             inGameMenuUI ??= FindAnyObjectByType<InGameMenuUI>(FindObjectsInactive.Include);
@@ -97,6 +113,10 @@ namespace Contrast.Core
             if (levelEditorUI == null)
                 levelEditorUI = new GameObject("LevelEditorUI").AddComponent<LevelEditorUI>();
 
+            testModeUI ??= FindAnyObjectByType<TestModeUI>(FindObjectsInactive.Include);
+            if (testModeUI == null)
+                testModeUI = new GameObject("TestModeUI").AddComponent<TestModeUI>();
+
             if (player != null)
                 player.gameObject.SetActive(false);
 
@@ -107,6 +127,15 @@ namespace Contrast.Core
         private void Start()
         {
             SetState(GameState.MainMenu);
+        }
+
+        public void SetTestMode(bool enabled)
+        {
+            if (player != null)
+                player.SetTestMode(enabled);
+
+            cameraFollow?.SetTestModeFreeMove(enabled);
+            testModeUI?.Show(enabled);
         }
 
         // The only gameplay Update path.
@@ -131,6 +160,25 @@ namespace Contrast.Core
                 return;
             }
 
+            if (RKeyPressed())
+            {
+                Restart();
+                return;
+            }
+
+            if (player != null && player.IsTestModeActive && EscapeKeyPressed())
+            {
+                SetTestMode(false);
+                return;
+            }
+
+            if (TKeyPressed())
+            {
+                bool nextMode = player != null ? !player.IsTestModeActive : false;
+                SetTestMode(nextMode);
+                return;
+            }
+
             if (EscapeKeyPressed())
             {
                 OpenInGameMenu();
@@ -146,10 +194,17 @@ namespace Contrast.Core
 
             // 2. Apply rider-carry: if the player stands on a moving platform,
             //    pass its frame displacement into the player's movement pipeline.
-            Vector2 riderDisp = TrajectorySystem.GetRiderDisplacement(
-                (Vector2)player.transform.position + player.PlayerOffset,
-                player.PlayerSize,
-                player.CurrentColor);
+            //    HTML strictly bypasses moving platform carry during Test Mode.
+            Vector2 riderDisp = Vector2.zero;
+            if (!player.IsTestModeActive && player.IsGrounded && !player.IsJumping)
+            {
+                riderDisp = TrajectorySystem.GetRiderDisplacement(
+                    (Vector2)player.transform.position + player.PlayerOffset,
+                    player.PlayerSize,
+                    player.CurrentColor,
+                    player.GroundedPlatform,
+                    player.IsJumping);
+            }
             player.SetRiderDisplacement(riderDisp);
 
             // 3. Normal player movement pipeline.
@@ -159,12 +214,129 @@ namespace Contrast.Core
         }
 
         /// <summary>
-        /// Transitions from Main Menu to Level Selection screen.
+        /// Starts the built-in campaign from L01 directly from packaged resources.
+        /// Does not depend on AppData or external level files.
         /// </summary>
-        public void StartGame()
+        public void StartCampaign()
         {
-            Debug.Log("[FLOW][START_GAME] opening level select screen");
-            CurrentEntryContext = GameplayEntryContext.MainMenuGameplay;
+            Debug.Log("[FLOW][CAMPAIGN] Starting built-in campaign at L01");
+            PlayCampaignLevel(0);
+        }
+
+        /// <summary>
+        /// Directly loads and starts any built-in level (L01=0, L02=1, L03=2) from the Chơi thử -> Chọn màn menu
+        /// without requiring prior level completion.
+        /// </summary>
+        public void PlayDirectLevel(int levelIndex)
+        {
+            Debug.Log($"[FLOW][DIRECT_LEVEL] Directly starting built-in level index={levelIndex}");
+            PlayCampaignLevel(levelIndex);
+        }
+
+        public void PlayCampaignLevel(int levelIndex)
+        {
+            if (levelIndex < 0 || levelIndex >= CampaignLevelResources.Length)
+            {
+                Debug.LogError($"[FLOW][CAMPAIGN] Invalid campaign level index: {levelIndex}");
+                ReturnToMainMenu();
+                return;
+            }
+
+            CurrentCampaignIndex = levelIndex;
+            CurrentEntryContext = GameplayEntryContext.Campaign;
+            string resourcePath = CampaignLevelResources[levelIndex];
+            string levelTitle = CampaignLevelTitles[levelIndex];
+            Debug.Log($"[FLOW][CAMPAIGN] Loading level {levelIndex + 1}/{CampaignLevelResources.Length}: {levelTitle} ({resourcePath})");
+            StartCoroutine(LoadPackagedLevelRoutine(resourcePath, levelTitle));
+        }
+
+        private IEnumerator LoadPackagedLevelRoutine(string resourcePath, string levelTitle)
+        {
+            levelEditor?.StopEditing();
+            levelEditorUI?.Show(false);
+            levelSelectUI?.Show(false);
+
+            if (player != null)
+                player.gameObject.SetActive(false);
+
+            SetState(GameState.Loading);
+            loadingOverlayUI?.Show(true, "LOADING CAMPAIGN...", $"ĐANG TẢI {levelTitle.ToUpper()} · SYNCHRONIZING OPTICAL PHASE");
+            yield return null;
+
+            LevelSource source = LevelSource.FromResource(resourcePath, levelTitle);
+            string rawJson;
+            try
+            {
+                rawJson = source.LoadRawJson();
+            }
+            catch (System.Exception ex)
+            {
+                Debug.LogError($"[FLOW][CAMPAIGN] Failed to load resource {resourcePath}: {ex.Message}");
+                loadingOverlayUI?.Show(false);
+                ReturnToMainMenu();
+                yield break;
+            }
+
+            LevelData data;
+            try
+            {
+                data = JsonUtility.FromJson<LevelData>(rawJson);
+            }
+            catch (System.Exception ex)
+            {
+                Debug.LogError($"[FLOW][CAMPAIGN] Failed to parse JSON for {resourcePath}: {ex.Message}");
+                loadingOverlayUI?.Show(false);
+                ReturnToMainMenu();
+                yield break;
+            }
+
+            if (data == null)
+            {
+                Debug.LogError($"[FLOW][CAMPAIGN] Deserialized LevelData is null for {resourcePath}");
+                loadingOverlayUI?.Show(false);
+                ReturnToMainMenu();
+                yield break;
+            }
+
+            try
+            {
+                data = LevelDataSanitizer.Sanitize(data, rawJson, out var report);
+                if (report != null && report.Count > 0)
+                {
+                    Debug.Log($"[CAMPAIGN_SANITY] Automatically sanitized {report.Count} items.");
+                }
+            }
+            catch (System.Exception ex)
+            {
+                Debug.LogWarning($"[CAMPAIGN_SANITY] Sanitize warning: {ex.Message}");
+            }
+
+            try
+            {
+                levelLoader?.BuildRuntimeLevel(data);
+            }
+            catch (System.Exception ex)
+            {
+                Debug.LogError($"[FLOW][CAMPAIGN] Runtime level build error: {ex.Message}");
+                loadingOverlayUI?.Show(false);
+                ReturnToMainMenu();
+                yield break;
+            }
+
+            CurrentLevelSource = source;
+
+            if (player != null)
+                player.gameObject.SetActive(true);
+
+            loadingOverlayUI?.Show(false);
+            SetState(GameState.Playing);
+        }
+
+        public void OpenLevelSelect()
+        {
+            Debug.Log("[FLOW][LOAD_LEVEL] opening external level select screen");
+            CurrentCampaignIndex = -1;
+            CurrentEntryContext = GameplayEntryContext.CustomLevel;
             levelEditor?.StopEditing();
             levelEditorUI?.Show(false);
 
@@ -175,12 +347,15 @@ namespace Contrast.Core
             levelSelectUI?.OpenForPlay();
         }
 
+        public void StartGame() => StartCampaign();
+
         /// <summary>
         /// Loads and starts a level from a disk file path with loading overlay and sanitization.
         /// </summary>
         public void PlayLevelFromFile(string filePath)
         {
-            CurrentEntryContext = GameplayEntryContext.MainMenuGameplay;
+            CurrentCampaignIndex = -1;
+            CurrentEntryContext = GameplayEntryContext.CustomLevel;
             Debug.Log($"[FLOW][START_GAME_FILE] loading level from file: {filePath} (context={CurrentEntryContext})");
             StartCoroutine(LoadLevelFromFileRoutine(filePath));
         }
@@ -373,6 +548,7 @@ namespace Contrast.Core
             if (player != null)
                 player.gameObject.SetActive(false);
 
+            CurrentCampaignIndex = -1;
             CurrentEntryContext = GameplayEntryContext.MainMenuGameplay;
             SetState(GameState.MainMenu);
         }
@@ -397,7 +573,7 @@ namespace Contrast.Core
 
         /// <summary>
         /// Exits gameplay and returns to the appropriate destination based on how gameplay started:
-        /// - MainMenuGameplay -> returns to top-level MainMenuUI.
+        /// - MainMenuGameplay / Campaign / CustomLevel -> returns to top-level MainMenuUI.
         /// - EditorTestPlay -> returns directly to the LevelEditor session, restoring the working copy.
         /// </summary>
         public void ReturnFromGameplay()
@@ -422,18 +598,63 @@ namespace Contrast.Core
                 cameraFollow.Target = player.transform;
         }
 
+        private bool isAutoRespawning;
+
         public void OnPlayerDied()
         {
-            if (State != GameState.Playing)
+            if (State != GameState.Playing || isAutoRespawning)
                 return;
-            SetState(GameState.GameOver);
+
+            isAutoRespawning = true;
+            try
+            {
+                Debug.Log("[FLOW][AUTO_RESPAWN] Player died -> automatically respawning at latest checkpoint");
+                Retry();
+            }
+            finally
+            {
+                isAutoRespawning = false;
+            }
         }
 
         public void OnPlayerWon()
         {
             if (State != GameState.Playing)
                 return;
+
+            Debug.Log($"[FLOW][WIN] Player won level (context={CurrentEntryContext}, campaignIndex={CurrentCampaignIndex})");
+
+            if (CurrentEntryContext == GameplayEntryContext.Campaign)
+            {
+                if (CurrentCampaignIndex >= 0 && CurrentCampaignIndex < CampaignLevelResources.Length - 1)
+                {
+                    StartCoroutine(AdvanceCampaignRoutine(CurrentCampaignIndex + 1));
+                    return;
+                }
+                else
+                {
+                    SetState(GameState.Won);
+                    if (gameOverUI != null)
+                    {
+                        gameOverUI.ShowCampaignComplete(
+                            onPlayAgain: () => StartCampaign(),
+                            onMainMenu: () => ReturnToMainMenu()
+                        );
+                    }
+                    return;
+                }
+            }
+
             SetState(GameState.Won);
+        }
+
+        private IEnumerator AdvanceCampaignRoutine(int nextIndex)
+        {
+            SetState(GameState.Loading);
+            string nextTitle = CampaignLevelTitles[nextIndex];
+            loadingOverlayUI?.Show(true, "HOÀN THÀNH MÀN CHƠI!", $"CHUẨN BỊ BƯỚC VÀO {nextTitle.ToUpper()}...");
+            yield return new WaitForSeconds(1.2f);
+            PlayCampaignLevel(nextIndex);
         }
 
         /// <summary>
@@ -474,35 +695,28 @@ namespace Contrast.Core
             loadingOverlayUI?.Show(true, "RESTARTING...", "TÁI KHỞI ĐỘNG MÀN CHƠI TỪ NGUỒN GỐC");
             yield return null;
 
-            if (CurrentLevelSource.SourceType == LevelSourceType.FilePath)
+            string rawJson;
+            try
             {
-                string path = CurrentLevelSource.FilePath;
-                Debug.Log($"[FLOW][LEVEL_FILE] load path={path}");
+                rawJson = CurrentLevelSource.LoadRawJson();
+            }
+            catch (System.Exception ex)
+            {
+                Debug.LogError($"[FLOW][RESTART] Failed to load raw JSON from source: {ex.Message}");
+                loadingOverlayUI?.Show(false);
+                ReturnToMainMenu();
+                yield break;
+            }
 
-                string rawJson = LevelRepository.ReadAllText(path);
-                LevelData data = JsonUtility.FromJson<LevelData>(rawJson);
-                data = LevelDataSanitizer.Sanitize(data, rawJson, out var report);
-                if (report != null && report.Count > 0)
-                {
-                    Debug.Log($"[LEVEL_FIX] Automatically fixed {report.Count} issues.");
-                    foreach (string fix in report)
-                        Debug.Log($"[LEVEL_FIX] {fix}");
-                }
-                levelLoader?.BuildRuntimeLevel(data);
-            }
-            else
+            LevelData data = JsonUtility.FromJson<LevelData>(rawJson);
+            data = LevelDataSanitizer.Sanitize(data, rawJson, out var report);
+            if (report != null && report.Count > 0)
             {
-                string rawJson = CurrentLevelSource.InMemoryJson;
-                LevelData data = JsonUtility.FromJson<LevelData>(rawJson);
-                data = LevelDataSanitizer.Sanitize(data, rawJson, out var report);
-                if (report != null && report.Count > 0)
-                {
-                    Debug.Log($"[LEVEL_FIX] Automatically fixed {report.Count} issues.");
-                    foreach (string fix in report)
-                        Debug.Log($"[LEVEL_FIX] {fix}");
-                }
-                levelLoader?.BuildRuntimeLevel(data);
+                Debug.Log($"[LEVEL_FIX] Automatically fixed {report.Count} issues.");
+                foreach (string fix in report)
+                    Debug.Log($"[LEVEL_FIX] {fix}");
             }
+            levelLoader?.BuildRuntimeLevel(data);
 
             if (player != null)
                 player.gameObject.SetActive(true);
@@ -517,18 +731,28 @@ namespace Contrast.Core
         public void Retry()
         {
             Debug.Log("[FLOW][RETRY] use latest checkpoint spawn");
-            if (levelLoader == null)
-                return;
-
             if (player != null)
                 player.gameObject.SetActive(true);
 
             SetState(GameState.Playing);
-            levelLoader.RetryCurrentSpawn();
+
+            if (levelLoader != null)
+            {
+                levelLoader.RetryCurrentSpawn();
+            }
+            else if (player != null)
+            {
+                player.ResetState();
+            }
         }
 
         private void SetState(GameState state)
         {
+            if (state != GameState.Playing && player != null && player.IsTestModeActive)
+            {
+                SetTestMode(false);
+            }
+
             GameState previous = State;
             State = state;
             Debug.Log($"[FLOW][STATE] {previous} -> {State}");
@@ -556,6 +780,34 @@ namespace Contrast.Core
             return kb != null && kb.escapeKey.wasPressedThisFrame;
 #else
             return Input.GetKeyDown(KeyCode.Escape);
+#endif
+        }
+
+        private static bool TKeyPressed()
+        {
+#if ENABLE_INPUT_SYSTEM
+            Keyboard kb = Keyboard.current;
+            return kb != null && kb.tKey.wasPressedThisFrame;
+#else
+            return Input.GetKeyDown(KeyCode.T);
+#endif
+        }
+
+        private void OnApplicationFocus(bool hasFocus)
+        {
+            if (!hasFocus && player != null && player.IsTestModeActive)
+            {
+                SetTestMode(false);
+            }
+        }
+
+        private static bool RKeyPressed()
+        {
+#if ENABLE_INPUT_SYSTEM
+            Keyboard kb = Keyboard.current;
+            return kb != null && kb.rKey.wasPressedThisFrame;
+#else
+            return Input.GetKeyDown(KeyCode.R);
 #endif
         }
 

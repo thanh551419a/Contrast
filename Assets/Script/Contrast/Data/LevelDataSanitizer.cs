@@ -336,7 +336,54 @@ namespace Contrast.Data
                 report.Add($"Calculated camera boundary: center=({data.cameraBoundary.position.x:F1}, {data.cameraBoundary.position.y:F1}), size=({data.cameraBoundary.size.x:F1}, {data.cameraBoundary.size.y:F1}).");
             }
 
+            // ── 7. Fixed World-Space deathY Validation / Defaulting ────────
+            bool hasAuthoredDeathY = string.IsNullOrWhiteSpace(rawJson)
+                ? (!float.IsNaN(data.deathY) && !float.IsInfinity(data.deathY) && Mathf.Abs(data.deathY - (-50f)) > 0.001f)
+                : IsFieldPresentAndNonNull(rawJson, "deathY");
+
+            if (!hasAuthoredDeathY || float.IsNaN(data.deathY) || float.IsInfinity(data.deathY))
+            {
+                data.deathY = CalculateDefaultDeathY(data);
+            }
+
             return data;
+        }
+
+        public static float CalculateDefaultDeathY(LevelData data)
+        {
+            if (data == null)
+                return -50f;
+
+            if (data.cameraBoundary != null &&
+                data.cameraBoundary.position != null &&
+                data.cameraBoundary.size != null &&
+                !float.IsNaN(data.cameraBoundary.position.y) &&
+                !float.IsNaN(data.cameraBoundary.size.y) &&
+                data.cameraBoundary.size.y > 0.01f)
+            {
+                return data.cameraBoundary.position.y - data.cameraBoundary.size.y * 0.5f - 1f;
+            }
+
+            if (data.platforms != null && data.platforms.Length > 0)
+            {
+                float lowestBottom = float.MaxValue;
+                for (int i = 0; i < data.platforms.Length; i++)
+                {
+                    ColorPlatformData p = data.platforms[i];
+                    if (p == null || p.position == null)
+                        continue;
+
+                    float halfH = (p.size != null ? Mathf.Abs(p.size.y) : 1f) * 0.5f;
+                    float bottom = p.position.y - halfH;
+                    if (bottom < lowestBottom)
+                        lowestBottom = bottom;
+                }
+
+                if (lowestBottom < float.MaxValue)
+                    return lowestBottom - 10f;
+            }
+
+            return -50f;
         }
 
         private static void SanitizeTrajectory(ColorPlatformData p, List<string> report, int index)
@@ -463,7 +510,7 @@ namespace Contrast.Data
             }
         }
 
-        private static CameraBoundaryData CalculateCameraBoundary(LevelData data)
+        public static CameraBoundaryData CalculateCameraBoundary(LevelData data)
         {
             float minX = float.MaxValue;
             float maxX = float.MinValue;
@@ -503,6 +550,22 @@ namespace Contrast.Data
 
             if (data.end != null && data.end.position != null)
                 IncludeBox(data.end.position.ToVector2(), data.end.size?.ToVector2() ?? new Vector2(1.5f, 2f));
+
+            if (data.collectibles != null)
+            {
+                foreach (CollectibleData col in data.collectibles)
+                {
+                    if (col != null && col.position != null)
+                        IncludeBox(col.position.ToVector2(), Vector2.one);
+                }
+            }
+
+            if (data.newton != null && data.newton.enabled && (Mathf.Abs(data.newton.cx) > 0.001f || Mathf.Abs(data.newton.cy) > 0.001f))
+            {
+                Vector2 nCenter = new Vector2(data.newton.cx, data.newton.cy);
+                float nSpan = 12f;
+                IncludeBox(nCenter, new Vector2(nSpan * 2f, nSpan * 2f));
+            }
 
             if (data.platforms != null)
             {
@@ -859,7 +922,13 @@ namespace Contrast.Data
                 hasPrevious = true;
             }
 
-            // 8. levelId / levelName
+            // 8. deathY / levelId / levelName
+            if (!float.IsNaN(data.deathY) && !float.IsInfinity(data.deathY))
+            {
+                if (hasPrevious) sb.AppendLine(",");
+                sb.Append($"  \"deathY\": {data.deathY.ToString("0.0###", System.Globalization.CultureInfo.InvariantCulture)}");
+                hasPrevious = true;
+            }
             if (!string.IsNullOrEmpty(data.levelId))
             {
                 if (hasPrevious) sb.AppendLine(",");
@@ -968,6 +1037,46 @@ namespace Contrast.Data
                 psb.AppendLine();
                 psb.Append("}");
                 return psb.ToString();
+            }
+            if (obj is NewtonChamberData nc)
+            {
+                StringBuilder nsb = new StringBuilder();
+                nsb.AppendLine("{");
+                nsb.AppendLine($"  \"enabled\": {(nc.enabled ? "true" : "false")},");
+                nsb.AppendLine($"  \"cx\": {nc.cx.ToString("0.0###", inv)},");
+                nsb.AppendLine($"  \"cy\": {nc.cy.ToString("0.0###", inv)},");
+                nsb.AppendLine($"  \"i\": {nc.i},");
+                nsb.AppendLine($"  \"k\": {nc.k},");
+                nsb.Append($"  \"orbitStart\": \"{(string.IsNullOrEmpty(nc.orbitStart) ? "auto" : nc.orbitStart)}\"");
+                if (nc.rails != null)
+                {
+                    nsb.AppendLine(",");
+                    nsb.AppendLine("  \"rails\": {");
+                    if (nc.rails.K != null)
+                    {
+                        nsb.AppendLine("    \"K\": {");
+                        nsb.AppendLine($"      \"width\": {nc.rails.K.width.ToString("0.0###", inv)},");
+                        nsb.AppendLine($"      \"period\": {nc.rails.K.period.ToString("0.0###", inv)},");
+                        nsb.AppendLine($"      \"angleDeg\": {nc.rails.K.angleDeg.ToString("0.0###", inv)},");
+                        nsb.AppendLine($"      \"direction\": {nc.rails.K.direction}");
+                        nsb.Append("    }");
+                    }
+                    if (nc.rails.I != null)
+                    {
+                        if (nc.rails.K != null) nsb.AppendLine(",");
+                        nsb.AppendLine("    \"I\": {");
+                        nsb.AppendLine($"      \"width\": {nc.rails.I.width.ToString("0.0###", inv)},");
+                        nsb.AppendLine($"      \"period\": {nc.rails.I.period.ToString("0.0###", inv)},");
+                        nsb.AppendLine($"      \"angleDeg\": {nc.rails.I.angleDeg.ToString("0.0###", inv)},");
+                        nsb.AppendLine($"      \"direction\": {nc.rails.I.direction}");
+                        nsb.Append("    }");
+                    }
+                    nsb.AppendLine();
+                    nsb.Append("  }");
+                }
+                nsb.AppendLine();
+                nsb.Append("}");
+                return nsb.ToString();
             }
 
             return "{}";

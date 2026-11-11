@@ -1,0 +1,587 @@
+{
+  "startPos": {
+      "position": {
+          "x": 2.015625,
+          "y": -14.1875
+      },
+      "size": {
+          "x": 0.59375,
+          "y": 1.0
+      },
+      "color": 0.0
+  },
+  "checkPoint": [
+{
+        "position": {
+            "x": 16.328125,
+            "y": -12.4375
+        },
+        "size": {
+            "x": 1.84375,
+            "y": 1.796875
+        },
+        "color": 127.0
+    },
+{
+        "position": {
+            "x": 24.4375,
+            "y": -8.328125
+        },
+        "size": {
+            "x": 1.953125,
+            "y": 1.75
+        },
+        "color": 127.0
+    },
+{
+        "position": {
+            "x": 38.421875,
+            "y": -3.15625
+        },
+        "size": {
+            "x": 1.953125,
+            "y": 1.71875
+        },
+        "color": 127.0
+    }
+  ],
+  "cameraBoundary": {
+      "position": {
+          "x": 49.952701568603519,
+          "y": -8.25
+      },
+      "size": {
+          "x": 115.90540313720703,
+          "y": 56.12330627441406
+      }
+  },
+  "platforms": [
+{
+        "position": {
+            "x": 5.625,
+            "y": -15.46875
+        },
+        "size": {
+            "x": 11.25,
+            "y": 1.5625
+        },
+        "rawGrayscaleColor": 212.0,
+        "trajectory": {
+            "enabled": false,
+            "curveType": 0,
+            "domainMode": 0,
+            "playbackMode": 1,
+            "originX": 0.0,
+            "originY": 0.0,
+            "rotation": 0.0,
+            "scaleX": 5.0,
+            "scaleY": 1.0,
+            "paramMin": 0.0,
+            "paramMax": 1.0,
+            "boundsXMin": -10.0,
+            "boundsXMax": 10.0,
+            "boundsYMin": -10.0,
+            "boundsYMax": 10.0,
+            "radius": 2.0,
+            "duration": 4.0,
+            "reverseDirection": false
+        }
+    },
+{
+        "position": {
+            "x": 16.21875,
+            "y": -11.125
+        },
+        "size": {
+            "x": 7.125,
+            "y": 0.84375
+        },
+        "rawGrayscaleColor": 212.0,
+        "trajectory": {
+            "enabled": false,
+            "curveType": 0,
+            "domainMode": 0,
+            "playbackMode": 1,
+            "originX": 0.0,
+            "originY": 0.0,
+            "rotation": 0.0,
+            "scaleX": 5.0,
+            "scaleY": 1.0,
+            "paramMin": 0.0,
+            "paramMax": 1.0,
+            "boundsXMin": -10.0,
+            "boundsXMax": 10.0,
+            "boundsYMin": -10.0,
+            "boundsYMax": 10.0,
+            "radius": 2.0,
+            "duration": 4.0,
+            "reverseDirection": false
+        }
+    },
+{
+        "position": {
+            "x": 16.21875,
+            "y": -13.53125
+        },
+        "size": {
+            "x": 7.125,
+            "y": 1.1875
+        },
+        "rawGrayscaleColor": 0.0,
+        "trajectory": {
+            "enabled": false,
+            "curveType": 0,
+            "domainMode": 0,
+            "playbackMode": 1,
+            "originX": 0.0,
+            "originY": 0.0,
+            "rotation": 0.0,
+            "scaleX": 5.0,
+            "scaleY": 1.0,
+            "paramMin": 0.0,
+            "paramMax": 1.0,
+            "boundsXMin": -10.0,
+            "boundsXMax": 10.0,
+            "boundsYMin": -10.0,
+            "boundsYMax": 10.0,
+            "radius": 2.0,
+            "duration": 4.0,
+            "reverseDirection": false
+        }
+    },
+{
+        "position": {
+            "x": 25.9453125,
+            "y": -9.1875
+        },
+        "size": {
+            "x": 7.109375,
+            "y": 0.71875
+        },
+        "rawGrayscaleColor": 212.0,
+        "trajectory": {
+            "enabled": false,
+            "curveType": 0,
+            "domainMode": 0,
+            "playbackMode": 1,
+            "originX": 0.0,
+            "originY": 0.0,
+            "rotation": 0.0,
+            "scaleX": 5.0,
+            "scaleY": 1.0,
+            "paramMin": 0.0,
+            "paramMax": 1.0,
+            "boundsXMin": -10.0,
+            "boundsXMax": 10.0,
+            "boundsYMin": -10.0,
+            "boundsYMax": 10.0,
+            "radius": 2.0,
+            "duration": 4.0,
+            "reverseDirection": false
+        }
+    },
+{
+        "position": {
+            "x": 45.6796875,
+            "y": -4.039062023162842
+        },
+        "size": {
+            "x": 4.484375,
+            "y": 0.671875
+        },
+        "rawGrayscaleColor": 212.0,
+        "trajectory": {
+            "enabled": false,
+            "curveType": 0,
+            "domainMode": 0,
+            "playbackMode": 1,
+            "originX": 0.0,
+            "originY": 0.0,
+            "rotation": 0.0,
+            "scaleX": 5.0,
+            "scaleY": 1.0,
+            "paramMin": 0.0,
+            "paramMax": 1.0,
+            "boundsXMin": -10.0,
+            "boundsXMax": 10.0,
+            "boundsYMin": -10.0,
+            "boundsYMax": 10.0,
+            "radius": 2.0,
+            "duration": 4.0,
+            "reverseDirection": false
+        }
+    },
+{
+        "position": {
+            "x": 37.8671875,
+            "y": -4.015625
+        },
+        "size": {
+            "x": 5.265625,
+            "y": 0.71875
+        },
+        "rawGrayscaleColor": 0.0,
+        "trajectory": {
+            "enabled": false,
+            "curveType": 0,
+            "domainMode": 0,
+            "playbackMode": 1,
+            "originX": 0.0,
+            "originY": 0.0,
+            "rotation": 0.0,
+            "scaleX": 5.0,
+            "scaleY": 1.0,
+            "paramMin": 0.0,
+            "paramMax": 1.0,
+            "boundsXMin": -10.0,
+            "boundsXMax": 10.0,
+            "boundsYMin": -10.0,
+            "boundsYMax": 10.0,
+            "radius": 2.0,
+            "duration": 4.0,
+            "reverseDirection": false
+        }
+    },
+{
+        "position": {
+            "x": 41.8671875,
+            "y": -1.359375
+        },
+        "size": {
+            "x": 1.171875,
+            "y": 3.46875
+        },
+        "rawGrayscaleColor": 255.0,
+        "trajectory": {
+            "enabled": false,
+            "curveType": 0,
+            "domainMode": 0,
+            "playbackMode": 1,
+            "originX": 0.0,
+            "originY": 0.0,
+            "rotation": 0.0,
+            "scaleX": 5.0,
+            "scaleY": 1.0,
+            "paramMin": 0.0,
+            "paramMax": 1.0,
+            "boundsXMin": -10.0,
+            "boundsXMax": 10.0,
+            "boundsYMin": -10.0,
+            "boundsYMax": 10.0,
+            "radius": 2.0,
+            "duration": 4.0,
+            "reverseDirection": false
+        }
+    },
+{
+        "position": {
+            "x": 31.953125,
+            "y": -7.359375
+        },
+        "size": {
+            "x": 3.59375,
+            "y": 0.75
+        },
+        "rawGrayscaleColor": 127.0,
+        "trajectory": {
+            "enabled": false,
+            "curveType": 0,
+            "domainMode": 0,
+            "playbackMode": 1,
+            "originX": 0.0,
+            "originY": 0.0,
+            "rotation": 0.0,
+            "scaleX": 5.0,
+            "scaleY": 1.0,
+            "paramMin": 0.0,
+            "paramMax": 1.0,
+            "boundsXMin": -10.0,
+            "boundsXMax": 10.0,
+            "boundsYMin": -10.0,
+            "boundsYMax": 10.0,
+            "radius": 2.0,
+            "duration": 4.0,
+            "reverseDirection": false
+        }
+    },
+{
+        "position": {
+            "x": 35.1171875,
+            "y": -5.90625
+        },
+        "size": {
+            "x": 2.734375,
+            "y": 0.71875
+        },
+        "rawGrayscaleColor": 212.0,
+        "trajectory": {
+            "enabled": false,
+            "curveType": 0,
+            "domainMode": 0,
+            "playbackMode": 1,
+            "originX": 0.0,
+            "originY": 0.0,
+            "rotation": 0.0,
+            "scaleX": 5.0,
+            "scaleY": 1.0,
+            "paramMin": 0.0,
+            "paramMax": 1.0,
+            "boundsXMin": -10.0,
+            "boundsXMax": 10.0,
+            "boundsYMin": -10.0,
+            "boundsYMax": 10.0,
+            "radius": 2.0,
+            "duration": 4.0,
+            "reverseDirection": false
+        }
+    },
+{
+        "position": {
+            "x": 53.75,
+            "y": -4.039062023162842
+        },
+        "size": {
+            "x": 9.6875,
+            "y": 0.671875
+        },
+        "rawGrayscaleColor": 212.0,
+        "trajectory": {
+            "enabled": false,
+            "curveType": 0,
+            "domainMode": 0,
+            "playbackMode": 1,
+            "originX": 0.0,
+            "originY": 0.0,
+            "rotation": 0.0,
+            "scaleX": 5.0,
+            "scaleY": 1.0,
+            "paramMin": 0.0,
+            "paramMax": 1.0,
+            "boundsXMin": -10.0,
+            "boundsXMax": 10.0,
+            "boundsYMin": -10.0,
+            "boundsYMax": 10.0,
+            "radius": 2.0,
+            "duration": 4.0,
+            "reverseDirection": false
+        }
+    },
+{
+        "position": {
+            "x": 54.203125,
+            "y": -6.625
+        },
+        "size": {
+            "x": 4.6875,
+            "y": 0.71875
+        },
+        "rawGrayscaleColor": 0.0,
+        "trajectory": {
+            "enabled": false,
+            "curveType": 0,
+            "domainMode": 0,
+            "playbackMode": 1,
+            "originX": 0.0,
+            "originY": 0.0,
+            "rotation": 0.0,
+            "scaleX": 5.0,
+            "scaleY": 1.0,
+            "paramMin": 0.0,
+            "paramMax": 1.0,
+            "boundsXMin": -10.0,
+            "boundsXMax": 10.0,
+            "boundsYMin": -10.0,
+            "boundsYMax": 10.0,
+            "radius": 2.0,
+            "duration": 4.0,
+            "reverseDirection": false
+        }
+    },
+{
+        "position": {
+            "x": 58.15625,
+            "y": -1.6640620231628419
+        },
+        "size": {
+            "x": 0.875,
+            "y": 4.078125
+        },
+        "rawGrayscaleColor": 212.0,
+        "trajectory": {
+            "enabled": false,
+            "curveType": 0,
+            "domainMode": 0,
+            "playbackMode": 1,
+            "originX": 0.0,
+            "originY": 0.0,
+            "rotation": 0.0,
+            "scaleX": 5.0,
+            "scaleY": 1.0,
+            "paramMin": 0.0,
+            "paramMax": 1.0,
+            "boundsXMin": -10.0,
+            "boundsXMax": 10.0,
+            "boundsYMin": -10.0,
+            "boundsYMax": 10.0,
+            "radius": 2.0,
+            "duration": 4.0,
+            "reverseDirection": false
+        }
+    },
+{
+        "position": {
+            "x": 60.640625,
+            "y": -4.039062023162842
+        },
+        "size": {
+            "x": 2.3125,
+            "y": 0.671875
+        },
+        "rawGrayscaleColor": 212.0,
+        "trajectory": {
+            "enabled": false,
+            "curveType": 0,
+            "domainMode": 0,
+            "playbackMode": 1,
+            "originX": 0.0,
+            "originY": 0.0,
+            "rotation": 0.0,
+            "scaleX": 5.0,
+            "scaleY": 1.0,
+            "paramMin": 0.0,
+            "paramMax": 1.0,
+            "boundsXMin": -10.0,
+            "boundsXMax": 10.0,
+            "boundsYMin": -10.0,
+            "boundsYMax": 10.0,
+            "radius": 2.0,
+            "duration": 4.0,
+            "reverseDirection": false
+        }
+    },
+{
+        "position": {
+            "x": 67.6171875,
+            "y": -9.640625
+        },
+        "size": {
+            "x": 1.953125,
+            "y": 0.8125
+        },
+        "rawGrayscaleColor": 255.0,
+        "trajectory": {
+            "enabled": false,
+            "curveType": 0,
+            "domainMode": 0,
+            "playbackMode": 1,
+            "originX": 0.0,
+            "originY": 0.0,
+            "rotation": 0.0,
+            "scaleX": 5.0,
+            "scaleY": 1.0,
+            "paramMin": 0.0,
+            "paramMax": 1.0,
+            "boundsXMin": -10.0,
+            "boundsXMax": 10.0,
+            "boundsYMin": -10.0,
+            "boundsYMax": 10.0,
+            "radius": 2.0,
+            "duration": 4.0,
+            "reverseDirection": false
+        }
+    },
+{
+        "position": {
+            "x": 38.171875,
+            "y": -1.59375
+        },
+        "size": {
+            "x": 4.65625,
+            "y": 0.75
+        },
+        "rawGrayscaleColor": 127.0,
+        "trajectory": {
+            "enabled": false,
+            "curveType": 0,
+            "domainMode": 0,
+            "playbackMode": 1,
+            "originX": 0.0,
+            "originY": 0.0,
+            "rotation": 0.0,
+            "scaleX": 5.0,
+            "scaleY": 1.0,
+            "paramMin": 0.0,
+            "paramMax": 1.0,
+            "boundsXMin": -10.0,
+            "boundsXMax": 10.0,
+            "boundsYMin": -10.0,
+            "boundsYMax": 10.0,
+            "radius": 2.0,
+            "duration": 4.0,
+            "reverseDirection": false
+        }
+    },
+{
+        "position": {
+            "x": 73.11434936523438,
+            "y": -6.81956672668457
+        },
+        "size": {
+            "x": 2.34375,
+            "y": 0.34375
+        },
+        "rawGrayscaleColor": 255.0,
+        "trajectory": {
+            "enabled": true,
+            "curveType": 1,
+            "domainMode": 0,
+            "playbackMode": 0,
+            "originX": 79.84400177001953,
+            "originY": -8.25,
+            "rotation": 0.0,
+            "scaleX": 5.0,
+            "scaleY": 1.0,
+            "paramMin": -192.0,
+            "paramMax": 168.0,
+            "boundsXMin": -10.0,
+            "boundsXMax": 10.0,
+            "boundsYMin": -10.0,
+            "boundsYMax": 10.0,
+            "radius": 6.880000114440918,
+            "duration": 11.199999809265137,
+            "reverseDirection": false
+        }
+    },
+{
+        "position": {
+            "x": 75.43934631347656,
+            "y": -10.303924560546875
+        },
+        "size": {
+            "x": 2.1875,
+            "y": 0.3125
+        },
+        "rawGrayscaleColor": 128.0,
+        "trajectory": {
+            "enabled": true,
+            "curveType": 1,
+            "domainMode": 0,
+            "playbackMode": 0,
+            "originX": 79.84400177001953,
+            "originY": -8.25,
+            "rotation": 0.0,
+            "scaleX": 5.0,
+            "scaleY": 1.0,
+            "paramMin": -515.0,
+            "paramMax": -155.0,
+            "boundsXMin": -10.0,
+            "boundsXMax": 10.0,
+            "boundsYMin": -10.0,
+            "boundsYMax": 10.0,
+            "radius": 4.860000133514404,
+            "duration": 10.5,
+            "reverseDirection": true
+        }
+    }
+  ]
+}

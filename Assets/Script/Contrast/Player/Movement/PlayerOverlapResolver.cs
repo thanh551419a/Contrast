@@ -83,6 +83,24 @@ namespace Contrast.Player
                 if (overlapArea <= 0f)
                     continue;
 
+                // Top-surface contact guard: if the player's feet were at or above
+                // the platform's top surface before this frame's upward platform
+                // displacement (or within sub-millimeter floating-point skin tolerance),
+                // this is ground support rather than interior penetration.
+                float upwardPlatformDisp = 0f;
+                Trajectory traj = platform.GetComponent<Trajectory>();
+                if (traj != null && traj.IsEnabled && traj.FrameDisplacement.y > 0f)
+                {
+                    upwardPlatformDisp = traj.FrameDisplacement.y;
+                }
+
+                float effectiveTopY = platformBounds.Max.y - upwardPlatformDisp;
+                if (playerBounds.Min.y >= effectiveTopY - 0.001f &&
+                    playerBounds.Center.y > platformBounds.Max.y)
+                {
+                    continue;
+                }
+
                 anyOverlap = true;
 
                 float overlapPercent = overlapArea / playerArea * 100f;

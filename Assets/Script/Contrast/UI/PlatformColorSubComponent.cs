@@ -141,7 +141,7 @@ namespace Contrast.UI
 
             btnAll = CreateQuickButton(parent, newUiFunc, getFontFunc, "ALL 255",
                 new Vector2(btnStartX + btnSpacing * 3f, y), new Vector2(btnW, btnH),
-                new UnityEngine.Color(0.95f, 0.78f, 0.22f, 1f), UnityEngine.Color.black, () => SetRawColor(255f, true));
+                new UnityEngine.Color(0.20f, 0.26f, 0.32f, 1f), UnityEngine.Color.white, () => SetRawColor(255f, true));
 
             y -= 35f;
         }
@@ -262,7 +262,7 @@ namespace Contrast.UI
                 {
                     case LogicalColor.Universal:
                         swatchLabel.text = "ALL";
-                        swatchLabel.color = UnityEngine.Color.black;
+                        swatchLabel.color = UnityEngine.Color.white;
                         break;
                     case LogicalColor.White:
                         swatchLabel.text = "WHT";

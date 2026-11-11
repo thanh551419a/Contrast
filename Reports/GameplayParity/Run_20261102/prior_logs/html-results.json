@@ -1,0 +1,768 @@
+{
+  "coordinateSystem": "raw HTML top-left pixels",
+  "timing": "Chromium RAF clock controlled, original 1/120 fixed-step update unchanged; CDP physical-key pathway",
+  "results": [
+    {
+      "scenario": "idle",
+      "frames": 480,
+      "initial": {
+        "schemaVersion": 1,
+        "runId": "HTML-L01-idle",
+        "environment": "HTML",
+        "levelId": "L01",
+        "frameIndex": 1,
+        "simulationTime": 0.008333333333333333,
+        "deltaTime": 0.008333333333333333,
+        "event": "frame",
+        "objectId": "player",
+        "objectType": "Player",
+        "coordinateSystem": "HTML-top-left-pixels",
+        "position": {
+          "x": -571,
+          "y": 908
+        },
+        "size": {
+          "x": 38,
+          "y": 64
+        },
+        "grounded": true,
+        "groundedOn": null,
+        "movementState": "TUNING",
+        "phase": 1.5707963267948966,
+        "intensity": 0.5,
+        "velocity": {
+          "x": 0,
+          "y": 0
+        },
+        "gameState": "PLAY",
+        "checkpoint": 0,
+        "newtonStage": 0,
+        "newtonActive": false,
+        "newtonMarks": 0,
+        "collectibles": 0,
+        "before": {
+          "x": -571,
+          "y": 908
+        },
+        "appliedDisplacement": {
+          "x": 0,
+          "y": 0
+        },
+        "input": {
+          "held": [],
+          "pressed": [],
+          "x": {
+            "held": false,
+            "pressed": false,
+            "released": false
+          }
+        },
+        "observationPhase": "after-update",
+        "collision": {
+          "grounded": true,
+          "groundedOn": null
+        }
+      },
+      "final": {
+        "schemaVersion": 1,
+        "runId": "HTML-L01-idle",
+        "environment": "HTML",
+        "levelId": "L01",
+        "frameIndex": 480,
+        "simulationTime": 3.9999999999999885,
+        "deltaTime": 0.008333333333333333,
+        "event": "frame",
+        "objectId": "player",
+        "objectType": "Player",
+        "coordinateSystem": "HTML-top-left-pixels",
+        "position": {
+          "x": -571,
+          "y": 908
+        },
+        "size": {
+          "x": 38,
+          "y": 64
+        },
+        "grounded": true,
+        "groundedOn": null,
+        "movementState": "TUNING",
+        "phase": 1.5707963267948966,
+        "intensity": 0.5,
+        "velocity": {
+          "x": 0,
+          "y": 0
+        },
+        "gameState": "PLAY",
+        "checkpoint": 0,
+        "newtonStage": 0,
+        "newtonActive": false,
+        "newtonMarks": 0,
+        "collectibles": 0,
+        "before": {
+          "x": -571,
+          "y": 908
+        },
+        "appliedDisplacement": {
+          "x": 0,
+          "y": 0
+        },
+        "input": {
+          "held": [],
+          "pressed": [],
+          "x": {
+            "held": false,
+            "pressed": false,
+            "released": false
+          }
+        },
+        "observationPhase": "after-update",
+        "collision": {
+          "grounded": true,
+          "groundedOn": null
+        }
+      },
+      "events": [],
+      "errors": []
+    },
+    {
+      "scenario": "horizontal",
+      "frames": 480,
+      "initial": {
+        "schemaVersion": 1,
+        "runId": "HTML-L01-horizontal",
+        "environment": "HTML",
+        "levelId": "L01",
+        "frameIndex": 1,
+        "simulationTime": 0.008333333333333333,
+        "deltaTime": 0.008333333333333333,
+        "event": "frame",
+        "objectId": "player",
+        "objectType": "Player",
+        "coordinateSystem": "HTML-top-left-pixels",
+        "position": {
+          "x": -571,
+          "y": 908
+        },
+        "size": {
+          "x": 38,
+          "y": 64
+        },
+        "grounded": true,
+        "groundedOn": null,
+        "movementState": "TUNING",
+        "phase": 1.5707963267948966,
+        "intensity": 0.5,
+        "velocity": {
+          "x": 0,
+          "y": 0
+        },
+        "gameState": "PLAY",
+        "checkpoint": 0,
+        "newtonStage": 0,
+        "newtonActive": false,
+        "newtonMarks": 0,
+        "collectibles": 0,
+        "before": {
+          "x": -571,
+          "y": 908
+        },
+        "appliedDisplacement": {
+          "x": 0,
+          "y": 0
+        },
+        "input": {
+          "held": [],
+          "pressed": [],
+          "x": {
+            "held": false,
+            "pressed": false,
+            "released": false
+          }
+        },
+        "observationPhase": "after-update",
+        "collision": {
+          "grounded": true,
+          "groundedOn": null
+        }
+      },
+      "final": {
+        "schemaVersion": 1,
+        "runId": "HTML-L01-horizontal",
+        "environment": "HTML",
+        "levelId": "L01",
+        "frameIndex": 480,
+        "simulationTime": 3.9999999999999885,
+        "deltaTime": 0.008333333333333333,
+        "event": "frame",
+        "objectId": "player",
+        "objectType": "Player",
+        "coordinateSystem": "HTML-top-left-pixels",
+        "position": {
+          "x": -657.9791666666666,
+          "y": 908
+        },
+        "size": {
+          "x": 38,
+          "y": 64
+        },
+        "grounded": true,
+        "groundedOn": null,
+        "movementState": "TUNING",
+        "phase": 1.5707963267948966,
+        "intensity": 0.5,
+        "velocity": {
+          "x": 0,
+          "y": 0
+        },
+        "gameState": "PLAY",
+        "checkpoint": 0,
+        "newtonStage": 0,
+        "newtonActive": false,
+        "newtonMarks": 0,
+        "collectibles": 0,
+        "before": {
+          "x": -657.9791666666666,
+          "y": 908
+        },
+        "appliedDisplacement": {
+          "x": 0,
+          "y": 0
+        },
+        "input": {
+          "held": [],
+          "pressed": [],
+          "x": {
+            "held": false,
+            "pressed": false,
+            "released": false
+          }
+        },
+        "observationPhase": "after-update",
+        "collision": {
+          "grounded": true,
+          "groundedOn": null
+        }
+      },
+      "events": [
+        "KEY_DOWN",
+        "KEY_UP",
+        "KEY_DOWN",
+        "KEY_UP"
+      ],
+      "errors": []
+    },
+    {
+      "scenario": "jump",
+      "frames": 480,
+      "initial": {
+        "schemaVersion": 1,
+        "runId": "HTML-L01-jump",
+        "environment": "HTML",
+        "levelId": "L01",
+        "frameIndex": 1,
+        "simulationTime": 0.008333333333333333,
+        "deltaTime": 0.008333333333333333,
+        "event": "frame",
+        "objectId": "player",
+        "objectType": "Player",
+        "coordinateSystem": "HTML-top-left-pixels",
+        "position": {
+          "x": -571,
+          "y": 908
+        },
+        "size": {
+          "x": 38,
+          "y": 64
+        },
+        "grounded": true,
+        "groundedOn": null,
+        "movementState": "TUNING",
+        "phase": 1.5707963267948966,
+        "intensity": 0.5,
+        "velocity": {
+          "x": 0,
+          "y": 0
+        },
+        "gameState": "PLAY",
+        "checkpoint": 0,
+        "newtonStage": 0,
+        "newtonActive": false,
+        "newtonMarks": 0,
+        "collectibles": 0,
+        "before": {
+          "x": -571,
+          "y": 908
+        },
+        "appliedDisplacement": {
+          "x": 0,
+          "y": 0
+        },
+        "input": {
+          "held": [],
+          "pressed": [],
+          "x": {
+            "held": false,
+            "pressed": false,
+            "released": false
+          }
+        },
+        "observationPhase": "after-update",
+        "collision": {
+          "grounded": true,
+          "groundedOn": null
+        }
+      },
+      "final": {
+        "schemaVersion": 1,
+        "runId": "HTML-L01-jump",
+        "environment": "HTML",
+        "levelId": "L01",
+        "frameIndex": 480,
+        "simulationTime": 3.9999999999999885,
+        "deltaTime": 0.008333333333333333,
+        "event": "frame",
+        "objectId": "player",
+        "objectType": "Player",
+        "coordinateSystem": "HTML-top-left-pixels",
+        "position": {
+          "x": -571,
+          "y": 908
+        },
+        "size": {
+          "x": 38,
+          "y": 64
+        },
+        "grounded": true,
+        "groundedOn": null,
+        "movementState": "TUNING",
+        "phase": 1.5707963267948966,
+        "intensity": 0.5,
+        "velocity": {
+          "x": 0,
+          "y": 0
+        },
+        "gameState": "PLAY",
+        "checkpoint": 0,
+        "newtonStage": 0,
+        "newtonActive": false,
+        "newtonMarks": 0,
+        "collectibles": 0,
+        "before": {
+          "x": -571,
+          "y": 908
+        },
+        "appliedDisplacement": {
+          "x": 0,
+          "y": 0
+        },
+        "input": {
+          "held": [],
+          "pressed": [],
+          "x": {
+            "held": false,
+            "pressed": false,
+            "released": false
+          }
+        },
+        "observationPhase": "after-update",
+        "collision": {
+          "grounded": true,
+          "groundedOn": null
+        }
+      },
+      "events": [
+        "KEY_DOWN",
+        "KEY_UP"
+      ],
+      "errors": []
+    },
+    {
+      "scenario": "combined",
+      "frames": 480,
+      "initial": {
+        "schemaVersion": 1,
+        "runId": "HTML-L01-combined",
+        "environment": "HTML",
+        "levelId": "L01",
+        "frameIndex": 1,
+        "simulationTime": 0.008333333333333333,
+        "deltaTime": 0.008333333333333333,
+        "event": "frame",
+        "objectId": "player",
+        "objectType": "Player",
+        "coordinateSystem": "HTML-top-left-pixels",
+        "position": {
+          "x": -571,
+          "y": 908
+        },
+        "size": {
+          "x": 38,
+          "y": 64
+        },
+        "grounded": true,
+        "groundedOn": null,
+        "movementState": "TUNING",
+        "phase": 1.5707963267948966,
+        "intensity": 0.5,
+        "velocity": {
+          "x": 0,
+          "y": 0
+        },
+        "gameState": "PLAY",
+        "checkpoint": 0,
+        "newtonStage": 0,
+        "newtonActive": false,
+        "newtonMarks": 0,
+        "collectibles": 0,
+        "before": {
+          "x": -571,
+          "y": 908
+        },
+        "appliedDisplacement": {
+          "x": 0,
+          "y": 0
+        },
+        "input": {
+          "held": [],
+          "pressed": [],
+          "x": {
+            "held": false,
+            "pressed": false,
+            "released": false
+          }
+        },
+        "observationPhase": "after-update",
+        "collision": {
+          "grounded": true,
+          "groundedOn": null
+        }
+      },
+      "final": {
+        "schemaVersion": 1,
+        "runId": "HTML-L01-combined",
+        "environment": "HTML",
+        "levelId": "L01",
+        "frameIndex": 480,
+        "simulationTime": 3.9999999999999885,
+        "deltaTime": 0.008333333333333333,
+        "event": "frame",
+        "objectId": "player",
+        "objectType": "Player",
+        "coordinateSystem": "HTML-top-left-pixels",
+        "position": {
+          "x": -303,
+          "y": 908
+        },
+        "size": {
+          "x": 38,
+          "y": 64
+        },
+        "grounded": true,
+        "groundedOn": null,
+        "movementState": "TUNING",
+        "phase": 1.5707963267948966,
+        "intensity": 0.5,
+        "velocity": {
+          "x": 0,
+          "y": 0
+        },
+        "gameState": "PLAY",
+        "checkpoint": 0,
+        "newtonStage": 0,
+        "newtonActive": false,
+        "newtonMarks": 0,
+        "collectibles": 0,
+        "before": {
+          "x": -303,
+          "y": 908
+        },
+        "appliedDisplacement": {
+          "x": 0,
+          "y": 0
+        },
+        "input": {
+          "held": [],
+          "pressed": [],
+          "x": {
+            "held": false,
+            "pressed": false,
+            "released": false
+          }
+        },
+        "observationPhase": "after-update",
+        "collision": {
+          "grounded": true,
+          "groundedOn": null
+        }
+      },
+      "events": [
+        "KEY_DOWN",
+        "KEY_DOWN",
+        "KEY_UP",
+        "KEY_UP"
+      ],
+      "errors": []
+    },
+    {
+      "scenario": "phase",
+      "frames": 480,
+      "initial": {
+        "schemaVersion": 1,
+        "runId": "HTML-L01-phase",
+        "environment": "HTML",
+        "levelId": "L01",
+        "frameIndex": 1,
+        "simulationTime": 0.008333333333333333,
+        "deltaTime": 0.008333333333333333,
+        "event": "frame",
+        "objectId": "player",
+        "objectType": "Player",
+        "coordinateSystem": "HTML-top-left-pixels",
+        "position": {
+          "x": -571,
+          "y": 908
+        },
+        "size": {
+          "x": 38,
+          "y": 64
+        },
+        "grounded": true,
+        "groundedOn": null,
+        "movementState": "TUNING",
+        "phase": 1.5707963267948966,
+        "intensity": 0.5,
+        "velocity": {
+          "x": 0,
+          "y": 0
+        },
+        "gameState": "PLAY",
+        "checkpoint": 0,
+        "newtonStage": 0,
+        "newtonActive": false,
+        "newtonMarks": 0,
+        "collectibles": 0,
+        "before": {
+          "x": -571,
+          "y": 908
+        },
+        "appliedDisplacement": {
+          "x": 0,
+          "y": 0
+        },
+        "input": {
+          "held": [],
+          "pressed": [],
+          "x": {
+            "held": false,
+            "pressed": false,
+            "released": false
+          }
+        },
+        "observationPhase": "after-update",
+        "collision": {
+          "grounded": true,
+          "groundedOn": null
+        }
+      },
+      "final": {
+        "schemaVersion": 1,
+        "runId": "HTML-L01-phase",
+        "environment": "HTML",
+        "levelId": "L01",
+        "frameIndex": 480,
+        "simulationTime": 3.9999999999999885,
+        "deltaTime": 0.008333333333333333,
+        "event": "frame",
+        "objectId": "player",
+        "objectType": "Player",
+        "coordinateSystem": "HTML-top-left-pixels",
+        "position": {
+          "x": -571,
+          "y": 908
+        },
+        "size": {
+          "x": 38,
+          "y": 64
+        },
+        "grounded": true,
+        "groundedOn": null,
+        "movementState": "TUNING",
+        "phase": 5.103981633974503,
+        "intensity": 0.6908304960261752,
+        "velocity": {
+          "x": 0,
+          "y": 0
+        },
+        "gameState": "PLAY",
+        "checkpoint": 0,
+        "newtonStage": 0,
+        "newtonActive": false,
+        "newtonMarks": 0,
+        "collectibles": 0,
+        "before": {
+          "x": -571,
+          "y": 908
+        },
+        "appliedDisplacement": {
+          "x": 0,
+          "y": 0
+        },
+        "input": {
+          "held": [],
+          "pressed": [],
+          "x": {
+            "held": false,
+            "pressed": false,
+            "released": false
+          }
+        },
+        "observationPhase": "after-update",
+        "collision": {
+          "grounded": true,
+          "groundedOn": null
+        }
+      },
+      "events": [
+        "KEY_DOWN",
+        "KEY_UP",
+        "PLAYER_DIE",
+        "state_changed",
+        "RESPAWN",
+        "state_changed",
+        "KEY_DOWN",
+        "KEY_UP"
+      ],
+      "errors": []
+    },
+    {
+      "scenario": "x_before_activation",
+      "frames": 480,
+      "initial": {
+        "schemaVersion": 1,
+        "runId": "HTML-L01-x_before_activation",
+        "environment": "HTML",
+        "levelId": "L01",
+        "frameIndex": 1,
+        "simulationTime": 0.008333333333333333,
+        "deltaTime": 0.008333333333333333,
+        "event": "frame",
+        "objectId": "player",
+        "objectType": "Player",
+        "coordinateSystem": "HTML-top-left-pixels",
+        "position": {
+          "x": -571,
+          "y": 908
+        },
+        "size": {
+          "x": 38,
+          "y": 64
+        },
+        "grounded": true,
+        "groundedOn": null,
+        "movementState": "TUNING",
+        "phase": 1.5707963267948966,
+        "intensity": 0.5,
+        "velocity": {
+          "x": 0,
+          "y": 0
+        },
+        "gameState": "PLAY",
+        "checkpoint": 0,
+        "newtonStage": 0,
+        "newtonActive": false,
+        "newtonMarks": 0,
+        "collectibles": 0,
+        "before": {
+          "x": -571,
+          "y": 908
+        },
+        "appliedDisplacement": {
+          "x": 0,
+          "y": 0
+        },
+        "input": {
+          "held": [],
+          "pressed": [],
+          "x": {
+            "held": false,
+            "pressed": false,
+            "released": false
+          }
+        },
+        "observationPhase": "after-update",
+        "collision": {
+          "grounded": true,
+          "groundedOn": null
+        }
+      },
+      "final": {
+        "schemaVersion": 1,
+        "runId": "HTML-L01-x_before_activation",
+        "environment": "HTML",
+        "levelId": "L01",
+        "frameIndex": 480,
+        "simulationTime": 3.9999999999999885,
+        "deltaTime": 0.008333333333333333,
+        "event": "frame",
+        "objectId": "player",
+        "objectType": "Player",
+        "coordinateSystem": "HTML-top-left-pixels",
+        "position": {
+          "x": -396.02083333333337,
+          "y": 908
+        },
+        "size": {
+          "x": 38,
+          "y": 64
+        },
+        "grounded": true,
+        "groundedOn": null,
+        "movementState": "TUNING",
+        "phase": 1.5707963267948966,
+        "intensity": 0.5,
+        "velocity": {
+          "x": 0,
+          "y": 0
+        },
+        "gameState": "PLAY",
+        "checkpoint": 0,
+        "newtonStage": 0,
+        "newtonActive": false,
+        "newtonMarks": 0,
+        "collectibles": 0,
+        "before": {
+          "x": -396.02083333333337,
+          "y": 908
+        },
+        "appliedDisplacement": {
+          "x": 0,
+          "y": 0
+        },
+        "input": {
+          "held": [],
+          "pressed": [],
+          "x": {
+            "held": false,
+            "pressed": false,
+            "released": false
+          }
+        },
+        "observationPhase": "after-update",
+        "collision": {
+          "grounded": true,
+          "groundedOn": null
+        }
+      },
+      "events": [
+        "KEY_DOWN",
+        "KEY_DOWN",
+        "KEY_UP",
+        "KEY_DOWN",
+        "KEY_DOWN",
+        "KEY_UP",
+        "KEY_UP"
+      ],
+      "errors": []
+    }
+  ]
+}

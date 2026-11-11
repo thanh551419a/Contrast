@@ -1184,6 +1184,32 @@ namespace Contrast.Level
             // Do not export legacy spawnPoint
             data.spawnPoint = null;
 
+            // Preserve Newton chamber configuration from working copy or current loaded level
+            NewtonChamberData sourceNewton = editorWorkingCopy?.newton ?? levelLoader?.CurrentLevelData?.newton;
+            if (sourceNewton != null)
+            {
+                data.newton = sourceNewton;
+            }
+
+            // Preserve collectibles and metadata
+            CollectibleData[] sourceCollectibles = editorWorkingCopy?.collectibles ?? levelLoader?.CurrentLevelData?.collectibles;
+            if (sourceCollectibles != null)
+            {
+                data.collectibles = sourceCollectibles;
+            }
+
+            string sourceLevelId = editorWorkingCopy?.levelId ?? levelLoader?.CurrentLevelData?.levelId;
+            if (!string.IsNullOrEmpty(sourceLevelId))
+            {
+                data.levelId = sourceLevelId;
+            }
+
+            string sourceLevelName = editorWorkingCopy?.levelName ?? levelLoader?.CurrentLevelData?.levelName;
+            if (!string.IsNullOrEmpty(sourceLevelName))
+            {
+                data.levelName = sourceLevelName;
+            }
+
             // Sanitize without modifying working active references
             data = LevelDataSanitizer.Sanitize(data, null, out _);
 

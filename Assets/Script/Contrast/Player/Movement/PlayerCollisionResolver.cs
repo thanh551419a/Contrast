@@ -28,6 +28,110 @@ namespace Contrast.Player
         [Header("Debug")]
         [SerializeField] private bool logCollision = true;
 
+        public CollisionResult ResolveCarrier(
+            Vector2 currentPosition,
+            Vector2 playerSize,
+            Vector2 playerOffset,
+            Vector2 carrierMove,
+            LogicalColor playerColor)
+        {
+            if (carrierMove == Vector2.zero)
+            {
+                return new CollisionResult(
+                    Vector2.zero,
+                    false,
+                    false,
+                    false,
+                    null);
+            }
+
+            Aabb current = Aabb.FromCenter(
+                currentPosition + playerOffset,
+                playerSize);
+
+            Vector2 resolvedPosition = currentPosition;
+            bool blockedX;
+            bool blockedY;
+            bool blockedDownward;
+            ColorPlatform downwardPlatform;
+
+            // When the supporting platform has an upward velocity component, its
+            // transform has already moved up in TrajectorySystem.UpdateAll().
+            // Resolve Y first so the rider is lifted onto the new top surface
+            // before horizontal carrier motion is tested against platform sides.
+            // When moving horizontally or downward, resolve X first while the
+            // rider is still at the previous top height, then lower Y.
+            if (carrierMove.y > 0f)
+            {
+                float resolvedCenterY = ResolveVertical(
+                    current,
+                    current.Center.y + carrierMove.y,
+                    carrierMove.y,
+                    playerSize,
+                    playerColor,
+                    false,
+                    out blockedDownward,
+                    out blockedY,
+                    out downwardPlatform);
+
+                resolvedPosition.y = resolvedCenterY - playerOffset.y;
+
+                Aabb afterY = Aabb.FromCenter(
+                    resolvedPosition + playerOffset,
+                    playerSize);
+
+                float resolvedCenterX = ResolveHorizontal(
+                    afterY,
+                    afterY.Center.x + carrierMove.x,
+                    carrierMove.x,
+                    playerSize,
+                    playerColor,
+                    false,
+                    out blockedX);
+
+                resolvedPosition.x = resolvedCenterX - playerOffset.x;
+            }
+            else
+            {
+                float resolvedCenterX = ResolveHorizontal(
+                    current,
+                    current.Center.x + carrierMove.x,
+                    carrierMove.x,
+                    playerSize,
+                    playerColor,
+                    false,
+                    out blockedX);
+
+                resolvedPosition.x = resolvedCenterX - playerOffset.x;
+
+                Aabb afterX = Aabb.FromCenter(
+                    resolvedPosition + playerOffset,
+                    playerSize);
+
+                float resolvedCenterY = ResolveVertical(
+                    afterX,
+                    afterX.Center.y + carrierMove.y,
+                    carrierMove.y,
+                    playerSize,
+                    playerColor,
+                    false,
+                    out blockedDownward,
+                    out blockedY,
+                    out downwardPlatform);
+
+                resolvedPosition.y = resolvedCenterY - playerOffset.y;
+            }
+
+            Vector2 finalMove = resolvedPosition - currentPosition;
+
+            return new CollisionResult(
+                finalMove,
+                blockedDownward,
+                blockedX,
+                blockedY,
+                downwardPlatform);
+        }
+
         public CollisionResult Resolve(
             Vector2 currentPosition,
             Vector2 playerSize,
@@ -88,7 +192,8 @@ namespace Contrast.Player
             {
                 groundedPlatform = downwardPlatform;
             }
-            else if (HasGroundSupport(finalBounds, playerColor, out ColorPlatform supportPlatform))
+            else if (intentMove.y <= collisionEpsilon &&
+                     HasGroundSupport(finalBounds, playerColor, out ColorPlatform supportPlatform))
             {
                 groundedPlatform = supportPlatform;
             }
@@ -125,7 +230,7 @@ namespace Contrast.Player
         {
             blocked = false;
 
-            if (Mathf.Abs(moveX) <= collisionEpsilon)
+            if (Mathf.Approximately(moveX, 0f))
                 return current.Center.x;
 
             Aabb candidate = current.WithCenterX(predictedX);
@@ -151,6 +256,16 @@ namespace Contrast.Player
 
                 if (!Aabb.Overlaps(candidate, platformBounds))
                     continue;
+
+                // If a rising platform swept across the player's feet this frame,
+                // do not treat its top surface as a horizontal wall before vertical
+                // resolution snaps the player onto the top surface.
+                float prevPlatformMaxY = GetPreviousPlatformMaxY(platform, platformBounds);
+                if (current.Min.y >= prevPlatformMaxY - collisionEpsilon &&
+                    current.Center.y > platformBounds.Max.y)
+                {
+                    continue;
+                }
 
                 if (logCollision)
                 {
@@ -220,7 +335,36 @@ namespace Contrast.Player
             downwardPlatform = null;
 
             if (Mathf.Abs(moveY) <= collisionEpsilon)
-                return current.Center.y;
+            {
+                float snapY = predictedY;
+                for (int i = 0; i < ColorPlatform.All.Count; i++)
+                {
+                    ColorPlatform platform = ColorPlatform.All[i];
+                    if (!IsBlockingPlatform(platform, playerColor))
+                        continue;
+
+                    Aabb platformBounds = FromPlatform(platform);
+                    if (!Aabb.Overlaps(current, platformBounds))
+                        continue;
+
+                    float prevMaxY = GetPreviousPlatformMaxY(platform, platformBounds);
+                    if (current.Min.y >= prevMaxY - collisionEpsilon &&
+                        current.Min.y < platformBounds.Max.y + collisionEpsilon &&
+                        current.Center.y > platformBounds.Max.y)
+                    {
+                        float candidateSnapY = platformBounds.Max.y + playerSize.y * 0.5f + collisionEpsilon;
+                        if (candidateSnapY >= snapY)
+                        {
+                            snapY = candidateSnapY;
+                            blocked = true;
+                            blockedDownward = true;
+                            downwardPlatform = platform;
+                        }
+                    }
+                }
+
+                return snapY;
+            }
 
             Aabb candidate = current.WithCenterY(predictedY);
             float bestY = predictedY;
@@ -256,7 +400,8 @@ namespace Contrast.Player
 
                 if (moveY < 0f)
                 {
-                    if (current.Min.y >= platformBounds.Max.y - collisionEpsilon)
+                    float prevPlatformMaxY = GetPreviousPlatformMaxY(platform, platformBounds);
+                    if (current.Min.y >= prevPlatformMaxY - collisionEpsilon)
                     {
                         correctedY = platformBounds.Max.y
                                       + playerSize.y * 0.5f
@@ -270,6 +415,16 @@ namespace Contrast.Player
                 }
                 else
                 {
+                    float prevPlatformMaxY = GetPreviousPlatformMaxY(platform, platformBounds);
+                    if (current.Min.y >= prevPlatformMaxY - groundEpsilon &&
+                        current.Center.y > platformBounds.Max.y)
+                    {
+                        float minTakeoffY = platformBounds.Max.y + playerSize.y * 0.5f + collisionEpsilon + moveY;
+                        if (bestY < minTakeoffY)
+                            bestY = minTakeoffY;
+                        continue;
+                    }
+
                     if (current.Max.y <= platformBounds.Min.y + collisionEpsilon)
                     {
                         correctedY = platformBounds.Min.y
@@ -298,6 +453,11 @@ namespace Contrast.Player
             }
 
             return bestY;
+        }
+
+        internal bool TryGetGroundSupport(Aabb playerBounds, LogicalColor playerColor, out ColorPlatform supportPlatform)
+        {
+            return HasGroundSupport(playerBounds, playerColor, out supportPlatform);
         }
 
         private bool HasGroundSupport(Aabb playerBounds, LogicalColor playerColor, out ColorPlatform supportPlatform)
@@ -350,6 +510,20 @@ namespace Contrast.Player
         {
             Rect rect = platform.GetAabb();
             return Aabb.FromCenter(rect.center, rect.size);
+        }
+
+        private static float GetPreviousPlatformMaxY(ColorPlatform platform, Aabb platformBounds)
+        {
+            if (platform != null)
+            {
+                Trajectory traj = platform.GetComponent<Trajectory>();
+                if (traj != null && traj.IsEnabled && traj.FrameDisplacement.y > 0f)
+                {
+                    return platformBounds.Max.y - traj.FrameDisplacement.y;
+                }
+            }
+
+            return platformBounds.Max.y;
         }
     }
 

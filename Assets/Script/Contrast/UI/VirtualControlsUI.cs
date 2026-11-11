@@ -272,6 +272,7 @@ namespace Contrast.UI
             outline.effectDistance = new Vector2(1.5f, -1.5f);
 
             Button btn = btnGo.AddComponent<Button>();
+            btn.navigation = new Navigation { mode = Navigation.Mode.None };
             btn.targetGraphic = img;
             btn.onClick.AddListener(() => onTap?.Invoke());
 

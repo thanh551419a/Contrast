@@ -44,10 +44,13 @@ namespace Contrast.Presentation
         private static readonly Color BlackBottom = new Color(0.051f, 0.078f, 0.122f, 1f);
         private static readonly Color BlackBorder = new Color(0.322f, 0.380f, 0.451f, 0.35f);
 
-        // Universal: #f5c738 -> #d49b1a
-        private static readonly Color UniversalTop = new Color(0.961f, 0.780f, 0.220f, 1f);
-        private static readonly Color UniversalBottom = new Color(0.831f, 0.608f, 0.102f, 1f);
-        private static readonly Color UniversalBorder = new Color(1f, 0.88f, 0.45f, 0.85f);
+        // Universal / Structural FIXED (255): Gray-Blue #28323b -> #151c24 matching HTML drawObject (c.structural)
+        public static readonly Color UniversalTop = new Color(0.157f, 0.196f, 0.231f, 1f);    // #28323b
+        public static readonly Color UniversalBottom = new Color(0.082f, 0.110f, 0.141f, 1f); // #151c24
+        public static readonly Color UniversalBorder = new Color(0.835f, 0.882f, 0.910f, 0.55f); // rgba(213,225,232,0.55)
+
+        public Color CurrentBorderColor => borderRenderer != null ? borderRenderer.color : Color.clear;
+        public Sprite CurrentSurfaceSprite => surfaceRenderer != null ? surfaceRenderer.sprite : null;
 
         // Cached procedural sprites
         private static Sprite cachedWhiteSprite;
@@ -114,6 +117,8 @@ namespace Contrast.Presentation
                 }
             }
 
+            Material unlitMat = PlayerVisualPresentation.GetSharedUnlitMaterial();
+
             // Surface child
             if (surfaceRenderer == null)
             {
@@ -123,6 +128,7 @@ namespace Contrast.Presentation
                 surfaceRenderer = surfaceGo.GetComponent<SpriteRenderer>();
                 if (surfaceRenderer == null)
                     surfaceRenderer = surfaceGo.AddComponent<SpriteRenderer>();
+                if (unlitMat != null) surfaceRenderer.sharedMaterial = unlitMat;
                 surfaceRenderer.sortingOrder = 0;
             }
 
@@ -137,6 +143,7 @@ namespace Contrast.Presentation
                     borderRenderer = borderGo.AddComponent<SpriteRenderer>();
                 borderRenderer.sprite = GetBorderSprite();
                 borderRenderer.drawMode = SpriteDrawMode.Sliced;
+                if (unlitMat != null) borderRenderer.sharedMaterial = unlitMat;
                 borderRenderer.sortingOrder = 1;
             }
 
@@ -151,6 +158,7 @@ namespace Contrast.Presentation
                     resonanceRenderer = resGo.AddComponent<SpriteRenderer>();
                 resonanceRenderer.sprite = GetBorderSprite();
                 resonanceRenderer.drawMode = SpriteDrawMode.Sliced;
+                if (unlitMat != null) resonanceRenderer.sharedMaterial = unlitMat;
                 resonanceRenderer.sortingOrder = 2;
                 resonanceRenderer.color = new Color(0.93f, 0.96f, 0.98f, 0f);
             }
@@ -184,7 +192,14 @@ namespace Contrast.Presentation
             lastRenderedSize = size;
             lastRenderedColor = raw;
 
-            if (platform.IsUniversal || raw >= 254.5f)
+            if (gameObject.name.Contains("OrbitPlatform_K"))
+            {
+                surfaceRenderer.sprite = GetWhiteSprite();
+                surfaceRenderer.color = Color.white;
+                if (borderRenderer != null)
+                    borderRenderer.color = WhiteBorder;
+            }
+            else if (platform.IsUniversal || raw >= 254.5f)
             {
                 surfaceRenderer.sprite = GetUniversalSprite();
                 surfaceRenderer.color = Color.white;
@@ -378,13 +393,16 @@ namespace Contrast.Presentation
             };
 
             Color[] pixels = new Color[w * h];
+            Color hatchTint = new Color(0.875f, 0.910f, 0.929f, 1f); // #dfe8ed
             for (int y = 0; y < h; y++)
             {
                 float t = (float)y / (h - 1);
                 Color baseGrad = Color.Lerp(UniversalBottom, UniversalTop, t);
                 for (int x = 0; x < w; x++)
                 {
-                    pixels[y * w + x] = baseGrad;
+                    // Subtle structural diagonal hatch lines matching HTML c.structural hatch
+                    bool isHatch = ((x - y + 128) % 20) < 2;
+                    pixels[y * w + x] = isHatch ? Color.Lerp(baseGrad, hatchTint, 0.16f) : baseGrad;
                 }
             }
 

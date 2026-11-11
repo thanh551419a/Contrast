@@ -13,7 +13,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("ContrastTests")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+31511fb25d149fe32f7c5e4f945cc26d79feaade")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+497c601d3f52095df712228c9e69a024d08ae23c")]
 [assembly: System.Reflection.AssemblyProductAttribute("ContrastTests")]
 [assembly: System.Reflection.AssemblyTitleAttribute("ContrastTests")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]

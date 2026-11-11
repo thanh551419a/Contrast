@@ -1,0 +1,28 @@
+{
+  "executedBy": "qa_release",
+  "tests": [
+    {
+      "levelId": "L01",
+      "platforms": 16,
+      "collectibles": 2,
+      "result": "PASS",
+      "scope": "JSON parse, collectible conversion, unrelated gameplay data preserved"
+    },
+    {
+      "levelId": "L02",
+      "platforms": 15,
+      "collectibles": 2,
+      "result": "PASS",
+      "scope": "JSON parse, collectible conversion, unrelated gameplay data preserved"
+    },
+    {
+      "levelId": "L03",
+      "platforms": 27,
+      "collectibles": 3,
+      "result": "PASS",
+      "scope": "JSON parse, collectible conversion, unrelated gameplay data preserved"
+    }
+  ],
+  "runtimeCollectibles": "MISSING: no data.collectibles consumer in LevelLoader; source inspection only",
+  "totalCollectibles": 7
+}

@@ -1,0 +1,29 @@
+{
+  "mode": "Idle",
+  "frameCount": 120,
+  "columns": 8,
+  "cellSize": 256,
+  "duration": 2.4,
+  "fps": 50,
+  "pivot": [
+    0.5,
+    0.125
+  ],
+  "pixelsPerUnit": 128,
+  "rootMotion": false,
+  "parameters": {
+    "idle": 2.4,
+    "run": 0.64,
+    "anticipation": 0.06,
+    "air": 0.7,
+    "land": 0.18,
+    "rest": 0.28,
+    "breath": 0.018,
+    "bounce": 3.5,
+    "lean": 9,
+    "squash": 0.2,
+    "stretch": 0.13,
+    "height": 68,
+    "easing": "smooth"
+  }
+}

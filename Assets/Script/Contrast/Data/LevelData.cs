@@ -28,6 +28,9 @@ namespace Contrast.Data
         // Collectibles (Quang Điểm)
         public CollectibleData[] collectibles;
 
+        // Configurable fixed world-space vertical fall death coordinate
+        public float deathY = -50f;
+
         // Level metadata
         public string levelId;
         public string levelName;

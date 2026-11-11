@@ -107,3 +107,6 @@ InitTestScene*.unity*
 
 # Auto-generated cache in Assets folder
 /[Aa]ssets/[Ss]ceneDependencyCache*
+# Large runtime trace logs (>100MB)
+Reports/GameplayParity/Run_20261102/Unity-*.jsonl
+Reports/Antigravity/*.jsonl

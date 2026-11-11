@@ -1,17 +1,17 @@
 {
   "format": 1,
   "restore": {
-    "Y:\\Contrast\\My project\\Tests\\ContrastTests\\ContrastTests.csproj": {}
+    "y:\\Contrast\\My project\\Tests\\ContrastTests\\ContrastTests.csproj": {}
   },
   "projects": {
-    "Y:\\Contrast\\My project\\Tests\\ContrastTests\\ContrastTests.csproj": {
+    "y:\\Contrast\\My project\\Tests\\ContrastTests\\ContrastTests.csproj": {
       "version": "1.0.0",
       "restore": {
-        "projectUniqueName": "Y:\\Contrast\\My project\\Tests\\ContrastTests\\ContrastTests.csproj",
+        "projectUniqueName": "y:\\Contrast\\My project\\Tests\\ContrastTests\\ContrastTests.csproj",
         "projectName": "ContrastTests",
-        "projectPath": "Y:\\Contrast\\My project\\Tests\\ContrastTests\\ContrastTests.csproj",
+        "projectPath": "y:\\Contrast\\My project\\Tests\\ContrastTests\\ContrastTests.csproj",
         "packagesPath": "C:\\Users\\thanh\\.nuget\\packages\\",
-        "outputPath": "Y:\\Contrast\\My project\\Tests\\ContrastTests\\obj\\",
+        "outputPath": "y:\\Contrast\\My project\\Tests\\ContrastTests\\obj\\",
         "projectStyle": "PackageReference",
         "fallbackFolders": [
           "C:\\Program Files (x86)\\Microsoft Visual Studio\\Shared\\NuGetPackages"

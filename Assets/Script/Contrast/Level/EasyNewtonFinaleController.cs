@@ -80,6 +80,22 @@ namespace Contrast.Level
         public float RevealTimer { get; private set; }
         public bool IsRevealActive => CurrentStep == NewtonFinaleStep.Reveal;
         public bool IsComplete => CurrentStep == NewtonFinaleStep.Complete;
+        public bool DockActive => dockActive;
+        public string OrbitStartMode => orbitStartMode;
+        public Trajectory TrajK => trajK;
+        public Trajectory TrajI => trajI;
+
+        public void TriggerDock()
+        {
+            if (!dockActive)
+            {
+                dockActive = true;
+                if (trajK != null) trajK.SetTrajectoryEnabled(true);
+                if (trajI != null) trajI.SetTrajectoryEnabled(true);
+                Debug.Log("[NEWTON_FINALE] Dock triggered explicitly -> Orbit motion started.");
+                LogCameraDiagnostics();
+            }
+        }
 
         // Calculation result
         public float MeasuredB_units { get; private set; }
@@ -120,6 +136,119 @@ namespace Contrast.Level
         private PlayerController player;
         private CameraFollow cameraFollow;
         private bool isZoneActive;
+
+        // Sequential Target Colliders (Target 1: K, Target 2: I, Target 3: K')
+        private readonly GameObject[] targetColliderGos = new GameObject[3];
+        private readonly BoxCollider2D[] targetColliders = new BoxCollider2D[3];
+        private readonly bool[] targetInteractionEnabled = new bool[3];
+        private readonly bool[] targetCompleted = new bool[3];
+        private int lastInputMarkFrame = -1;
+        private int markEventSequence = 0;
+
+        public int CurrentTargetIndex => CurrentStep switch
+        {
+            NewtonFinaleStep.CaptureK => 0,
+            NewtonFinaleStep.CaptureI => 1,
+            NewtonFinaleStep.CaptureKp => 2,
+            _ => 3
+        };
+
+        public int MarkEventSequence => markEventSequence;
+        public string LastMarkRejectionReason { get; private set; } = "NONE";
+
+        public bool IsTargetInteractionEnabled(int targetIndex)
+        {
+            return targetIndex >= 0 && targetIndex < 3 && targetInteractionEnabled[targetIndex];
+        }
+
+        public bool IsTargetCompleted(int targetIndex)
+        {
+            return targetIndex >= 0 && targetIndex < 3 && targetCompleted[targetIndex];
+        }
+
+        public BoxCollider2D GetTargetCollider(int targetIndex)
+        {
+            return (targetIndex >= 0 && targetIndex < 3) ? targetColliders[targetIndex] : null;
+        }
+
+        public void ComputeNewtonCameraFraming(out Vector3 fixedWorldCenter, out float orthoSize)
+        {
+            // HTML prototype (newtonViewLayout in CONTRAST_3_LEVELS_Newton_Fixed_Windowed.html):
+            // Fixed world-space camera anchored on Newton center O = (cx, cy), scaled so the outer dark ring k
+            // and all 3 targets (K, I, K') plus orbiting platforms K & I remain simultaneously inside the frame.
+            float rK = GetRadiusForOrder(fringeOrderK);
+            fixedWorldCenter = new Vector3(centerO.x, centerO.y, -10f);
+            orthoSize = Mathf.Max(8.6f, (rK + 0.70f) / 0.89f);
+        }
+
+        /// <summary>
+        /// Identifies the terrain platform immediately before the Newton Ring section
+        /// and returns its authoritative world-space AABB left boundary (platformBounds.min.x).
+        /// </summary>
+        public void FindPreNewtonPlatform(out ColorPlatform preNewtonPlat, out float thresholdX)
+        {
+            preNewtonPlat = null;
+            float rK = GetRadiusForOrder(fringeOrderK);
+            float ringLeftX = centerO.x - rK;
+            float bestCenterX = float.NegativeInfinity;
+
+            List<ColorPlatform> allPlats = ColorPlatform.All;
+            for (int i = 0; i < allPlats.Count; i++)
+            {
+                ColorPlatform p = allPlats[i];
+                if (p == null || p == platformK || p == platformI)
+                    continue;
+
+                float px = p.Position.x;
+                if (px < ringLeftX && px > bestCenterX)
+                {
+                    bestCenterX = px;
+                    preNewtonPlat = p;
+                }
+            }
+
+            if (preNewtonPlat != null)
+            {
+                thresholdX = preNewtonPlat.GetAabb().xMin;
+            }
+            else
+            {
+                // Authoritative pre-Newton platform left boundary fallback when terrain platforms
+                // are not instantiated in isolated unit tests:
+                // L02 (k=4): 67.617188 - 1.953125 * 0.5 = 66.6406255f
+                // L01 (k=6): 68.414062 - 2.890625 * 0.5 = 66.9687495f
+                // L03 (k=7): 65.75 - 6.84375 * 0.5      = 62.3281250f
+                thresholdX = fringeOrderK switch
+                {
+                    4 => 67.617188f - 1.953125f * 0.5f,
+                    6 => 68.414062f - 2.890625f * 0.5f,
+                    7 => 65.75f - 6.84375f * 0.5f,
+                    _ => centerO.x - ringScale * 3.84f
+                };
+            }
+        }
+
+        public float GetPreNewtonThresholdX()
+        {
+            if (cameraFollow != null && cameraFollow.HasNewtonThreshold)
+            {
+                return cameraFollow.PlatformLeftBoundaryX;
+            }
+            FindPreNewtonPlatform(out _, out float thresholdX);
+            return thresholdX;
+        }
+
+        public void SyncCameraTransitionConfig()
+        {
+            if (cameraFollow == null)
+                cameraFollow = FindAnyObjectByType<CameraFollow>();
+            if (cameraFollow == null)
+                return;
+
+            FindPreNewtonPlatform(out ColorPlatform prePlat, out float thresholdX);
+            ComputeNewtonCameraFraming(out Vector3 fixedCenter, out float maxOrthoSize);
+            cameraFollow.ConfigureNewtonTransition(prePlat, thresholdX, fixedCenter, 5.0f, maxOrthoSize);
+        }
 
         private void Awake()
         {
@@ -169,9 +298,16 @@ namespace Contrast.Level
 
             dockActive = (orbitStartMode != "dock");
 
+            if (player != null)
+            {
+                player.OnNewtonMarkRequested -= OnPlayerNewtonMarkInput;
+                player.OnNewtonMarkRequested += OnPlayerNewtonMarkInput;
+            }
+
             EnsureHierarchyRoots();
             SpawnApparatus();
             SpawnOrbitPlatforms();
+            BuildTargetColliders();
             BuildWorldVisuals();
             BuildHUD();
 
@@ -310,8 +446,152 @@ namespace Contrast.Level
             targetKpCrosshair.SetActive(false);
 
             // Labels above platforms
-            labelPlatformK = CreatePlatformFloatingLabel(platformK.transform, "k = 4");
-            labelPlatformI = CreatePlatformFloatingLabel(platformI.transform, "i = 2");
+            labelPlatformK = CreatePlatformFloatingLabel(platformK.transform, $"k = {fringeOrderK}");
+            labelPlatformI = CreatePlatformFloatingLabel(platformI.transform, $"i = {fringeOrderI}");
+        }
+
+        private void BuildTargetColliders()
+        {
+            string[] names =
+            {
+                "NewtonTargetCollider_1_K",
+                "NewtonTargetCollider_2_I",
+                "NewtonTargetCollider_3_Kp"
+            };
+
+            for (int idx = 0; idx < 3; idx++)
+            {
+                if (targetColliderGos[idx] != null)
+                    SafeDestroy(targetColliderGos[idx]);
+
+                GameObject go = new GameObject(names[idx]);
+                go.transform.SetParent(apparatusRoot != null ? apparatusRoot.transform : transform, false);
+                BoxCollider2D col = go.AddComponent<BoxCollider2D>();
+                col.isTrigger = true;
+                targetColliderGos[idx] = go;
+                targetColliders[idx] = col;
+            }
+
+            SyncTargetStatesAndColliders();
+        }
+
+        public Vector2 GetTargetWorldPosition(int targetIndex)
+        {
+            float rI = GetRadiusForOrder(fringeOrderI);
+            float rK = GetRadiusForOrder(fringeOrderK);
+
+            switch (targetIndex)
+            {
+                case 0:
+                    if (HasK)
+                        return PointK;
+                    if (platformK != null)
+                        return (Vector2)platformK.transform.position;
+                    return centerO + Vector2.left * rK;
+                case 1:
+                    return centerO - AxisU * rI;
+                case 2:
+                    return centerO - AxisU * rK;
+                default:
+                    return centerO;
+            }
+        }
+
+        public Rect GetTargetColliderWorldRect(int targetIndex)
+        {
+            SyncTargetCollidersGeometry();
+            if (targetIndex < 0 || targetIndex >= 3 || targetColliders[targetIndex] == null)
+                return new Rect(0f, 0f, 0f, 0f);
+
+            Vector2 center = (Vector2)targetColliderGos[targetIndex].transform.position + targetColliders[targetIndex].offset;
+            Vector2 size = targetColliders[targetIndex].size;
+            return new Rect(center.x - size.x * 0.5f, center.y - size.y * 0.5f, size.x, size.y);
+        }
+
+        public Rect GetPlayerColliderWorldRect()
+        {
+            if (player == null)
+                return new Rect(0f, 0f, 0f, 0f);
+
+            Vector2 pSize = new Vector2(
+                Mathf.Max(0.01f, Mathf.Abs(player.PlayerSize.x)),
+                Mathf.Max(0.01f, Mathf.Abs(player.PlayerSize.y)));
+            Vector2 pCenter = (Vector2)player.transform.position + player.PlayerOffset;
+            return new Rect(pCenter.x - pSize.x * 0.5f, pCenter.y - pSize.y * 0.5f, pSize.x, pSize.y);
+        }
+
+        public void SyncTargetCollidersGeometry()
+        {
+            float pHeight = player != null ? Mathf.Max(0.5f, Mathf.Abs(player.PlayerSize.y)) : 1.0f;
+
+            // Target 1 (Index 0): K capture region on outer orbit K
+            if (targetColliderGos[0] != null && targetColliders[0] != null)
+            {
+                Vector2 posK = GetTargetWorldPosition(0);
+                float centerOffsetY = platformSizeK.y * 0.5f + pHeight * 0.5f;
+                targetColliderGos[0].transform.position = new Vector3(posK.x, posK.y + centerOffsetY, 0f);
+                targetColliders[0].offset = Vector2.zero;
+                targetColliders[0].size = new Vector2(platformSizeK.x + 0.25f, pHeight + platformSizeK.y + 0.35f);
+            }
+
+            // Target 2 (Index 1): I capture region at centerO - AxisU * rI
+            if (targetColliderGos[1] != null && targetColliders[1] != null)
+            {
+                Vector2 posI = GetTargetWorldPosition(1);
+                float centerOffsetY = platformSizeI.y * 0.5f + pHeight * 0.5f;
+                targetColliderGos[1].transform.position = new Vector3(posI.x, posI.y + centerOffsetY * 0.5f, 0f);
+                targetColliders[1].offset = Vector2.zero;
+                targetColliders[1].size = new Vector2(toleranceI * 2f, toleranceI * 2f + pHeight + platformSizeI.y);
+            }
+
+            // Target 3 (Index 2): K' capture region at centerO - AxisU * rK
+            if (targetColliderGos[2] != null && targetColliders[2] != null)
+            {
+                Vector2 posKp = GetTargetWorldPosition(2);
+                float centerOffsetY = platformSizeK.y * 0.5f + pHeight * 0.5f;
+                targetColliderGos[2].transform.position = new Vector3(posKp.x, posKp.y + centerOffsetY * 0.5f, 0f);
+                targetColliders[2].offset = Vector2.zero;
+                targetColliders[2].size = new Vector2(toleranceKp * 2f, toleranceKp * 2f + pHeight + platformSizeK.y);
+            }
+        }
+
+        public void SyncTargetStatesAndColliders()
+        {
+            int activeIdx = CurrentTargetIndex;
+
+            targetCompleted[0] = HasK || activeIdx > 0;
+            targetCompleted[1] = HasI || activeIdx > 1;
+            targetCompleted[2] = HasKp || activeIdx > 2;
+
+            for (int i = 0; i < 3; i++)
+            {
+                bool enableInteraction = (i == activeIdx) && !targetCompleted[i] && CurrentStep < NewtonFinaleStep.Reveal;
+                targetInteractionEnabled[i] = enableInteraction;
+                if (targetColliders[i] != null)
+                {
+                    targetColliders[i].enabled = enableInteraction;
+                }
+            }
+
+            SyncTargetCollidersGeometry();
+        }
+
+        public bool DoesPlayerOverlapTargetCollider(int targetIndex, out Rect playerRect, out Rect targetRect)
+        {
+            SyncTargetStatesAndColliders();
+            playerRect = GetPlayerColliderWorldRect();
+            targetRect = GetTargetColliderWorldRect(targetIndex);
+
+            if (targetIndex < 0 || targetIndex >= 3)
+                return false;
+
+            if (!targetInteractionEnabled[targetIndex] || targetCompleted[targetIndex])
+                return false;
+
+            if (targetColliders[targetIndex] == null || !targetColliders[targetIndex].enabled)
+                return false;
+
+            return playerRect.width > 0f && targetRect.width > 0f && playerRect.Overlaps(targetRect);
         }
 
         private LineRenderer CreateLineObject(string name, int sortingOrder, float width, Color color)
@@ -457,7 +737,7 @@ namespace Contrast.Level
             headerGo.transform.SetParent(objCard.transform, false);
             Text header = headerGo.AddComponent<Text>();
             header.font = GetFont();
-            header.text = "NHIỆM VỤ · ĐO VÂN NEWTON (EASY FINALE)";
+            header.text = "NHIỆM VỤ · ĐO VÂN NEWTON";
             header.fontSize = 13;
             header.fontStyle = FontStyle.Bold;
             header.color = new Color(0.85f, 0.92f, 0.98f, 0.85f);
@@ -470,7 +750,7 @@ namespace Contrast.Level
             titleGo.transform.SetParent(objCard.transform, false);
             objectiveTitleText = titleGo.AddComponent<Text>();
             objectiveTitleText.font = GetFont();
-            objectiveTitleText.text = "CHỌN ĐIỂM K TRÊN THANH TRẮNG k = 4";
+            objectiveTitleText.text = $"CHỌN K TRÊN VÂN k = {fringeOrderK}";
             objectiveTitleText.fontSize = 19;
             objectiveTitleText.fontStyle = FontStyle.Bold;
             objectiveTitleText.color = new Color(0.96f, 0.98f, 1f, 1f);
@@ -483,7 +763,7 @@ namespace Contrast.Level
             subGo.transform.SetParent(objCard.transform, false);
             objectiveSubText = subGo.AddComponent<Text>();
             objectiveSubText.font = GetFont();
-            objectiveSubText.text = "Đứng trên thanh k · Nhấn Space để khóa K và xác lập trục K–O";
+            objectiveSubText.text = "Đứng trên thanh K và nhấn X để đánh dấu";
             objectiveSubText.fontSize = 14;
             objectiveSubText.color = new Color(0.72f, 0.82f, 0.90f, 0.75f);
             RectTransform srt = subGo.GetComponent<RectTransform>();
@@ -779,8 +1059,58 @@ namespace Contrast.Level
             return button;
         }
 
+        public void SetNewtonZoneActive(bool active)
+        {
+            if (active == isZoneActive && cameraFollow != null &&
+                ((active && cameraFollow.CurrentMode == CameraMode.NewtonFixed) ||
+                 (!active && cameraFollow.CurrentMode == CameraMode.NormalPlatformingFollow)))
+            {
+                return;
+            }
+
+            isZoneActive = active;
+            if (hudCanvasGo != null)
+                hudCanvasGo.SetActive(isZoneActive);
+
+            if (cameraFollow != null)
+            {
+                if (isZoneActive)
+                {
+                    if (cameraFollow.CurrentMode != CameraMode.NewtonResultReveal)
+                    {
+                        ComputeNewtonCameraFraming(out Vector3 fixedCenter, out float orthoSize);
+                        cameraFollow.SetNewtonFixed(fixedCenter, orthoSize, 3.2f);
+                        Debug.Log($"[CAMERA] Transition -> NewtonFixed (center=({fixedCenter.x:F2}, {fixedCenter.y:F2}), orthoSize={orthoSize:F2})");
+                        LogCameraDiagnostics();
+                    }
+                }
+                else
+                {
+                    if (cameraFollow.CurrentMode == CameraMode.NewtonFixed ||
+                        cameraFollow.CurrentMode == CameraMode.NewtonPlayerFollow)
+                    {
+                        cameraFollow.ResetToNormal(5.0f, 3.0f);
+                        Debug.Log("[CAMERA] Transition -> NormalPlatformingFollow (Player exited chamber)");
+                        LogCameraDiagnostics();
+                    }
+                }
+            }
+        }
+
+        private void OnPlayerNewtonMarkInput()
+        {
+            if (Application.isPlaying && Time.frameCount == lastInputMarkFrame)
+                return;
+
+            lastInputMarkFrame = Time.frameCount;
+            AttemptCapture();
+        }
+
         private void Update()
         {
+            if (GameManager.Instance == null || GameManager.Instance.State != GameState.Playing)
+                return;
+
             if (player == null)
             {
                 player = FindAnyObjectByType<PlayerController>();
@@ -790,26 +1120,36 @@ namespace Contrast.Level
             if (cameraFollow == null)
                 cameraFollow = FindAnyObjectByType<CameraFollow>();
 
-            // Handle proximity to finale chamber
+            // Handle proximity to finale chamber using the pre-Newton platform left boundary (Task E).
+            // Camera position and orthographicSize are updated exclusively by CameraFollow.ProcessCameraUpdate().
             float px = player.transform.position.x;
-            float chamberZoneThreshold = centerO.x - ringScale * 4.25f;
-            bool inZone = px >= chamberZoneThreshold;
-            if (inZone != isZoneActive)
+            float thresholdX = GetPreNewtonThresholdX();
+            if (px > thresholdX && !isZoneActive)
             {
-                isZoneActive = inZone;
+                isZoneActive = true;
                 if (hudCanvasGo != null)
-                    hudCanvasGo.SetActive(isZoneActive);
+                    hudCanvasGo.SetActive(true);
             }
+            else if (px < thresholdX && isZoneActive)
+            {
+                isZoneActive = false;
+                if (hudCanvasGo != null)
+                    hudCanvasGo.SetActive(false);
+            }
+
+            SyncTargetStatesAndColliders();
 
             // Check dock mode activation: starts orbit when player first lands on platform K
             if (orbitStartMode == "dock" && !dockActive)
             {
-                if (player != null && player.IsGrounded && player.GroundedPlatform == platformK)
+                bool isGroundedOnK = (player != null && player.IsGrounded && player.GroundedPlatform == platformK) || IsPlayerStandingOn(platformK);
+                if (isGroundedOnK)
                 {
                     dockActive = true;
-                    if (trajK != null) trajK.enabled = true;
-                    if (trajI != null) trajI.enabled = true;
+                    if (trajK != null) trajK.SetTrajectoryEnabled(true);
+                    if (trajI != null) trajI.SetTrajectoryEnabled(true);
                     Debug.Log("[NEWTON_FINALE] Player docked on K -> Orbit motion started.");
+                    LogCameraDiagnostics();
                 }
             }
 
@@ -842,15 +1182,18 @@ namespace Contrast.Level
             // Target crosshair positions
             UpdateTargetCrosshairs();
 
-            // Check point capture trigger (X key down or mobile mark button)
+            // Check point capture trigger (X key down or mobile mark button, deduplicated per frame)
             if (IsNewtonMarkPressedThisFrame())
             {
-                AttemptCapture();
+                OnPlayerNewtonMarkInput();
             }
         }
 
         private bool IsNewtonMarkPressedThisFrame()
         {
+            if (player != null && player.IsTestModeActive)
+                return false;
+
             if (player != null && player.NewtonMarkRequested)
                 return true;
 
@@ -890,6 +1233,8 @@ namespace Contrast.Level
 
         private void UpdateTargetCrosshairs()
         {
+            SyncTargetStatesAndColliders();
+
             if (!HasK)
             {
                 if (targetICrosshair != null) targetICrosshair.SetActive(false);
@@ -903,51 +1248,95 @@ namespace Contrast.Level
             Vector2 targetI = centerO - AxisU * rI;
             Vector2 targetKp = centerO - AxisU * rK;
 
+            // Keep target crosshairs visually visible once axis is established until each is captured;
+            // only their interaction collider eligibility is gated by CurrentTargetIndex.
             if (targetICrosshair != null)
             {
                 targetICrosshair.transform.position = new Vector3(targetI.x, targetI.y, -1f);
-                targetICrosshair.SetActive(CurrentStep == NewtonFinaleStep.CaptureI);
+                targetICrosshair.SetActive(!HasI && CurrentStep < NewtonFinaleStep.Reveal);
             }
 
             if (targetKpCrosshair != null)
             {
                 targetKpCrosshair.transform.position = new Vector3(targetKp.x, targetKp.y, -1f);
-                targetKpCrosshair.SetActive(CurrentStep == NewtonFinaleStep.CaptureKp);
+                targetKpCrosshair.SetActive(!HasKp && CurrentStep < NewtonFinaleStep.Reveal);
             }
         }
 
         public void AttemptCapture()
         {
-            if (CurrentStep >= NewtonFinaleStep.Reveal)
-                return;
+            markEventSequence++;
+            string eventId = $"X_{markEventSequence:D4}";
+            int frame = Time.frameCount;
 
-            if (player == null || !player.IsGrounded)
+            if (player != null && player.IsTestModeActive)
             {
+                LastMarkRejectionReason = "TEST_MODE_ACTIVE";
+                return;
+            }
+
+            if (CurrentStep >= NewtonFinaleStep.Reveal)
+            {
+                LastMarkRejectionReason = "ALREADY_COMPLETED";
+                Debug.Log($"[NEWTON_MARKING] frame={frame} eventId={eventId} target=NONE accepted=False reason=ALREADY_COMPLETED nextTarget=COMPLETE");
+                return;
+            }
+
+            if (player == null || player.State == PlayerState.Dead)
+            {
+                LastMarkRejectionReason = "PLAYER_DEAD_OR_NULL";
+                Debug.Log($"[NEWTON_MARKING] frame={frame} eventId={eventId} target={CurrentTargetIndex + 1} accepted=False reason=PLAYER_DEAD_OR_NULL nextTarget=UNCHANGED");
+                return;
+            }
+
+            SyncTargetStatesAndColliders();
+            int activeTargetIdx = CurrentTargetIndex;
+            bool overlapsActiveCollider = DoesPlayerOverlapTargetCollider(activeTargetIdx, out Rect pBounds, out Rect tBounds);
+
+            Debug.Log($"[NEWTON_INPUT] frame={frame} xPressedThisFrame=True xHeld=False eventId={eventId}");
+            Debug.Log($"[NEWTON_COLLISION] frame={frame} currentTarget={activeTargetIdx + 1} playerBounds={pBounds} targetBounds={tBounds} overlapping={overlapsActiveCollider}");
+
+            bool onK = (player.IsGrounded && player.GroundedPlatform == platformK) || IsPlayerStandingOn(platformK);
+            bool onI = (player.IsGrounded && player.GroundedPlatform == platformI) || IsPlayerStandingOn(platformI);
+
+            if (!onK && !onI)
+            {
+                LastMarkRejectionReason = "NOT_ON_ORBIT_PLATFORM";
+                Debug.Log($"[NEWTON_MARKING] frame={frame} eventId={eventId} target={activeTargetIdx + 1} accepted=False reason=NOT_ON_ORBIT_PLATFORM nextTarget=UNCHANGED");
                 ShowFeedback("HÃY ĐỨNG TRÊN THANH ĐỂ ĐO · STAND ON PLATFORM");
                 return;
             }
 
-            ColorPlatform currentPlat = player.GroundedPlatform;
+            ColorPlatform currentPlat = onK ? platformK : platformI;
 
             switch (CurrentStep)
             {
                 case NewtonFinaleStep.CaptureK:
-                    CaptureStepK(currentPlat);
+                    CaptureStepK(currentPlat, overlapsActiveCollider, eventId, frame);
                     break;
                 case NewtonFinaleStep.CaptureI:
-                    CaptureStepI(currentPlat);
+                    CaptureStepI(currentPlat, overlapsActiveCollider, eventId, frame);
                     break;
                 case NewtonFinaleStep.CaptureKp:
-                    CaptureStepKp(currentPlat);
+                    CaptureStepKp(currentPlat, overlapsActiveCollider, eventId, frame);
                     break;
             }
         }
 
-        private void CaptureStepK(ColorPlatform currentPlat)
+        private void CaptureStepK(ColorPlatform currentPlat, bool overlapsTarget1, string eventId, int frame)
         {
             if (currentPlat != platformK)
             {
+                LastMarkRejectionReason = "WRONG_TARGET_PLATFORM_I_DURING_TARGET_1";
+                Debug.Log($"[NEWTON_MARKING] frame={frame} eventId={eventId} target=1 accepted=False reason=WRONG_PLATFORM_I nextTarget=UNCHANGED");
                 ShowFeedback($"HÃY ĐỨNG TRÊN THANH K (k = {fringeOrderK})");
+                return;
+            }
+
+            if (!overlapsTarget1 || !IsTargetInteractionEnabled(0) || IsTargetCompleted(0))
+            {
+                LastMarkRejectionReason = "NO_TARGET_1_COLLIDER_OVERLAP";
+                Debug.Log($"[NEWTON_MARKING] frame={frame} eventId={eventId} target=1 accepted=False reason=NO_TARGET_1_COLLIDER_OVERLAP nextTarget=UNCHANGED");
                 return;
             }
 
@@ -975,13 +1364,20 @@ namespace Contrast.Level
             markerKGo.SetActive(true);
 
             CurrentStep = NewtonFinaleStep.CaptureI;
+            SyncTargetStatesAndColliders();
+            UpdateTargetCrosshairs();
+            LastMarkRejectionReason = "NONE";
+            Debug.Log($"[NEWTON_MARKING] frame={frame} eventId={eventId} target=1 accepted=True reason=TARGET_1_LOCKED nextTarget=2");
             ShowFeedback("ĐÃ KHÓA K · TRỤC K–O ĐƯỢC XÁC LẬP");
+            LogCameraDiagnostics();
         }
 
-        private void CaptureStepI(ColorPlatform currentPlat)
+        private void CaptureStepI(ColorPlatform currentPlat, bool overlapsTarget2, string eventId, int frame)
         {
             if (currentPlat != platformI)
             {
+                LastMarkRejectionReason = "WRONG_TARGET_PLATFORM_K_DURING_TARGET_2";
+                Debug.Log($"[NEWTON_MARKING] frame={frame} eventId={eventId} target=2 accepted=False reason=WRONG_PLATFORM_K nextTarget=UNCHANGED");
                 ShowFeedback($"HÃY ĐỨNG TRÊN THANH I (i = {fringeOrderI})");
                 return;
             }
@@ -992,7 +1388,7 @@ namespace Contrast.Level
             Vector2 curPos = platformI.transform.position;
             float dist = Vector2.Distance(curPos, targetI);
 
-            if (dist <= toleranceI)
+            if (overlapsTarget2 && IsTargetInteractionEnabled(1) && !IsTargetCompleted(1) && dist <= toleranceI)
             {
                 PointI = targetI;
                 HasI = true;
@@ -1002,18 +1398,27 @@ namespace Contrast.Level
 
                 int accuracy = Mathf.Max(0, Mathf.RoundToInt(100f * (1f - dist / toleranceI)));
                 CurrentStep = NewtonFinaleStep.CaptureKp;
+                SyncTargetStatesAndColliders();
+                UpdateTargetCrosshairs();
+                LastMarkRejectionReason = "NONE";
+                Debug.Log($"[NEWTON_MARKING] frame={frame} eventId={eventId} target=2 accepted=True reason=TARGET_2_LOCKED nextTarget=3");
                 ShowFeedback($"I ĐÃ KHÓA · {accuracy}%");
+                LogCameraDiagnostics();
             }
             else
             {
+                LastMarkRejectionReason = "NO_TARGET_2_COLLIDER_OVERLAP";
+                Debug.Log($"[NEWTON_MARKING] frame={frame} eventId={eventId} target=2 accepted=False reason=NO_TARGET_2_COLLIDER_OVERLAP nextTarget=UNCHANGED");
                 ShowFeedback("CHỜ I THẲNG HÀNG VỚI TRỤC K–O");
             }
         }
 
-        private void CaptureStepKp(ColorPlatform currentPlat)
+        private void CaptureStepKp(ColorPlatform currentPlat, bool overlapsTarget3, string eventId, int frame)
         {
             if (currentPlat != platformK)
             {
+                LastMarkRejectionReason = "WRONG_TARGET_PLATFORM_I_DURING_TARGET_3";
+                Debug.Log($"[NEWTON_MARKING] frame={frame} eventId={eventId} target=3 accepted=False reason=WRONG_PLATFORM_I nextTarget=UNCHANGED");
                 ShowFeedback($"HÃY TRỞ LẠI THANH K (k = {fringeOrderK})");
                 return;
             }
@@ -1024,7 +1429,7 @@ namespace Contrast.Level
             Vector2 curPos = platformK.transform.position;
             float dist = Vector2.Distance(curPos, targetKp);
 
-            if (dist <= toleranceKp)
+            if (overlapsTarget3 && IsTargetInteractionEnabled(2) && !IsTargetCompleted(2) && dist <= toleranceKp)
             {
                 PointKp = targetKp;
                 HasKp = true;
@@ -1033,11 +1438,15 @@ namespace Contrast.Level
                 markerKpGo.SetActive(true);
 
                 int accuracy = Mathf.Max(0, Mathf.RoundToInt(100f * (1f - dist / toleranceKp)));
+                LastMarkRejectionReason = "NONE";
+                Debug.Log($"[NEWTON_MARKING] frame={frame} eventId={eventId} target=3 accepted=True reason=TARGET_3_LOCKED nextTarget=COMPLETE");
                 ShowFeedback($"K′ ĐÃ KHÓA · {accuracy}% · BẮT ĐẦU HIỂN THỊ KẾT QUẢ ĐO");
                 StartRevealSequence();
             }
             else
             {
+                LastMarkRejectionReason = "NO_TARGET_3_COLLIDER_OVERLAP";
+                Debug.Log($"[NEWTON_MARKING] frame={frame} eventId={eventId} target=3 accepted=False reason=NO_TARGET_3_COLLIDER_OVERLAP nextTarget=UNCHANGED");
                 ShowFeedback("CHỜ K′ THẲNG HÀNG VỚI TRỤC K–O");
             }
         }
@@ -1046,6 +1455,7 @@ namespace Contrast.Level
         {
             CurrentStep = NewtonFinaleStep.Reveal;
             RevealTimer = 0f;
+            SyncTargetStatesAndColliders();
 
             if (player != null)
             {
@@ -1055,7 +1465,10 @@ namespace Contrast.Level
 
             if (cameraFollow != null)
             {
-                cameraFollow.SetOverride(new Vector3(centerO.x, centerO.y, -10f), 9.6f, 3.2f);
+                ComputeNewtonCameraFraming(out Vector3 fixedCenter, out float orthoSize);
+                cameraFollow.SetNewtonReveal(fixedCenter, orthoSize, 3.2f);
+                Debug.Log($"[CAMERA] Transition -> NewtonResultReveal (Marks complete: K->I->K', framing center O=({centerO.x:F2}, {centerO.y:F2}))");
+                LogCameraDiagnostics();
             }
 
             ComputePhysicalWavelength();
@@ -1145,9 +1558,20 @@ namespace Contrast.Level
             // Phase E — Result hold (2.55 - 5.6s), then Complete
             if (tm >= 5.6f)
             {
-                CurrentStep = NewtonFinaleStep.Complete;
-                if (completionPanelGo != null)
-                    completionPanelGo.SetActive(true);
+                if (CurrentStep != NewtonFinaleStep.Complete)
+                {
+                    CurrentStep = NewtonFinaleStep.Complete;
+                    if (GameManager.Instance != null && GameManager.Instance.CurrentEntryContext == GameplayEntryContext.Campaign)
+                    {
+                        GameManager.Instance.OnPlayerWon();
+                    }
+                    else
+                    {
+                        if (completionPanelGo != null)
+                            completionPanelGo.SetActive(true);
+                        GameManager.Instance?.OnPlayerWon();
+                    }
+                }
             }
         }
 
@@ -1172,10 +1596,15 @@ namespace Contrast.Level
         {
             Debug.Log("[NEWTON_FINALE] Return to Level Select clicked.");
             Teardown();
-            GameManager.Instance?.StartGame();
+            GameManager.Instance?.ReturnToMainMenu();
         }
 
         public void ResetState()
+        {
+            ResetState(false);
+        }
+
+        public void ResetState(bool preserveCameraInFlight)
         {
             CurrentStep = NewtonFinaleStep.CaptureK;
             HasK = false;
@@ -1200,13 +1629,35 @@ namespace Contrast.Level
             if (bottomBarGo != null) bottomBarGo.SetActive(true);
 
             if (cameraFollow != null)
-                cameraFollow.ClearOverride();
+            {
+                SyncCameraTransitionConfig();
+                if (!preserveCameraInFlight)
+                {
+                    cameraFollow.ResetToNormal();
+                }
+            }
 
             if (player != null)
                 player.SetInputEnabled(true);
 
-            if (trajK != null) trajK.ResetPhase();
-            if (trajI != null) trajI.ResetPhase();
+            dockActive = (orbitStartMode != "dock");
+            if (trajK != null)
+            {
+                trajK.SetTrajectoryEnabled(dockActive);
+                trajK.ResetPhase();
+            }
+            if (trajI != null)
+            {
+                trajI.SetTrajectoryEnabled(dockActive);
+                trajI.ResetPhase();
+            }
+
+            isZoneActive = false;
+            lastInputMarkFrame = -1;
+            LastMarkRejectionReason = "NONE";
+            SyncTargetStatesAndColliders();
+            if (hudCanvasGo != null)
+                hudCanvasGo.SetActive(false);
         }
 
         public void Teardown()
@@ -1214,10 +1665,17 @@ namespace Contrast.Level
             if (Instance == this)
                 Instance = null;
 
+            dockActive = false;
             PlayerInput.IsNewtonFinaleActive = false;
 
+            if (player != null)
+                player.OnNewtonMarkRequested -= OnPlayerNewtonMarkInput;
+
             if (cameraFollow != null)
-                cameraFollow.ClearOverride();
+            {
+                cameraFollow.ClearNewtonTransitionConfig();
+                cameraFollow.ResetToNormal();
+            }
 
             if (player != null)
                 player.SetInputEnabled(true);
@@ -1235,6 +1693,38 @@ namespace Contrast.Level
                 SafeDestroy(apparatusRoot);
 
             SafeDestroy(gameObject);
+        }
+
+        public string GetCurrentActiveRail()
+        {
+            if (player == null) return "None";
+            if (!player.IsGrounded) return "Air";
+            if (player.GroundedPlatform == platformK) return "K";
+            if (player.GroundedPlatform == platformI) return "I";
+            return "Ground";
+        }
+
+        public void LogCameraDiagnostics()
+        {
+            if (cameraFollow != null)
+            {
+                string diag = cameraFollow.GetDiagnosticsLog(GetCurrentActiveRail());
+                Debug.Log(diag);
+            }
+        }
+
+        private bool IsPlayerStandingOn(ColorPlatform plat)
+        {
+            if (player == null || plat == null) return false;
+            Rect platRect = plat.GetAabb();
+            Vector2 pPos = player.transform.position;
+            Vector2 pSize = player.PlayerSize;
+            float pBottom = pPos.y - pSize.y * 0.5f;
+            float pLeft = pPos.x - pSize.x * 0.5f;
+            float pRight = pPos.x + pSize.x * 0.5f;
+            bool hOverlap = pRight > platRect.xMin + 0.01f && pLeft < platRect.xMax - 0.01f;
+            bool vTouch = Mathf.Abs(pBottom - platRect.yMax) <= 0.2f && pPos.y >= platRect.yMax - 0.05f;
+            return hOverlap && vTouch;
         }
 
         private static void SafeDestroy(UnityEngine.Object obj)

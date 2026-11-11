@@ -1,0 +1,311 @@
+{
+  "startPos": {
+    "position": {
+      "x": 2.015625,
+      "y": -14.1875
+    },
+    "size": {
+      "x": 0.59375,
+      "y": 1.0
+    },
+    "color": 0.0
+  },
+  "checkPoint": [
+    {
+      "position": {
+        "x": 16.328125,
+        "y": -12.4375
+      },
+      "size": {
+        "x": 1.84375,
+        "y": 1.796875
+      },
+      "color": 127.0
+    },
+    {
+      "position": {
+        "x": 24.4375,
+        "y": -8.328125
+      },
+      "size": {
+        "x": 1.953125,
+        "y": 1.75
+      },
+      "color": 127.0
+    },
+    {
+      "position": {
+        "x": 38.421875,
+        "y": -3.15625
+      },
+      "size": {
+        "x": 1.953125,
+        "y": 1.71875
+      },
+      "color": 127.0
+    },
+    {
+      "position": {
+        "x": 55.640625,
+        "y": -3.203125
+      },
+      "size": {
+        "x": 1.90625,
+        "y": 1.734375
+      },
+      "color": 127.0
+    },
+    {
+      "position": {
+        "x": 67.617188,
+        "y": -8.734375
+      },
+      "size": {
+        "x": 1.5625,
+        "y": 1.640625
+      },
+      "color": 127.0
+    }
+  ],
+  "end": null,
+  "spawnPoint": null,
+  "cameraBoundary": {
+    "position": {
+      "x": 34.297,
+      "y": -7.937
+    },
+    "size": {
+      "x": 84.594,
+      "y": 28.625
+    }
+  },
+  "platforms": [
+    {
+      "position": {
+        "x": 5.625,
+        "y": -15.46875
+      },
+      "size": {
+        "x": 11.25,
+        "y": 1.5625
+      },
+      "rawGrayscaleColor": 212.0
+    },
+    {
+      "position": {
+        "x": 16.21875,
+        "y": -11.125
+      },
+      "size": {
+        "x": 7.125,
+        "y": 0.84375
+      },
+      "rawGrayscaleColor": 212.0
+    },
+    {
+      "position": {
+        "x": 16.21875,
+        "y": -13.53125
+      },
+      "size": {
+        "x": 7.125,
+        "y": 1.1875
+      },
+      "rawGrayscaleColor": 0.0
+    },
+    {
+      "position": {
+        "x": 25.945312,
+        "y": -9.1875
+      },
+      "size": {
+        "x": 7.109375,
+        "y": 0.71875
+      },
+      "rawGrayscaleColor": 212.0
+    },
+    {
+      "position": {
+        "x": 45.679688,
+        "y": -4.039062
+      },
+      "size": {
+        "x": 4.484375,
+        "y": 0.671875
+      },
+      "rawGrayscaleColor": 212.0
+    },
+    {
+      "position": {
+        "x": 37.867188,
+        "y": -4.015625
+      },
+      "size": {
+        "x": 5.265625,
+        "y": 0.71875
+      },
+      "rawGrayscaleColor": 0.0
+    },
+    {
+      "position": {
+        "x": 41.867188,
+        "y": -1.359375
+      },
+      "size": {
+        "x": 1.171875,
+        "y": 3.46875
+      },
+      "rawGrayscaleColor": 255.0
+    },
+    {
+      "position": {
+        "x": 31.953125,
+        "y": -7.359375
+      },
+      "size": {
+        "x": 3.59375,
+        "y": 0.75
+      },
+      "rawGrayscaleColor": 127.0
+    },
+    {
+      "position": {
+        "x": 35.117188,
+        "y": -5.90625
+      },
+      "size": {
+        "x": 2.734375,
+        "y": 0.71875
+      },
+      "rawGrayscaleColor": 212.0
+    },
+    {
+      "position": {
+        "x": 53.75,
+        "y": -4.039062
+      },
+      "size": {
+        "x": 9.6875,
+        "y": 0.671875
+      },
+      "rawGrayscaleColor": 212.0
+    },
+    {
+      "position": {
+        "x": 54.203125,
+        "y": -6.625
+      },
+      "size": {
+        "x": 4.6875,
+        "y": 0.71875
+      },
+      "rawGrayscaleColor": 0.0
+    },
+    {
+      "position": {
+        "x": 58.15625,
+        "y": -1.664062
+      },
+      "size": {
+        "x": 0.875,
+        "y": 4.078125
+      },
+      "rawGrayscaleColor": 212.0
+    },
+    {
+      "position": {
+        "x": 60.640625,
+        "y": -4.039062
+      },
+      "size": {
+        "x": 2.3125,
+        "y": 0.671875
+      },
+      "rawGrayscaleColor": 212.0
+    },
+    {
+      "position": {
+        "x": 67.617188,
+        "y": -9.640625
+      },
+      "size": {
+        "x": 1.953125,
+        "y": 0.8125
+      },
+      "rawGrayscaleColor": 255.0
+    },
+    {
+      "position": {
+        "x": 38.171875,
+        "y": -1.59375
+      },
+      "size": {
+        "x": 4.65625,
+        "y": 0.75
+      },
+      "rawGrayscaleColor": 127.0
+    }
+  ],
+  "newton": {
+    "cx": 5110.0,
+    "cy": 528.0,
+    "i": 2,
+    "k": 4,
+    "R": 1500.0,
+    "lambda": 550.0,
+    "orbitStart": "auto",
+    "rails": {
+      "K": {
+        "width": 150.0,
+        "period": 11.2,
+        "angleDeg": 192.0,
+        "direction": -1
+      },
+      "I": {
+        "width": 140.0,
+        "period": 10.5,
+        "angleDeg": 155.0,
+        "direction": 1
+      }
+    },
+    "enabled": true,
+    "vestibuleId": null
+  },
+  "collectibles": [
+    {
+      "id": "item_mvni3tly_1",
+      "kind": "collectible",
+      "x": 1042.0,
+      "y": 554.0,
+      "w": 26.0,
+      "h": 26.0,
+      "position": {
+        "x": 16.484375,
+        "y": -8.859375
+      },
+      "size": {
+        "x": 0.40625,
+        "y": 0.40625
+      }
+    },
+    {
+      "id": "L02_QD02_SECRET_UNDER_BLACK",
+      "kind": "collectible",
+      "x": 3450.0,
+      "y": 345.0,
+      "w": 26.0,
+      "h": 26.0,
+      "position": {
+        "x": 54.109375,
+        "y": -5.59375
+      },
+      "size": {
+        "x": 0.40625,
+        "y": 0.40625
+      }
+    }
+  ],
+  "deathY": -23.25,
+  "levelId": "L02",
+  "levelName": "Cầu thang ma"
+}

@@ -46,8 +46,71 @@ namespace Contrast.UI
             if (retryButton != null)
                 retryButton.gameObject.SetActive(allowRetry);
 
+            if (restartButton != null)
+            {
+                Text label = restartButton.transform.Find("Label")?.GetComponent<Text>();
+                Text sub = restartButton.transform.Find("SubLabel")?.GetComponent<Text>();
+                if (label != null) label.text = "RESTART";
+                if (sub != null) sub.text = "CHƠI LẠI TỪ ĐẦU";
+                restartButton.onClick.RemoveAllListeners();
+                restartButton.onClick.AddListener(OnRestartClicked);
+            }
+
+            if (returnButton != null)
+            {
+                Text label = returnButton.transform.Find("Label")?.GetComponent<Text>();
+                Text sub = returnButton.transform.Find("SubLabel")?.GetComponent<Text>();
+                if (label != null) label.text = "RETURN";
+                if (sub != null) sub.text = "QUAY LẠI";
+                returnButton.onClick.RemoveAllListeners();
+                returnButton.onClick.AddListener(OnReturnClicked);
+            }
+
             if (panel != null)
                 panel.SetActive(visible);
+        }
+
+        public void ShowCampaignComplete(UnityEngine.Events.UnityAction onPlayAgain, UnityEngine.Events.UnityAction onMainMenu)
+        {
+            if (titleText != null)
+                titleText.text = "CAMPAIGN COMPLETE";
+
+            if (subText != null)
+                subText.text = "CHÚC MỪNG! BẠN ĐÃ HOÀN THÀNH TOÀN BỘ 3 MÀN CHƠI CỦA CONTRAST";
+
+            if (retryButton != null)
+                retryButton.gameObject.SetActive(false);
+
+            if (restartButton != null)
+            {
+                restartButton.gameObject.SetActive(true);
+                Text label = restartButton.transform.Find("Label")?.GetComponent<Text>();
+                Text sub = restartButton.transform.Find("SubLabel")?.GetComponent<Text>();
+                if (label != null) label.text = "PLAY AGAIN";
+                if (sub != null) sub.text = "CHƠI LẠI TỪ ĐẦU (L01)";
+                restartButton.onClick.RemoveAllListeners();
+                if (onPlayAgain != null)
+                    restartButton.onClick.AddListener(onPlayAgain);
+                else
+                    restartButton.onClick.AddListener(OnRestartClicked);
+            }
+
+            if (returnButton != null)
+            {
+                returnButton.gameObject.SetActive(true);
+                Text label = returnButton.transform.Find("Label")?.GetComponent<Text>();
+                Text sub = returnButton.transform.Find("SubLabel")?.GetComponent<Text>();
+                if (label != null) label.text = "MAIN MENU";
+                if (sub != null) sub.text = "MENU CHÍNH";
+                returnButton.onClick.RemoveAllListeners();
+                if (onMainMenu != null)
+                    returnButton.onClick.AddListener(onMainMenu);
+                else
+                    returnButton.onClick.AddListener(OnReturnClicked);
+            }
+
+            if (panel != null)
+                panel.SetActive(true);
         }
 
         private void OnRestartClicked()

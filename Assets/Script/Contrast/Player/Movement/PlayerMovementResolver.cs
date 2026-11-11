@@ -37,15 +37,39 @@ namespace Contrast.Player
             float deltaTime,
             Vector2 riderMove = default)
         {
+            overlapResolver ??= GetComponent<PlayerOverlapResolver>();
+            collisionResolver ??= GetComponent<PlayerCollisionResolver>();
+
             Vector2 safeSize = new Vector2(
                 Mathf.Max(0.0001f, Mathf.Abs(playerSize.x)),
                 Mathf.Max(0.0001f, Mathf.Abs(playerSize.y)));
 
+            // 0. Pre-resolve supporting platform carrier displacement so that
+            // overlap evaluation and player self-movement operate in the
+            // post-carry reference frame (matching TrajectorySystem.UpdateAll).
+            Vector2 carrierMove = Vector2.zero;
+            bool carrierBlockedX = false;
+            bool carrierBlockedY = false;
+            if (riderMove != Vector2.zero)
+            {
+                CollisionResult carrierCollision = collisionResolver.ResolveCarrier(
+                    currentPosition,
+                    safeSize,
+                    playerOffset,
+                    riderMove,
+                    playerColor);
+                carrierMove = carrierCollision.FinalMove;
+                carrierBlockedX = carrierCollision.BlockedX;
+                carrierBlockedY = carrierCollision.BlockedY;
+            }
+
+            Vector2 carriedPosition = currentPosition + carrierMove;
+
             Aabb currentBounds = Aabb.FromCenter(
-                currentPosition + playerOffset,
+                carriedPosition + playerOffset,
                 safeSize);
 
-            // 1. Current overlap state.
+            // 1. Current overlap state (evaluated after carrier transport).
             OverlapResult overlap =
                 overlapResolver.Evaluate(currentBounds, playerColor);
 
@@ -64,7 +88,7 @@ namespace Contrast.Player
                     Vector2.zero);
             }
 
-            // 2. Build ONE final intent vector.
+            // 2. Build player self-intent vector and combined total intent.
             float controlMultiplier =
                 overlapResolver.GetControlMultiplier(overlap.IsPushingOut);
 
@@ -89,8 +113,11 @@ namespace Contrast.Player
                 ? overlap.PushDirection * pushSpeed * safeDeltaTime
                 : Vector2.zero;
 
+            Vector2 selfIntent =
+                adjustedInput + jumpMove + pushMove;
+
             Vector2 combinedIntent =
-                adjustedInput + jumpMove + pushMove + riderMove;
+                selfIntent + riderMove;
 
             if (logIntent)
             {
@@ -104,14 +131,18 @@ namespace Contrast.Player
                     $"combined={combinedIntent}");
             }
 
-            // 3. Predict + resolve that ONE vector.
+            // 3. Predict + resolve self-intent from the carried position.
             CollisionResult collision = collisionResolver.Resolve(
-                currentPosition,
+                carriedPosition,
                 safeSize,
                 playerOffset,
-                combinedIntent,
+                selfIntent,
                 playerColor,
                 overlap.IsPushingOut);
+
+            Vector2 finalMove = carrierMove + collision.FinalMove;
+            bool finalBlockedX = carrierBlockedX || collision.BlockedX;
+            bool finalBlockedY = carrierBlockedY || collision.BlockedY;
 
             if (logIntent)
             {
@@ -128,21 +159,21 @@ namespace Contrast.Player
                 Debug.Log(
                     $"[RESOLVE][RESULT] current={currentPosition} " +
                     $"combined={combinedIntent} " +
-                    $"final={collision.FinalMove} " +
-                    $"blockedX={collision.BlockedX} " +
-                    $"blockedY={collision.BlockedY} " +
+                    $"final={finalMove} " +
+                    $"blockedX={finalBlockedX} " +
+                    $"blockedY={finalBlockedY} " +
                     $"grounded={collision.IsGrounded}");
             }
 
             return new MovementResult(
-                collision.FinalMove,
+                finalMove,
                 collision.IsGrounded,
                 false,
                 overlap.IsPushingOut,
                 overlap.OverlapPercent,
                 overlap.PushDirection,
-                collision.BlockedX,
-                collision.BlockedY,
+                finalBlockedX,
+                finalBlockedY,
                 combinedIntent,
                 pushMove,
                 collision.GroundedPlatform);

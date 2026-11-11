@@ -105,6 +105,12 @@ namespace Contrast.Level
                 visualValue,
                 visualValue,
                 VisualAlpha);
+
+            // Task D: Hide checkpoint visuals during gameplay while preserving AABB overlap and respawn
+            if (type == LevelMarkerType.CheckPoint)
+            {
+                spriteRenderer.enabled = false;
+            }
         }
 
         internal bool Overlaps(Aabb playerBounds)
@@ -165,6 +171,98 @@ namespace Contrast.Level
         {
             Gizmos.color = UnityEngine.Color.cyan;
             Gizmos.DrawWireCube(transform.position, size);
+        }
+    }
+
+    /// <summary>
+    /// Runtime collectible (Quang Điểm) instantiated from LevelData.collectibles.
+    /// Evaluates contact against the Player's AABB during LevelLoader.ProcessPlayerInteractions.
+    /// </summary>
+    [DisallowMultipleComponent]
+    public sealed class QuangDiemItem : MonoBehaviour
+    {
+        public static readonly List<QuangDiemItem> All = new List<QuangDiemItem>();
+        public static int TotalCount { get; private set; }
+        public static int CollectedCount { get; private set; }
+        public static event System.Action<QuangDiemItem> OnCollected;
+
+        private string itemId;
+        private Vector2 basePosition;
+        private float radius = 0.25f; // HTML: r = 16 px / 64 px/unit = 0.25 units
+        private float bobPhase;
+        private bool collected;
+
+        public string ItemId => itemId;
+        public Vector2 BasePosition => basePosition;
+        public Vector2 Position => transform.position;
+        public float Radius => radius;
+        public float BobPhase
+        {
+            get => bobPhase;
+            set => bobPhase = value;
+        }
+        public bool IsCollected => collected;
+
+        public void Initialize(string id, Vector2 position, float itemRadius = 0.25f, float initialBobPhase = 0f)
+        {
+            itemId = string.IsNullOrEmpty(id) ? $"quang_{All.Count + 1}" : id;
+            basePosition = position;
+            radius = Mathf.Max(0.1f, itemRadius);
+            bobPhase = initialBobPhase;
+            collected = false;
+
+            transform.position = new Vector3(position.x, position.y, 0f);
+            transform.localScale = Vector3.one;
+            gameObject.name = $"QuangDiem_{itemId}";
+
+            if (!All.Contains(this))
+                All.Add(this);
+        }
+
+        internal bool Overlaps(Aabb playerBounds)
+        {
+            if (collected || !gameObject.activeInHierarchy)
+                return false;
+
+            Vector2 playerCenter = (playerBounds.Min + playerBounds.Max) * 0.5f;
+            Vector2 playerSize = playerBounds.Size;
+            float pr = Mathf.Max(playerSize.x, playerSize.y) * 0.45f;
+            float dist = Vector2.Distance(playerCenter, transform.position);
+            if (dist <= radius + pr)
+                return true;
+
+            Aabb itemBox = Aabb.FromCenter(transform.position, new Vector2(radius * 2f, radius * 2f));
+            return Aabb.Overlaps(itemBox, playerBounds);
+        }
+
+        public void Collect()
+        {
+            if (collected)
+                return;
+
+            collected = true;
+            CollectedCount++;
+
+            Debug.Log($"[QUANG_DIEM] Collected id={itemId} position={basePosition} ({CollectedCount}/{TotalCount})");
+            Contrast.Audio.ContrastAudioManager.Instance?.PlayCheckpoint();
+            OnCollected?.Invoke(this);
+
+            var pres = GetComponent<Contrast.Presentation.QuangDiemVisualPresentation>();
+            if (pres != null)
+            {
+                pres.PlayPickupBurst();
+            }
+            else
+            {
+                gameObject.SetActive(false);
+            }
+        }
+
+        public static void ResetLevelProgress(int totalCount = 0)
+        {
+            All.Clear();
+            TotalCount = Mathf.Max(0, totalCount);
+            CollectedCount = 0;
         }
     }
 }

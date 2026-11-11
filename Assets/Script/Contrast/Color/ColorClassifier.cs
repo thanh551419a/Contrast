@@ -39,8 +39,8 @@ namespace Contrast.Color
         public static float ToValue(LogicalColor c) => c switch
         {
             LogicalColor.White => 1f,
-            LogicalColor.Gray => 0.5f,
-            LogicalColor.Black => 0.1f,
+            LogicalColor.Gray => 0.522f,
+            LogicalColor.Black => 0.02f,
             LogicalColor.Universal => 0.85f,
             _ => 1f
         };
@@ -51,9 +51,8 @@ namespace Contrast.Color
             switch (logical)
             {
                 case LogicalColor.Universal:
-                    // Distinct Gold/Amber tint for Universal (255) so players immediately
-                    // see that any color can stand on this platform
-                    return new UnityEngine.Color(0.96f, 0.78f, 0.22f, 1f);
+                    // Gray-blue structural tint for Universal/FIXED (255) matching HTML (#28323b)
+                    return new UnityEngine.Color(0.157f, 0.196f, 0.231f, 1f);
 
                 case LogicalColor.White:
                     return UnityEngine.Color.white;
