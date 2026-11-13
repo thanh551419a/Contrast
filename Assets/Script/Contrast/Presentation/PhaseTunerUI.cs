@@ -5,6 +5,7 @@ namespace Contrast.Presentation
     using Contrast.Color;
     using Contrast.Core;
     using Contrast.Player;
+    using Contrast.UI;
     using Color = UnityEngine.Color;
     /// <summary>
     /// Presentation-only UI reproducing the Wave-First Cyclic Phase Tuner HUD,
@@ -48,6 +49,21 @@ namespace Contrast.Presentation
 
         // Control hint card
         private GameObject hintPanel;
+        private bool userGuideVisible = true;
+        public bool IsUserGuideVisible => userGuideVisible;
+
+        public void ToggleUserGuide()
+        {
+            userGuideVisible = !userGuideVisible;
+            if (hintPanel != null)
+            {
+                GameManager gm = GameManager.Instance;
+                bool isPlaying = gm == null || gm.State == GameState.Playing;
+                var newtonCtrl = Contrast.Level.EasyNewtonFinaleController.Instance;
+                bool inNewton = newtonCtrl != null && newtonCtrl.IsZoneActive;
+                hintPanel.SetActive(isPlaying && !inNewton && userGuideVisible);
+            }
+        }
 
         // Checkpoint toast
         private GameObject checkpointToast;
@@ -114,32 +130,29 @@ namespace Contrast.Presentation
             quangHudCard.transform.SetParent(parent, false);
 
             Image bg = quangHudCard.AddComponent<Image>();
-            bg.color = new Color(0.027f, 0.043f, 0.071f, 0.80f); // rgba(7,11,18,0.80)
+            LabStyleUI.ApplySlicedSprite(bg, LabStyleUI.GetPillSprite(), true, -4f);
 
-            Outline outline = quangHudCard.AddComponent<Outline>();
-            outline.effectColor = new Color(1.000f, 0.863f, 0.580f, 0.34f); // rgba(255,220,148,0.34)
-            outline.effectDistance = new Vector2(1f, -1f);
-
+            // Docked cleanly next to top-left "< Quay lại" pill so right toolbar stays 100% unobstructed
             RectTransform rt = quangHudCard.GetComponent<RectTransform>();
-            rt.anchorMin = new Vector2(1f, 1f);
-            rt.anchorMax = new Vector2(1f, 1f);
-            rt.pivot = new Vector2(1f, 1f);
-            rt.anchoredPosition = new Vector2(-24f, -96f);
-            rt.sizeDelta = new Vector2(210f, 40f);
+            rt.anchorMin = new Vector2(0f, 1f);
+            rt.anchorMax = new Vector2(0f, 1f);
+            rt.pivot = new Vector2(0f, 1f);
+            rt.anchoredPosition = new Vector2(190f, -22f);
+            rt.sizeDelta = new Vector2(204f, 44f);
 
             GameObject starGo = new GameObject("StarLabel", typeof(RectTransform));
             starGo.transform.SetParent(quangHudCard.transform, false);
             Text starText = starGo.AddComponent<Text>();
             starText.font = GetFont();
-            starText.text = "✦  QUANG ĐIỂM";
-            starText.fontSize = 12;
+            starText.text = "✦  Quang Điểm";
+            starText.fontSize = 13;
             starText.fontStyle = FontStyle.Bold;
-            starText.color = new Color(1.000f, 0.851f, 0.541f, 0.95f); // #ffd98a
+            starText.color = new Color(1.000f, 0.875f, 0.560f, 0.98f);
             starText.alignment = TextAnchor.MiddleLeft;
             RectTransform starRt = starGo.GetComponent<RectTransform>();
             starRt.anchorMin = new Vector2(0f, 0f);
-            starRt.anchorMax = new Vector2(0.7f, 1f);
-            starRt.offsetMin = new Vector2(14f, 0f);
+            starRt.anchorMax = new Vector2(0.68f, 1f);
+            starRt.offsetMin = new Vector2(16f, 0f);
             starRt.offsetMax = Vector2.zero;
 
             GameObject valGo = new GameObject("CountValue", typeof(RectTransform));
@@ -149,53 +162,61 @@ namespace Contrast.Presentation
             quangHudValueText.text = "0 / 0";
             quangHudValueText.fontSize = 15;
             quangHudValueText.fontStyle = FontStyle.Bold;
-            quangHudValueText.color = new Color(1.000f, 0.961f, 0.839f, 0.98f);
+            quangHudValueText.color = new Color(1.000f, 0.965f, 0.860f, 1.00f);
             quangHudValueText.alignment = TextAnchor.MiddleRight;
             RectTransform valRt = valGo.GetComponent<RectTransform>();
             valRt.anchorMin = new Vector2(0.55f, 0f);
             valRt.anchorMax = new Vector2(1f, 1f);
             valRt.offsetMin = Vector2.zero;
-            valRt.offsetMax = new Vector2(-14f, 0f);
+            valRt.offsetMax = new Vector2(-16f, 0f);
         }
 
         private void BuildTunerPanel(Transform parent)
         {
-            // Tuner Card: Bottom Center (540 x 150)
+            // Tuner Card: Bottom Center (560 x 158) styled with Virtual Lab Frosted Slate Card
             tunerPanel = new GameObject("PhaseTunerPanel", typeof(RectTransform));
             tunerPanel.transform.SetParent(parent, false);
 
             Image panelBg = tunerPanel.AddComponent<Image>();
-            panelBg.color = new Color(0.020f, 0.035f, 0.067f, 0.90f); // #050911 at 90% alpha
+            LabStyleUI.ApplySlicedSprite(panelBg, LabStyleUI.GetCardSprite(), true, -5f);
 
             RectTransform rt = tunerPanel.GetComponent<RectTransform>();
             rt.anchorMin = new Vector2(0.5f, 0f);
             rt.anchorMax = new Vector2(0.5f, 0f);
             rt.pivot = new Vector2(0.5f, 0f);
-            rt.sizeDelta = new Vector2(560f, 155f);
+            rt.sizeDelta = new Vector2(560f, 158f);
             rt.anchoredPosition = new Vector2(0f, 18f);
-
-            // 1px Border Outline
-            Outline outline = tunerPanel.AddComponent<Outline>();
-            outline.effectColor = new Color(0.804f, 0.863f, 0.902f, 0.22f);
-            outline.effectDistance = new Vector2(1.2f, -1.2f);
 
             // Header Title
             GameObject titleGo = new GameObject("HeaderLabel", typeof(RectTransform));
             titleGo.transform.SetParent(tunerPanel.transform, false);
             Text titleText = titleGo.AddComponent<Text>();
             titleText.font = GetFont();
-            titleText.text = "GIAO THOA · VÒNG PHA (INTERFERENCE PHASE TUNER)";
-            titleText.fontSize = 11;
+            titleText.text = "Bộ điều pha giao thoa sóng";
+            titleText.fontSize = 13;
             titleText.fontStyle = FontStyle.Bold;
-            titleText.color = new Color(0.88f, 0.92f, 0.94f, 0.65f);
+            titleText.color = LabStyleUI.TextSecondary;
             titleText.alignment = TextAnchor.MiddleLeft;
 
             RectTransform titleRt = titleGo.GetComponent<RectTransform>();
             titleRt.anchorMin = new Vector2(0f, 1f);
             titleRt.anchorMax = new Vector2(1f, 1f);
             titleRt.pivot = new Vector2(0f, 1f);
-            titleRt.anchoredPosition = new Vector2(18f, -12f);
-            titleRt.sizeDelta = new Vector2(-36f, 18f);
+            titleRt.anchoredPosition = new Vector2(18f, -11f);
+            titleRt.sizeDelta = new Vector2(-36f, 20f);
+
+            // Recessed Frame around Wave Graph
+            GameObject waveSlotGo = new GameObject("WaveSlotBg", typeof(RectTransform));
+            waveSlotGo.transform.SetParent(tunerPanel.transform, false);
+            Image waveSlotImg = waveSlotGo.AddComponent<Image>();
+            LabStyleUI.ApplySlicedSprite(waveSlotImg, LabStyleUI.GetRecessedSlotSprite(), false);
+            waveSlotImg.color = new Color(0.58f, 0.66f, 0.78f, 0.92f);
+            RectTransform waveSlotRt = waveSlotGo.GetComponent<RectTransform>();
+            waveSlotRt.anchorMin = new Vector2(0f, 0f);
+            waveSlotRt.anchorMax = new Vector2(0f, 0f);
+            waveSlotRt.pivot = new Vector2(0f, 0f);
+            waveSlotRt.anchoredPosition = new Vector2(66f, 38f);
+            waveSlotRt.sizeDelta = new Vector2(WaveTexWidth + 8f, WaveTexHeight + 8f);
 
             // Dual Wave Graph Image
             GameObject waveGo = new GameObject("WaveGraph", typeof(RectTransform));
@@ -219,25 +240,21 @@ namespace Contrast.Presentation
             waveRt.sizeDelta = new Vector2(WaveTexWidth, WaveTexHeight);
 
             // Wave A and B Labels
-            CreateLabel(tunerPanel.transform, "A  CỐ ĐỊNH", new Vector2(12f, 88f), 10, FontStyle.Bold, new Color(0.96f, 0.98f, 1f, 0.85f));
-            CreateLabel(tunerPanel.transform, "B  DỊCH PHA", new Vector2(12f, 54f), 10, FontStyle.Bold, new Color(0.65f, 0.72f, 0.78f, 0.85f));
+            CreateLabel(tunerPanel.transform, "Sóng A", new Vector2(14f, 88f), 11, FontStyle.Bold, LabStyleUI.TextPrimary);
+            CreateLabel(tunerPanel.transform, "Sóng B", new Vector2(14f, 54f), 11, FontStyle.Bold, LabStyleUI.TextSecondary);
 
-            // Status Badge (Right side)
+            // Status Badge (Right side — Royal Sapphire / Slate rounded slot)
             GameObject badgeGo = new GameObject("StateBadge", typeof(RectTransform));
             badgeGo.transform.SetParent(tunerPanel.transform, false);
             stateBadgeBg = badgeGo.AddComponent<Image>();
-            stateBadgeBg.color = new Color(0.12f, 0.16f, 0.22f, 0.85f);
-
-            Outline badgeOutline = badgeGo.AddComponent<Outline>();
-            badgeOutline.effectColor = new Color(0.9f, 0.95f, 1f, 0.35f);
-            badgeOutline.effectDistance = new Vector2(1f, -1f);
+            LabStyleUI.ApplySlicedSprite(stateBadgeBg, LabStyleUI.GetPrimaryButtonSprite(), false);
 
             RectTransform badgeRt = badgeGo.GetComponent<RectTransform>();
             badgeRt.anchorMin = new Vector2(1f, 0.5f);
             badgeRt.anchorMax = new Vector2(1f, 0.5f);
             badgeRt.pivot = new Vector2(1f, 0.5f);
-            badgeRt.anchoredPosition = new Vector2(-16f, 16f);
-            badgeRt.sizeDelta = new Vector2(165f, 65f);
+            badgeRt.anchoredPosition = new Vector2(-16f, 12f);
+            badgeRt.sizeDelta = new Vector2(168f, 68f);
 
             // Badge Title Text
             GameObject badgeTitleGo = new GameObject("Title", typeof(RectTransform));
@@ -251,25 +268,25 @@ namespace Contrast.Presentation
             stateBadgeTitle.text = "SÁNG";
 
             RectTransform btRt = badgeTitleGo.GetComponent<RectTransform>();
-            btRt.anchorMin = new Vector2(0f, 0.5f);
+            btRt.anchorMin = new Vector2(0f, 0.48f);
             btRt.anchorMax = new Vector2(1f, 1f);
             btRt.offsetMin = Vector2.zero;
-            btRt.offsetMax = Vector2.zero;
+            btRt.offsetMax = new Vector2(0f, -2f);
 
             // Badge Relation Text
             GameObject badgeRelGo = new GameObject("Relation", typeof(RectTransform));
             badgeRelGo.transform.SetParent(badgeGo.transform, false);
             stateBadgeRelation = badgeRelGo.AddComponent<Text>();
             stateBadgeRelation.font = GetFont();
-            stateBadgeRelation.fontSize = 9;
-            stateBadgeRelation.fontStyle = FontStyle.Normal;
+            stateBadgeRelation.fontSize = 10;
+            stateBadgeRelation.fontStyle = FontStyle.Bold;
             stateBadgeRelation.alignment = TextAnchor.MiddleCenter;
-            stateBadgeRelation.color = new Color(0.85f, 0.90f, 0.95f, 0.70f);
-            stateBadgeRelation.text = "CÙNG PHA (Δφ = 0°)";
+            stateBadgeRelation.color = new Color(0.86f, 0.92f, 1f, 0.88f);
+            stateBadgeRelation.text = "Cùng pha (Δφ = 0°)";
 
             RectTransform brRt = badgeRelGo.GetComponent<RectTransform>();
             brRt.anchorMin = new Vector2(0f, 0f);
-            brRt.anchorMax = new Vector2(1f, 0.5f);
+            brRt.anchorMax = new Vector2(1f, 0.50f);
             brRt.offsetMin = Vector2.zero;
             brRt.offsetMax = Vector2.zero;
 
@@ -299,22 +316,21 @@ namespace Contrast.Presentation
             ombreStripImage.texture = ombreTexture;
 
             Outline ombreOutline = ombreGo.AddComponent<Outline>();
-            ombreOutline.effectColor = new Color(0.922f, 0.945f, 0.957f, 0.22f); // rgba(235,241,244,0.22)
+            ombreOutline.effectColor = new Color(0.75f, 0.84f, 0.94f, 0.45f);
             ombreOutline.effectDistance = new Vector2(1f, -1f);
 
             RectTransform ombreRt = ombreGo.GetComponent<RectTransform>();
             ombreRt.anchorMin = new Vector2(0f, 0f);
             ombreRt.anchorMax = new Vector2(0f, 0f);
             ombreRt.pivot = new Vector2(0f, 0f);
-            ombreRt.anchoredPosition = new Vector2(110f, 14f);
+            ombreRt.anchoredPosition = new Vector2(106f, 14f);
             ombreRt.sizeDelta = new Vector2(240f, 12f);
 
             // Phase zone boundary divider lines (BRIGHT / TUNING / DARK / TUNING)
-            // Transitions occur at I = 0.78 (cos(phi) = 0.56) and I = 0.22 (cos(phi) = -0.56)
-            float t1 = Mathf.Acos(0.56f) / (Mathf.PI * 2f);   // ~0.155401 (BRIGHT -> TUNING)
-            float t2 = Mathf.Acos(-0.56f) / (Mathf.PI * 2f);  // ~0.344599 (TUNING -> DARK)
-            float t3 = 1f - t2;                               // ~0.655401 (DARK -> TUNING)
-            float t4 = 1f - t1;                               // ~0.844599 (TUNING -> BRIGHT)
+            float t1 = Mathf.Acos(0.56f) / (Mathf.PI * 2f);
+            float t2 = Mathf.Acos(-0.56f) / (Mathf.PI * 2f);
+            float t3 = 1f - t2;
+            float t4 = 1f - t1;
             float[] dividerNormalized = { t1, t2, t3, t4 };
 
             for (int d = 0; d < dividerNormalized.Length; d++)
@@ -322,7 +338,7 @@ namespace Contrast.Presentation
                 GameObject divGo = new GameObject($"PhaseDivider_{d}", typeof(RectTransform));
                 divGo.transform.SetParent(ombreGo.transform, false);
                 Image divImg = divGo.AddComponent<Image>();
-                divImg.color = new Color(0.961f, 0.973f, 0.980f, 0.48f); // Crisp optical boundary divider
+                divImg.color = new Color(0.961f, 0.973f, 0.980f, 0.55f);
 
                 RectTransform divRt = divGo.GetComponent<RectTransform>();
                 divRt.anchorMin = new Vector2(0f, 0.5f);
@@ -337,7 +353,7 @@ namespace Contrast.Presentation
             GameObject cursorGo = new GameObject("CursorMarker", typeof(RectTransform));
             cursorGo.transform.SetParent(ombreGo.transform, false);
             Image cursorImg = cursorGo.AddComponent<Image>();
-            cursorImg.color = new Color(0.969f, 0.980f, 0.984f, 1f); // #f7fafb
+            cursorImg.color = new Color(0.969f, 0.980f, 0.984f, 1f);
 
             cursorMarker = cursorGo.GetComponent<RectTransform>();
             cursorMarker.anchorMin = new Vector2(0f, 0.5f);
@@ -345,8 +361,7 @@ namespace Contrast.Presentation
             cursorMarker.pivot = new Vector2(0.5f, 0.5f);
             cursorMarker.sizeDelta = new Vector2(3f, 20f);
 
-            CreateLabel(tunerPanel.transform, "SÁNG · ĐIỀU PHA · TỐI · ĐIỀU PHA · LẶP", new Vector2(110f, 2f), 8, FontStyle.Normal, new Color(0.85f, 0.90f, 0.95f, 0.45f));
-            CreateLabel(tunerPanel.transform, "← / → ĐỔI PHA TUẦN HOÀN", new Vector2(370f, 14f), 9, FontStyle.Bold, new Color(0.88f, 0.92f, 0.95f, 0.55f));
+            CreateLabel(tunerPanel.transform, "← / →  Đổi pha tuần hoàn", new Vector2(374f, 12f), 11, FontStyle.Bold, LabStyleUI.TextSecondary);
         }
 
         public static Color EvaluateHtmlStripColor(float localPhase)
@@ -377,30 +392,28 @@ namespace Contrast.Presentation
 
         private void BuildControlHint(Transform parent)
         {
-            // Control Hint in top-left: 280 x 140
+            // Control Guide Card positioned cleanly below "< Quay lại" pill on Top-Left
             hintPanel = new GameObject("ControlHintCard", typeof(RectTransform));
             hintPanel.transform.SetParent(parent, false);
 
             Image panelBg = hintPanel.AddComponent<Image>();
-            panelBg.color = new Color(0.020f, 0.035f, 0.067f, 0.75f);
-
-            Outline outline = hintPanel.AddComponent<Outline>();
-            outline.effectColor = new Color(0.804f, 0.863f, 0.902f, 0.20f);
-            outline.effectDistance = new Vector2(1f, -1f);
+            LabStyleUI.ApplySlicedSprite(panelBg, LabStyleUI.GetCardSprite(), true, -4f);
 
             RectTransform rt = hintPanel.GetComponent<RectTransform>();
             rt.anchorMin = new Vector2(0f, 1f);
             rt.anchorMax = new Vector2(0f, 1f);
             rt.pivot = new Vector2(0f, 1f);
-            rt.anchoredPosition = new Vector2(24f, -24f);
+            rt.anchoredPosition = new Vector2(22f, -80f);
+            rt.sizeDelta = new Vector2(310f, 172f);
+
             // Controls text
-            CreateLabel(hintPanel.transform, "ĐIỀU KHIỂN QUANG HỌC", new Vector2(16f, 130f), 11, FontStyle.Bold, new Color(0.95f, 0.98f, 1f, 0.9f));
-            CreateLabel(hintPanel.transform, "A / D          DI CHUYỂN", new Vector2(16f, 108f), 11, FontStyle.Normal, new Color(0.85f, 0.90f, 0.95f, 0.75f));
-            CreateLabel(hintPanel.transform, "SPACE / W      NHẢY", new Vector2(16f, 88f), 11, FontStyle.Normal, new Color(0.85f, 0.90f, 0.95f, 0.75f));
-            CreateLabel(hintPanel.transform, "S              FAST FALL", new Vector2(16f, 68f), 11, FontStyle.Normal, new Color(0.85f, 0.90f, 0.95f, 0.75f));
-            CreateLabel(hintPanel.transform, "← / →          ĐỔI PHA (TUNING)", new Vector2(16f, 48f), 11, FontStyle.Normal, new Color(0.85f, 0.90f, 0.95f, 0.75f));
-            CreateLabel(hintPanel.transform, "X              ĐO VÂN NEWTON", new Vector2(16f, 28f), 11, FontStyle.Normal, new Color(1f, 0.88f, 0.45f, 0.85f));
-            CreateLabel(hintPanel.transform, "R              RESTART LEVEL", new Vector2(16f, 10f), 10, FontStyle.Normal, new Color(0.75f, 0.82f, 0.88f, 0.50f));
+            CreateLabel(hintPanel.transform, "Hướng dẫn điều khiển", new Vector2(18f, 138f), 13, FontStyle.Bold, LabStyleUI.TextPrimary);
+            CreateLabel(hintPanel.transform, "A / D          Di chuyển trái / phải", new Vector2(18f, 112f), 12, FontStyle.Normal, LabStyleUI.TextSecondary);
+            CreateLabel(hintPanel.transform, "SPACE / W      Nhảy", new Vector2(18f, 91f), 12, FontStyle.Normal, LabStyleUI.TextSecondary);
+            CreateLabel(hintPanel.transform, "S              Rơi nhanh", new Vector2(18f, 70f), 12, FontStyle.Normal, LabStyleUI.TextSecondary);
+            CreateLabel(hintPanel.transform, "← / →          Đổi pha màu (Sáng/Xám/Tối)", new Vector2(18f, 49f), 12, FontStyle.Normal, LabStyleUI.TextSecondary);
+            CreateLabel(hintPanel.transform, "X              Ghi toạ độ vân Newton", new Vector2(18f, 28f), 12, FontStyle.Bold, new Color(1f, 0.89f, 0.50f, 0.96f));
+            CreateLabel(hintPanel.transform, "R              Chơi lại màn", new Vector2(18f, 9f), 11, FontStyle.Normal, LabStyleUI.TextMuted);
         }
 
         private void BuildCheckpointToast(Transform parent)
@@ -412,17 +425,13 @@ namespace Contrast.Presentation
             checkpointToastGroup.alpha = 0f;
 
             Image bg = checkpointToast.AddComponent<Image>();
-            bg.color = new Color(0.04f, 0.08f, 0.14f, 0.88f);
-
-            Outline outline = checkpointToast.AddComponent<Outline>();
-            outline.effectColor = new Color(0.85f, 0.95f, 1f, 0.35f);
-            outline.effectDistance = new Vector2(1f, -1f);
+            LabStyleUI.ApplySlicedSprite(bg, LabStyleUI.GetPillSprite(), true, -4f);
 
             RectTransform rt = checkpointToast.GetComponent<RectTransform>();
             rt.anchorMin = new Vector2(0.5f, 1f);
             rt.anchorMax = new Vector2(0.5f, 1f);
             rt.pivot = new Vector2(0.5f, 1f);
-            rt.anchoredPosition = new Vector2(0f, -45f);
+            rt.anchoredPosition = new Vector2(0f, -66f);
             rt.sizeDelta = new Vector2(360f, 44f);
 
             GameObject textGo = new GameObject("ToastText", typeof(RectTransform));
@@ -432,8 +441,8 @@ namespace Contrast.Presentation
             checkpointToastText.fontSize = 13;
             checkpointToastText.fontStyle = FontStyle.Bold;
             checkpointToastText.alignment = TextAnchor.MiddleCenter;
-            checkpointToastText.color = new Color(0.92f, 0.97f, 1f, 1f);
-            checkpointToastText.text = "✦  ĐÃ LƯU ĐIỂM HỒI SINH  ✦";
+            checkpointToastText.color = LabStyleUI.TextPrimary;
+            checkpointToastText.text = "✦  Đã lưu điểm hồi sinh  ✦";
 
             RectTransform textRt = textGo.GetComponent<RectTransform>();
             textRt.anchorMin = Vector2.zero;
@@ -490,7 +499,7 @@ namespace Contrast.Presentation
             {
                 GameManager gm = GameManager.Instance;
                 bool isPlaying = gm == null || gm.State == GameState.Playing;
-                hintPanel.SetActive(isPlaying && !isNewtonFramingActive);
+                hintPanel.SetActive(isPlaying && !isNewtonFramingActive && userGuideVisible);
             }
         }
 
@@ -516,7 +525,7 @@ namespace Contrast.Presentation
             if (tunerPanel != null)
                 tunerPanel.SetActive(isPlaying);
             if (hintPanel != null)
-                hintPanel.SetActive(isPlaying && !isNewtonFramingActive);
+                hintPanel.SetActive(isPlaying && !isNewtonFramingActive && userGuideVisible);
             if (quangHudCard != null)
             {
                 bool showQuang = isPlaying && Contrast.Level.QuangDiemItem.TotalCount > 0;
@@ -549,8 +558,8 @@ namespace Contrast.Presentation
             if (wavePixels == null || waveTexture == null)
                 return;
 
-            // Clear background
-            Color32 clearCol = new Color32(8, 14, 24, 255);
+            // Clear background (deep slate-navy inside recessed slot)
+            Color32 clearCol = new Color32(18, 26, 39, 255);
             for (int i = 0; i < wavePixels.Length; i++)
                 wavePixels[i] = clearCol;
 
@@ -559,18 +568,18 @@ namespace Contrast.Presentation
             {
                 for (int gy = 4; gy < WaveTexHeight - 4; gy++)
                 {
-                    wavePixels[gy * WaveTexWidth + gx] = new Color32(28, 42, 60, 255);
+                    wavePixels[gy * WaveTexWidth + gx] = new Color32(38, 54, 76, 255);
                 }
             }
 
-            // Draw Wave A (Fixed reference wave, yCenter = 56)
+            // Draw Wave A (Fixed reference wave, yCenter = 54)
             int yCenterA = 54;
             int yCenterB = 26;
             const float spatialFreq = 0.075f;
             const float amplitude = 12f;
 
-            Color32 waveACol = new Color32(245, 248, 250, 255);
-            Color32 waveBCol = new Color32(160, 185, 205, 255);
+            Color32 waveACol = new Color32(245, 249, 255, 255);
+            Color32 waveBCol = new Color32(142, 186, 245, 255);
 
             for (int x = 0; x < WaveTexWidth; x++)
             {
@@ -601,23 +610,26 @@ namespace Contrast.Presentation
                 case LogicalColor.White:
                     stateBadgeTitle.text = "SÁNG";
                     stateBadgeTitle.color = Color.white;
-                    stateBadgeRelation.text = "CÙNG PHA (Δφ ≈ 0°)";
-                    stateBadgeBg.color = new Color(0.25f, 0.32f, 0.42f, 0.90f);
+                    stateBadgeRelation.text = "Cùng pha (Δφ ≈ 0°)";
+                    stateBadgeBg.sprite = LabStyleUI.GetPrimaryButtonSprite();
+                    stateBadgeBg.color = Color.white;
                     break;
 
                 case LogicalColor.Gray:
                     stateBadgeTitle.text = "ĐIỀU PHA";
-                    stateBadgeTitle.color = new Color(0.85f, 0.90f, 0.95f, 1f);
-                    stateBadgeRelation.text = "LỆCH PHA (Δφ ≈ 90°)";
-                    stateBadgeBg.color = new Color(0.16f, 0.22f, 0.30f, 0.90f);
+                    stateBadgeTitle.color = new Color(0.92f, 0.96f, 1f, 1f);
+                    stateBadgeRelation.text = "Lệch pha (Δφ ≈ 90°)";
+                    stateBadgeBg.sprite = LabStyleUI.GetSecondaryButtonSprite();
+                    stateBadgeBg.color = Color.white;
                     break;
 
                 case LogicalColor.Black:
                 default:
                     stateBadgeTitle.text = "TỐI";
-                    stateBadgeTitle.color = new Color(0.75f, 0.82f, 0.90f, 1f);
-                    stateBadgeRelation.text = "NGƯỢC PHA (Δφ ≈ 180°)";
-                    stateBadgeBg.color = new Color(0.08f, 0.12f, 0.18f, 0.90f);
+                    stateBadgeTitle.color = new Color(0.80f, 0.86f, 0.94f, 1f);
+                    stateBadgeRelation.text = "Ngược pha (Δφ ≈ 180°)";
+                    stateBadgeBg.sprite = LabStyleUI.GetSecondaryButtonSprite();
+                    stateBadgeBg.color = new Color(0.58f, 0.64f, 0.74f, 1f);
                     break;
             }
         }

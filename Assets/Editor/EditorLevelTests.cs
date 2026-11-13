@@ -4441,15 +4441,87 @@ namespace Contrast.Tests
                        Contrast.Presentation.NewtonRingsPresentation.GetWavelengthColorNameVi(470f) == "Xanh dương",
                 "NewtonColor_04_SpectralLabelsVi", "550/650/470 nm Vietnamese spectral band labels are 'Lục', 'Đỏ', and 'Xanh dương'");
 
-            // 4. Verify MainMenuUI directly opens the single Gameplay panel (no CHƠI THỬ / EDIT LEVEL chooser)
+            // 4. Verify MainMenuUI directly opens the single Gameplay panel + Animated Showcase + Settings + Exit
             GameObject directMenuGo = new GameObject("DirectGameplayMainMenuTest");
             Contrast.UI.MainMenuUI directMenu = directMenuGo.AddComponent<Contrast.UI.MainMenuUI>();
             directMenu.EnsureInitialized();
             directMenu.Show(true);
             Transform cardsRootTr = directMenuGo.transform.Find("Canvas/Panel/MainCardsRoot");
+            Transform showcaseTr = directMenuGo.transform.Find("Canvas/Panel/GameplayShowcaseCard/DemoViewport/DemoCharacter");
+            Transform settingsBtnTr = directMenuGo.transform.Find("Canvas/Panel/PlaySubMenuPanel/SettingsButton");
+            Transform exitBtnTr = directMenuGo.transform.Find("Canvas/Panel/PlaySubMenuPanel/ExitButton");
             AssertTrue(directMenu.IsPlaySubMenuOpen && (cardsRootTr == null || !cardsRootTr.gameObject.activeSelf),
                 "MainMenu_01_DirectGameplayOnly", "MainMenuUI directly shows only the Gameplay selection screen with MainCardsRoot hidden");
+            AssertTrue(showcaseTr != null && settingsBtnTr != null && exitBtnTr != null,
+                "MainMenu_02_AnimatedDemoAndSettingsExitButtons", "MainMenuUI builds animated gameplay showcase, Settings button, and Exit button");
+            directMenu.OpenSettings();
+            AssertTrue(directMenu.IsSettingsOpen, "MainMenu_03_SettingsModalOpens", "MainMenuUI Settings modal opens");
+            directMenu.CloseSettings();
+            AssertTrue(!directMenu.IsSettingsOpen, "MainMenu_04_SettingsModalCloses", "MainMenuUI Settings modal closes");
             UnityEngine.Object.DestroyImmediate(directMenuGo);
+
+            // 5. Verify BGM MP3 assets & ContrastAudioManager volume settings + Win UI spacing
+            string menuMp3 = Path.Combine(Application.dataPath, "Resources", "Sound", Contrast.Audio.ContrastAudioManager.MenuMusicFileName);
+            string gameMp3 = Path.Combine(Application.dataPath, "Resources", "Sound", Contrast.Audio.ContrastAudioManager.GameplayMusicFileName);
+            AssertTrue(File.Exists(menuMp3) && File.Exists(gameMp3),
+                "Audio_01_Mp3TracksPackagedInResources", "Menu ('Calima - Full Moon') and Gameplay ('Aventure - Evening Tone') MP3s exist in Assets/Resources/Sound");
+
+            var audioMgr = Contrast.Audio.ContrastAudioManager.EnsureInstance();
+            float prevMusic = audioMgr.MusicVolume;
+            float prevSfx = audioMgr.SfxVolume;
+            audioMgr.SetMusicVolume(0.42f);
+            audioMgr.SetSfxVolume(0.73f);
+            AssertApproximately(0.42f, audioMgr.MusicVolume, 1e-3f, "Audio_02_SetMusicVolume", "MusicVolume updates and clamps accurately");
+            AssertApproximately(0.73f, audioMgr.SfxVolume, 1e-3f, "Audio_03_SetSfxVolume", "SfxVolume updates and clamps accurately");
+            audioMgr.SetMusicVolume(prevMusic);
+            audioMgr.SetSfxVolume(prevSfx);
+
+            GameObject winUiGo = new GameObject("WinSpacingTestUI");
+            Contrast.UI.GameOverUI winUi = winUiGo.AddComponent<Contrast.UI.GameOverUI>();
+            winUi.ShowCampaignComplete(null, null);
+            RectTransform b1 = winUiGo.transform.Find("Canvas/Panel/ResultCard/ButtonRow/RETRYButton")?.GetComponent<RectTransform>();
+            RectTransform b2 = winUiGo.transform.Find("Canvas/Panel/ResultCard/ButtonRow/RESTARTButton")?.GetComponent<RectTransform>();
+            RectTransform b3 = winUiGo.transform.Find("Canvas/Panel/ResultCard/ButtonRow/RETURNButton")?.GetComponent<RectTransform>();
+            float gap12 = (b1 != null && b2 != null) ? (b2.anchoredPosition.x - b2.sizeDelta.x * 0.5f) - (b1.anchoredPosition.x + b1.sizeDelta.x * 0.5f) : 0f;
+            float gap23 = (b2 != null && b3 != null) ? (b3.anchoredPosition.x - b3.sizeDelta.x * 0.5f) - (b2.anchoredPosition.x + b2.sizeDelta.x * 0.5f) : 0f;
+            AssertTrue(gap12 >= 60f && gap23 >= 60f,
+                "WinUI_01_ButtonsGenerouslySpaced", $"Completion buttons have >= 60px clear spacing (gap12={gap12:F1}px, gap23={gap23:F1}px)");
+            UnityEngine.Object.DestroyImmediate(winUiGo);
+
+            // 6. Verify Virtual Physics Lab UI sprites, HUD Chrome (BackPill + TopLabDock + Right Circular Icon Column), and Newton Coordinate Slots
+            AssertTrue(
+                Contrast.UI.LabStyleUI.GetCardSprite() != null &&
+                Contrast.UI.LabStyleUI.GetPillSprite() != null &&
+                Contrast.UI.LabStyleUI.GetPrimaryButtonSprite() != null &&
+                Contrast.UI.LabStyleUI.GetCircleButtonSprite() != null &&
+                Contrast.UI.LabStyleUI.GetRecessedSlotSprite() != null,
+                "LabUI_01_ProceduralSpritesValid", "LabStyleUI generates anti-aliased 9-sliced and circular Virtual Lab sprites");
+
+            GameObject hudGo = new GameObject("LabHudControlTest");
+            Contrast.UI.GameControlUI hudCtrl = hudGo.AddComponent<Contrast.UI.GameControlUI>();
+            hudCtrl.Show(true);
+            Transform backPillTr = hudGo.transform.Find("Canvas/Panel/BackPillButton");
+            Transform topDockTr = hudGo.transform.Find("Canvas/Panel/TopLabDock");
+            Transform fsBtnTr = hudGo.transform.Find("Canvas/Panel/FullscreenButton");
+            Transform retryCircleTr = hudGo.transform.Find("Canvas/Panel/RETRYButton");
+            Transform restartCircleTr = hudGo.transform.Find("Canvas/Panel/RESTARTButton");
+            Transform guideCircleTr = hudGo.transform.Find("Canvas/Panel/GuideButton");
+            Transform menuCircleTr = hudGo.transform.Find("Canvas/Panel/MENUButton");
+            AssertTrue(
+                backPillTr != null && topDockTr != null && fsBtnTr != null &&
+                retryCircleTr != null && restartCircleTr != null && guideCircleTr != null && menuCircleTr != null,
+                "LabUI_02_InGameChromeButtonsPresent", "GameControlUI builds '< Quay lại' pill, TopLabDock groove bar, and right-edge circular icon buttons");
+            UnityEngine.Object.DestroyImmediate(hudGo);
+
+            if (newtonCtrl != null && newtonCtrl.ObjectiveCardGo != null)
+            {
+                Transform slotXk = newtonCtrl.ObjectiveCardGo.transform.Find("Slot_Xk");
+                Transform slotXi = newtonCtrl.ObjectiveCardGo.transform.Find("Slot_Xi");
+                Transform slotXkp = newtonCtrl.ObjectiveCardGo.transform.Find("Slot_Xkp");
+                Transform markBtn = newtonCtrl.ObjectiveCardGo.transform.Find("MarkActionButton");
+                AssertTrue(slotXk != null && slotXi != null && slotXkp != null && markBtn != null,
+                    "LabUI_03_NewtonReadoutSlotsAndNhapButton", "ObjectiveCard contains x_k, x_i, x_k' recessed mm slots and Royal-Blue NHẬP button");
+            }
 
             if (EasyNewtonFinaleController.Instance != null)
                 EasyNewtonFinaleController.Instance.Teardown();

@@ -2,37 +2,87 @@ using System;
 
 namespace Contrast.UI
 {
+    using Contrast.Audio;
     using Contrast.Core;
     using UnityEngine;
     using UnityEngine.EventSystems;
     using UnityEngine.UI;
     using Color = UnityEngine.Color;
+
     /// <summary>
-    /// In-game pause menu with context-aware navigation:
-    /// - RESUME: closes menu and continues playing.
-    /// - RESTART: reloads current level from its tracked source.
-    /// - RETURN: leaves gameplay and returns to MainMenuUI (for MainMenuGameplay)
-    ///           or LevelEditor session (for EditorTestPlay).
-    /// Pure code-generated UGUI matching the dark optical styling of Contrast.
+    /// Virtual Physics Lab Pause Menu UI matching the Vietnamese Virtual Lab reference style:
+    /// - Frosted rounded slate-navy card with silver-steel rim & soft drop shadow
+    /// - Recessed audio volume slots (Music & SFX) with royal-blue fill tracks
+    /// - Clean single-line Vietnamese buttons: Royal-Blue "TIẾP TỤC", Matte-Slate "CHƠI LẠI MÀN NÀY",
+    ///   and Stadium Pill "< Quay lại Menu chính"
     /// </summary>
     public sealed class InGameMenuUI : MonoBehaviour
     {
         private GameObject panel;
         private Text contextBadgeText;
-        private Text returnButtonSubText;
+        private Text returnButtonTitleText;
+        private Slider musicSlider;
+        private Slider sfxSlider;
+        private Text musicValText;
+        private Text sfxValText;
+        private bool suppressSliderEvents;
         private GameplayEntryContext currentContext = GameplayEntryContext.MainMenuGameplay;
 
         private void Awake()
         {
             EnsureEventSystem();
             BuildUI();
+            BindAudioEvents();
             Show(false);
+        }
+
+        private void OnDestroy()
+        {
+            if (ContrastAudioManager.Instance != null)
+                ContrastAudioManager.Instance.OnVolumeChanged -= HandleExternalVolumeChanged;
+        }
+
+        private void BindAudioEvents()
+        {
+            var audio = ContrastAudioManager.EnsureInstance();
+            if (audio != null)
+            {
+                audio.OnVolumeChanged -= HandleExternalVolumeChanged;
+                audio.OnVolumeChanged += HandleExternalVolumeChanged;
+                SyncSlidersFromAudio(audio.MusicVolume, audio.SfxVolume);
+            }
+        }
+
+        private void HandleExternalVolumeChanged(float musicVol, float sfxVol)
+        {
+            SyncSlidersFromAudio(musicVol, sfxVol);
+        }
+
+        private void SyncSlidersFromAudio(float musicVol, float sfxVol)
+        {
+            suppressSliderEvents = true;
+            if (musicSlider != null)
+                musicSlider.value = musicVol;
+            if (sfxSlider != null)
+                sfxSlider.value = sfxVol;
+            if (musicValText != null)
+                musicValText.text = $"{Mathf.RoundToInt(musicVol * 100f)}%";
+            if (sfxValText != null)
+                sfxValText.text = $"{Mathf.RoundToInt(sfxVol * 100f)}%";
+            suppressSliderEvents = false;
         }
 
         public void Show(bool visible, GameplayEntryContext context = GameplayEntryContext.MainMenuGameplay)
         {
             currentContext = context;
             UpdateContextVisuals();
+
+            if (visible)
+            {
+                var audio = ContrastAudioManager.EnsureInstance();
+                if (audio != null)
+                    SyncSlidersFromAudio(audio.MusicVolume, audio.SfxVolume);
+            }
 
             if (panel != null)
                 panel.SetActive(visible);
@@ -42,35 +92,43 @@ namespace Contrast.UI
         {
             if (contextBadgeText != null)
             {
+                string levelInfo = "Thí nghiệm giao thoa ánh sáng";
+                if (GameManager.Instance != null)
+                {
+                    int idx = GameManager.Instance.CurrentCampaignIndex;
+                    if (idx >= 0 && idx < GameManager.CampaignLevelTitles.Length)
+                        levelInfo = $"Đang thực hiện: {GameManager.CampaignLevelTitles[idx]}";
+                }
+
                 contextBadgeText.text = currentContext == GameplayEntryContext.EditorTestPlay
-                    ? "CHẾ ĐỘ: MÀN CHƠI THỬ NGHIỆM (TEST PLAY)"
-                    : "CHẾ ĐỘ: MÀN CHƠI CHÍNH (MAIN GAMEPLAY)";
-                contextBadgeText.color = currentContext == GameplayEntryContext.EditorTestPlay
-                    ? new Color(0.35f, 0.85f, 0.55f, 0.90f)
-                    : new Color(0.45f, 0.75f, 1f, 0.90f);
+                    ? "Chế độ thử nghiệm màn chơi"
+                    : levelInfo;
             }
 
-            if (returnButtonSubText != null)
+            if (returnButtonTitleText != null)
             {
-                returnButtonSubText.text = currentContext == GameplayEntryContext.EditorTestPlay
-                    ? "QUAY LẠI TRÌNH THIẾT KẾ · LEVEL EDITOR"
-                    : "QUAY LẠI MENU CHÍNH · MAIN MENU";
+                returnButtonTitleText.text = currentContext == GameplayEntryContext.EditorTestPlay
+                    ? "Quay lại trình thiết kế"
+                    : "Quay lại Menu chính";
             }
         }
 
         private void OnResumeClicked()
         {
+            ContrastAudioManager.Instance?.PlayButtonClick();
             GameManager.Instance?.ResumeGame();
         }
 
         private void OnRestartClicked()
         {
+            ContrastAudioManager.Instance?.PlayButtonClick();
             Show(false);
             GameManager.Instance?.Restart();
         }
 
         private void OnReturnClicked()
         {
+            ContrastAudioManager.Instance?.PlayButtonClick();
             Show(false);
             GameManager.Instance?.ReturnFromGameplay();
         }
@@ -80,7 +138,7 @@ namespace Contrast.UI
             GameObject canvasGo = NewUI("Canvas", transform);
             Canvas canvas = canvasGo.AddComponent<Canvas>();
             canvas.renderMode = RenderMode.ScreenSpaceOverlay;
-            canvas.sortingOrder = 220; // Above standard gameplay UI (90) and loading overlay (200)
+            canvas.sortingOrder = 220;
 
             CanvasScaler scaler = canvasGo.AddComponent<CanvasScaler>();
             scaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
@@ -91,192 +149,273 @@ namespace Contrast.UI
 
             panel = NewUI("Panel", canvasGo.transform);
             Image backdrop = panel.AddComponent<Image>();
-            // Dark vignette overlay backdrop (#03060c at 88%)
-            backdrop.color = new Color(0.012f, 0.024f, 0.047f, 0.88f);
+            backdrop.color = new Color(0.018f, 0.032f, 0.058f, 0.84f);
             Stretch(panel.GetComponent<RectTransform>());
 
-            // Center modal dialog box
+            // Center Frosted Slate-Navy Modal Card
             GameObject modal = NewUI("Modal", panel.transform);
             Image modalBg = modal.AddComponent<Image>();
-            modalBg.color = new Color(0.040f, 0.065f, 0.100f, 0.97f); // #0a111a
-
-            Outline modalOutline = modal.AddComponent<Outline>();
-            modalOutline.effectColor = new Color(0.75f, 0.88f, 0.98f, 0.28f);
-            modalOutline.effectDistance = new Vector2(1.5f, -1.5f);
+            LabStyleUI.ApplySlicedSprite(modalBg, LabStyleUI.GetCardSprite(), true, -7f);
 
             RectTransform modalRt = modal.GetComponent<RectTransform>();
-            modalRt.sizeDelta = new Vector2(560f, 520f);
+            modalRt.sizeDelta = new Vector2(640f, 628f);
             modalRt.anchoredPosition = Vector2.zero;
 
             // Title
             GameObject titleGo = NewUI("Title", modal.transform);
             Text title = titleGo.AddComponent<Text>();
-            title.font = GetFont();
-            title.text = "PAUSE";
-            title.fontSize = 42;
+            title.font = LabStyleUI.GetFont();
+            title.text = "TẠM DỪNG";
+            title.fontSize = 38;
             title.fontStyle = FontStyle.Bold;
             title.alignment = TextAnchor.MiddleCenter;
-            title.color = new Color(0.95f, 0.97f, 1f, 1f);
-
-            Outline titleOutline = titleGo.AddComponent<Outline>();
-            titleOutline.effectColor = new Color(0.85f, 0.95f, 1f, 0.35f);
-            titleOutline.effectDistance = new Vector2(1.5f, -1.5f);
+            title.color = LabStyleUI.TextPrimary;
 
             RectTransform titleRt = titleGo.GetComponent<RectTransform>();
-            titleRt.sizeDelta = new Vector2(500f, 50f);
-            titleRt.anchoredPosition = new Vector2(0f, 195f);
+            titleRt.sizeDelta = new Vector2(540f, 48f);
+            titleRt.anchoredPosition = new Vector2(0f, 250f);
 
-            // Subtitle
-            GameObject subGo = NewUI("Subtitle", modal.transform);
-            Text sub = subGo.AddComponent<Text>();
-            sub.font = GetFont();
-            sub.text = "TẠM DỪNG TRÒ CHƠI · CONTRAST SESSION PAUSED";
-            sub.fontSize = 13;
-            sub.fontStyle = FontStyle.Normal;
-            sub.alignment = TextAnchor.MiddleCenter;
-            sub.color = new Color(0.72f, 0.82f, 0.90f, 0.65f);
-
-            RectTransform subRt = subGo.GetComponent<RectTransform>();
-            subRt.sizeDelta = new Vector2(500f, 25f);
-            subRt.anchoredPosition = new Vector2(0f, 155f);
-
-            // Context Badge Pill
+            // Context Stadium Pill Badge
             GameObject badgeGo = NewUI("ContextBadge", modal.transform);
             Image badgeBg = badgeGo.AddComponent<Image>();
-            badgeBg.color = new Color(0.08f, 0.13f, 0.19f, 0.85f);
-
-            Outline badgeOutline = badgeGo.AddComponent<Outline>();
-            badgeOutline.effectColor = new Color(0.75f, 0.85f, 0.95f, 0.22f);
-            badgeOutline.effectDistance = new Vector2(1f, -1f);
+            LabStyleUI.ApplySlicedSprite(badgeBg, LabStyleUI.GetPillSprite(), false);
 
             RectTransform badgeRt = badgeGo.GetComponent<RectTransform>();
-            badgeRt.sizeDelta = new Vector2(440f, 32f);
-            badgeRt.anchoredPosition = new Vector2(0f, 115f);
+            badgeRt.sizeDelta = new Vector2(536f, 40f);
+            badgeRt.anchoredPosition = new Vector2(0f, 194f);
 
             GameObject badgeTextGo = NewUI("BadgeText", badgeGo.transform);
             contextBadgeText = badgeTextGo.AddComponent<Text>();
-            contextBadgeText.font = GetFont();
-            contextBadgeText.text = "CHẾ ĐỘ: MÀN CHƠI CHÍNH (MAIN GAMEPLAY)";
-            contextBadgeText.fontSize = 12;
+            contextBadgeText.font = LabStyleUI.GetFont();
+            contextBadgeText.text = "Đang thực hiện: L01 — Cánh cửa không phải vật cản";
+            contextBadgeText.fontSize = 14;
             contextBadgeText.fontStyle = FontStyle.Bold;
             contextBadgeText.alignment = TextAnchor.MiddleCenter;
-            contextBadgeText.color = new Color(0.45f, 0.75f, 1f, 0.90f);
+            contextBadgeText.color = LabStyleUI.TextSecondary;
             Stretch(badgeTextGo.GetComponent<RectTransform>());
 
-            // ── Buttons ──────────────────────────────────────────────
-            float btnStartY = 45f;
-            float btnGap = 82f;
+            // ── Recessed Audio Volume Card ──────────────────────────────
+            GameObject audioCard = NewUI("AudioSettingsCard", modal.transform);
+            Image audioBg = audioCard.AddComponent<Image>();
+            LabStyleUI.ApplySlicedSprite(audioBg, LabStyleUI.GetRecessedSlotSprite(), false);
+            RectTransform audioRt = audioCard.GetComponent<RectTransform>();
+            audioRt.sizeDelta = new Vector2(536f, 144f);
+            audioRt.anchoredPosition = new Vector2(0f, 82f);
 
-            // 1. RESUME Button
-            CreateMenuButton(
+            musicSlider = CreateVolumeSliderRow(
+                audioCard.transform,
+                "MusicRow",
+                "Nhạc nền",
+                new Vector2(0f, 32f),
+                ContrastAudioManager.DefaultMusicVolume,
+                out musicValText,
+                val =>
+                {
+                    if (suppressSliderEvents) return;
+                    ContrastAudioManager.EnsureInstance().SetMusicVolume(val);
+                    if (musicValText != null)
+                        musicValText.text = $"{Mathf.RoundToInt(val * 100f)}%";
+                });
+
+            sfxSlider = CreateVolumeSliderRow(
+                audioCard.transform,
+                "SfxRow",
+                "Hiệu ứng âm thanh",
+                new Vector2(0f, -32f),
+                ContrastAudioManager.DefaultSfxVolume,
+                out sfxValText,
+                val =>
+                {
+                    if (suppressSliderEvents) return;
+                    ContrastAudioManager.EnsureInstance().SetSfxVolume(val);
+                    if (sfxValText != null)
+                        sfxValText.text = $"{Mathf.RoundToInt(val * 100f)}%";
+                });
+
+            // ── Clean Single-Line Virtual Lab Buttons ───────────────────
+            // 1. Primary Royal-Blue CTA ("TIẾP TỤC")
+            CreateLabModalButton(
                 modal.transform,
-                "RESUME",
-                "TIẾP TỤC TRÒ CHƠI · CONTINUE",
-                new Vector2(0f, btnStartY),
-                new Color(0.09f, 0.15f, 0.22f, 0.95f),
-                new Color(0.25f, 0.82f, 0.95f, 0.40f),
+                "ResumeButton",
+                "TIẾP TỤC",
+                LabStyleUI.GetPrimaryButtonSprite(),
+                LabStyleUI.IconKind.PlayTriangle,
+                new Vector2(0f, -48f),
                 OnResumeClicked);
 
-            // 2. RESTART Button
-            CreateMenuButton(
+            // 2. Secondary Matte-Slate Button ("CHƠI LẠI MÀN NÀY")
+            CreateLabModalButton(
                 modal.transform,
-                "RESTART",
-                "CHƠI LẠI MÀN HIỆN TẠI · RELOAD LEVEL",
-                new Vector2(0f, btnStartY - btnGap),
-                new Color(0.07f, 0.11f, 0.17f, 0.95f),
-                new Color(0.75f, 0.88f, 0.98f, 0.25f),
+                "RestartButton",
+                "CHƠI LẠI MÀN NÀY",
+                LabStyleUI.GetSecondaryButtonSprite(),
+                LabStyleUI.IconKind.Restart,
+                new Vector2(0f, -128f),
                 OnRestartClicked);
 
-            // 3. RETURN Button (Context-Aware)
-            returnButtonSubText = CreateMenuButton(
+            // 3. Stadium Navigation Pill ("< Quay lại Menu chính")
+            returnButtonTitleText = CreateLabModalButton(
                 modal.transform,
-                "RETURN",
-                "QUAY LẠI MENU CHÍNH · MAIN MENU",
-                new Vector2(0f, btnStartY - btnGap * 2f),
-                new Color(0.12f, 0.08f, 0.08f, 0.95f),
-                new Color(0.95f, 0.45f, 0.45f, 0.35f),
+                "ReturnButton",
+                "Quay lại Menu chính",
+                LabStyleUI.GetPillSprite(),
+                LabStyleUI.IconKind.ChevronLeft,
+                new Vector2(0f, -208f),
                 OnReturnClicked);
 
             // Footer hint
             GameObject hintGo = NewUI("Hint", modal.transform);
             Text hint = hintGo.AddComponent<Text>();
-            hint.font = GetFont();
-            hint.text = "Nhấn ESC hoặc nút RESUME để tiếp tục chơi";
+            hint.font = LabStyleUI.GetFont();
+            hint.text = "Nhấn phím ESC để tiếp tục thí nghiệm";
             hint.fontSize = 12;
             hint.fontStyle = FontStyle.Normal;
             hint.alignment = TextAnchor.MiddleCenter;
-            hint.color = new Color(0.72f, 0.82f, 0.90f, 0.45f);
+            hint.color = LabStyleUI.TextMuted;
 
             RectTransform hintRt = hintGo.GetComponent<RectTransform>();
-            hintRt.sizeDelta = new Vector2(500f, 25f);
-            hintRt.anchoredPosition = new Vector2(0f, -215f);
+            hintRt.sizeDelta = new Vector2(520f, 24f);
+            hintRt.anchoredPosition = new Vector2(0f, -276f);
         }
 
-        private static Text CreateMenuButton(
+        private static Slider CreateVolumeSliderRow(
             Transform parent,
-            string mainTitle,
-            string subTitle,
+            string name,
+            string labelStr,
+            Vector2 pos,
+            float initialVal,
+            out Text valueLabel,
+            UnityEngine.Events.UnityAction<float> onChanged)
+        {
+            GameObject row = NewUI(name, parent);
+            RectTransform rowRt = row.GetComponent<RectTransform>();
+            rowRt.sizeDelta = new Vector2(496f, 48f);
+            rowRt.anchoredPosition = pos;
+
+            GameObject lblGo = NewUI("Label", row.transform);
+            Text lbl = lblGo.AddComponent<Text>();
+            lbl.font = LabStyleUI.GetFont();
+            lbl.text = labelStr;
+            lbl.fontSize = 14;
+            lbl.fontStyle = FontStyle.Bold;
+            lbl.alignment = TextAnchor.MiddleLeft;
+            lbl.color = LabStyleUI.TextPrimary;
+            RectTransform lblRt = lblGo.GetComponent<RectTransform>();
+            lblRt.sizeDelta = new Vector2(180f, 32f);
+            lblRt.anchoredPosition = new Vector2(-156f, 0f);
+
+            // Slider track
+            GameObject sliderGo = NewUI("Slider", row.transform);
+            RectTransform sRt = sliderGo.GetComponent<RectTransform>();
+            sRt.sizeDelta = new Vector2(226f, 28f);
+            sRt.anchoredPosition = new Vector2(68f, 0f);
+
+            GameObject bgGo = NewUI("Background", sliderGo.transform);
+            Image bgImg = bgGo.AddComponent<Image>();
+            LabStyleUI.ApplySlicedSprite(bgImg, LabStyleUI.GetPillSprite(), false);
+            bgImg.color = new Color(0.68f, 0.76f, 0.86f, 0.95f);
+            RectTransform bgRt = bgGo.GetComponent<RectTransform>();
+            bgRt.anchorMin = new Vector2(0f, 0.5f);
+            bgRt.anchorMax = new Vector2(1f, 0.5f);
+            bgRt.sizeDelta = new Vector2(0f, 12f);
+
+            GameObject fillArea = NewUI("Fill Area", sliderGo.transform);
+            RectTransform faRt = fillArea.GetComponent<RectTransform>();
+            faRt.anchorMin = new Vector2(0f, 0.5f);
+            faRt.anchorMax = new Vector2(1f, 0.5f);
+            faRt.offsetMin = new Vector2(2f, -5f);
+            faRt.offsetMax = new Vector2(-2f, 5f);
+
+            GameObject fillGo = NewUI("Fill", fillArea.transform);
+            Image fillImg = fillGo.AddComponent<Image>();
+            LabStyleUI.ApplySlicedSprite(fillImg, LabStyleUI.GetPrimaryButtonSprite(), false);
+            RectTransform fillRt = fillGo.GetComponent<RectTransform>();
+            Stretch(fillRt);
+
+            GameObject handleArea = NewUI("Handle Slide Area", sliderGo.transform);
+            Stretch(handleArea.GetComponent<RectTransform>());
+
+            GameObject handleGo = NewUI("Handle", handleArea.transform);
+            Image handleImg = handleGo.AddComponent<Image>();
+            handleImg.sprite = LabStyleUI.GetCircleButtonSprite();
+            handleImg.color = Color.white;
+            RectTransform hRt = handleGo.GetComponent<RectTransform>();
+            hRt.sizeDelta = new Vector2(24f, 24f);
+
+            Slider slider = sliderGo.AddComponent<Slider>();
+            slider.minValue = 0f;
+            slider.maxValue = 1f;
+            slider.wholeNumbers = false;
+            slider.fillRect = fillRt;
+            slider.handleRect = hRt;
+            slider.targetGraphic = handleImg;
+            slider.direction = Slider.Direction.LeftToRight;
+            slider.value = initialVal;
+            slider.onValueChanged.AddListener(onChanged);
+
+            GameObject valGo = NewUI("ValueText", row.transform);
+            valueLabel = valGo.AddComponent<Text>();
+            valueLabel.font = LabStyleUI.GetFont();
+            valueLabel.text = $"{Mathf.RoundToInt(initialVal * 100f)}%";
+            valueLabel.fontSize = 14;
+            valueLabel.fontStyle = FontStyle.Bold;
+            valueLabel.alignment = TextAnchor.MiddleRight;
+            valueLabel.color = LabStyleUI.TextPrimary;
+            RectTransform valRt = valGo.GetComponent<RectTransform>();
+            valRt.sizeDelta = new Vector2(56f, 32f);
+            valRt.anchoredPosition = new Vector2(220f, 0f);
+
+            return slider;
+        }
+
+        private static Text CreateLabModalButton(
+            Transform parent,
+            string objectName,
+            string titleText,
+            Sprite bgSprite,
+            LabStyleUI.IconKind iconKind,
             Vector2 position,
-            Color bgColor,
-            Color outlineColor,
             UnityEngine.Events.UnityAction callback)
         {
-            GameObject btnGo = NewUI("Btn_" + mainTitle, parent);
+            GameObject btnGo = NewUI(objectName, parent);
             Image btnImg = btnGo.AddComponent<Image>();
-            btnImg.color = bgColor;
-
-            Outline outline = btnGo.AddComponent<Outline>();
-            outline.effectColor = outlineColor;
-            outline.effectDistance = new Vector2(1.5f, -1.5f);
+            LabStyleUI.ApplySlicedSprite(btnImg, bgSprite, true, -4f);
 
             Button btn = btnGo.AddComponent<Button>();
+            btn.navigation = new Navigation { mode = Navigation.Mode.None };
             btn.targetGraphic = btnImg;
+            btn.colors = LabStyleUI.MakeButtonColorBlock();
             btn.onClick.AddListener(callback);
 
-            ColorBlock cb = btn.colors;
-            cb.normalColor = bgColor;
-            cb.highlightedColor = new Color(bgColor.r + 0.06f, bgColor.g + 0.06f, bgColor.b + 0.08f, 1f);
-            cb.pressedColor = new Color(bgColor.r + 0.12f, bgColor.g + 0.12f, bgColor.b + 0.15f, 1f);
-            cb.fadeDuration = 0.12f;
-            btn.colors = cb;
-
             RectTransform rt = btnGo.GetComponent<RectTransform>();
-            rt.sizeDelta = new Vector2(440f, 66f);
+            rt.sizeDelta = new Vector2(536f, 58f);
             rt.anchoredPosition = position;
 
-            // Main Title
+            // Crisp vector icon on left
+            GameObject iconGo = NewUI("Icon", btnGo.transform);
+            Image iconImg = iconGo.AddComponent<Image>();
+            iconImg.sprite = LabStyleUI.GetIconSprite(iconKind);
+            iconImg.color = Color.white;
+            iconImg.raycastTarget = false;
+            RectTransform iRt = iconGo.GetComponent<RectTransform>();
+            iRt.anchorMin = new Vector2(0f, 0.5f);
+            iRt.anchorMax = new Vector2(0f, 0.5f);
+            iRt.pivot = new Vector2(0.5f, 0.5f);
+            iRt.anchoredPosition = new Vector2(36f, 0f);
+            iRt.sizeDelta = new Vector2(22f, 22f);
+
             GameObject titleGo = NewUI("Title", btnGo.transform);
             Text title = titleGo.AddComponent<Text>();
-            title.font = GetFont();
-            title.text = mainTitle;
-            title.fontSize = 20;
+            title.font = LabStyleUI.GetFont();
+            title.text = titleText;
+            title.fontSize = 18;
             title.fontStyle = FontStyle.Bold;
             title.alignment = TextAnchor.MiddleCenter;
-            title.color = new Color(0.95f, 0.98f, 1f, 1f);
+            title.color = Color.white;
+            title.raycastTarget = false;
+            Stretch(titleGo.GetComponent<RectTransform>());
 
-            RectTransform titleRt = titleGo.GetComponent<RectTransform>();
-            titleRt.anchorMin = new Vector2(0f, 0.5f);
-            titleRt.anchorMax = new Vector2(1f, 1f);
-            titleRt.offsetMin = new Vector2(10f, 0f);
-            titleRt.offsetMax = new Vector2(-10f, -4f);
-
-            // Subtitle
-            GameObject subGo = NewUI("Sub", btnGo.transform);
-            Text sub = subGo.AddComponent<Text>();
-            sub.font = GetFont();
-            sub.text = subTitle;
-            sub.fontSize = 11;
-            sub.fontStyle = FontStyle.Normal;
-            sub.alignment = TextAnchor.MiddleCenter;
-            sub.color = new Color(0.75f, 0.85f, 0.92f, 0.65f);
-
-            RectTransform subRt = subGo.GetComponent<RectTransform>();
-            subRt.anchorMin = new Vector2(0f, 0f);
-            subRt.anchorMax = new Vector2(1f, 0.5f);
-            subRt.offsetMin = new Vector2(10f, 4f);
-            subRt.offsetMax = new Vector2(-10f, 0f);
-
-            return sub;
+            return title;
         }
 
         private static GameObject NewUI(string name, Transform parent)
@@ -298,15 +437,6 @@ namespace Contrast.UI
             rt.anchorMax = Vector2.one;
             rt.offsetMin = Vector2.zero;
             rt.offsetMax = Vector2.zero;
-        }
-
-        private static Font GetFont()
-        {
-#if UNITY_2022_2_OR_NEWER
-            return Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
-#else
-            return Resources.GetBuiltinResource<Font>("Arial.ttf");
-#endif
         }
 
         private static void EnsureEventSystem()

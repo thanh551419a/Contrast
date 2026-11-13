@@ -5,6 +5,7 @@ using Contrast.Core;
 using Contrast.Data;
 using Contrast.Player;
 using Contrast.Presentation;
+using Contrast.UI;
 using UnityEngine;
 using UnityEngine.UI;
 
@@ -117,6 +118,9 @@ namespace Contrast.Level
         private Text objectiveInfoText;
         private Text objectiveTitleText;
         private Text objectiveSubText;
+        private Text slotXkValText;
+        private Text slotXiValText;
+        private Text slotXkpValText;
         private Text feedbackText;
         private float feedbackTimer;
         private GameObject bottomBarGo;
@@ -729,7 +733,7 @@ namespace Contrast.Level
 
             hudCanvas = hudCanvasGo.AddComponent<Canvas>();
             hudCanvas.renderMode = RenderMode.ScreenSpaceOverlay;
-            hudCanvas.sortingOrder = 150;
+            hudCanvas.sortingOrder = 85; // Above gameplay/PhaseTuner, below GameControlUI (90) & Pause/Win modals (210+)
 
             CanvasScaler scaler = hudCanvasGo.AddComponent<CanvasScaler>();
             scaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
@@ -742,121 +746,156 @@ namespace Contrast.Level
             string colorNameVi = NewtonRingsPresentation.GetWavelengthColorNameVi(sourceLambda);
             Color spectralAccent = Color.Lerp(spectralCol, Color.white, 0.30f);
 
-            // Objective Card (Top Left)
-            GameObject objCard = new GameObject("ObjectiveCard");
+            // 1. Virtual Lab Newton Measurement Card (Docked Top-Left below "< Quay lại" pill so bottom of Newton rings is 100% clear)
+            GameObject objCard = new GameObject("ObjectiveCard", typeof(RectTransform));
             objectiveCardGo = objCard;
             objCard.transform.SetParent(hudCanvasGo.transform, false);
             Image objBg = objCard.AddComponent<Image>();
-            objBg.color = new Color(0.02f, 0.04f, 0.07f, 0.85f);
-            Outline objOut = objCard.AddComponent<Outline>();
-            objOut.effectColor = new Color(spectralAccent.r, spectralAccent.g, spectralAccent.b, 0.28f);
-            objOut.effectDistance = new Vector2(1f, -1f);
+            LabStyleUI.ApplySlicedSprite(objBg, LabStyleUI.GetCardSprite(), true, -5f);
+
             RectTransform objRt = objCard.GetComponent<RectTransform>();
             objRt.anchorMin = new Vector2(0f, 1f);
             objRt.anchorMax = new Vector2(0f, 1f);
             objRt.pivot = new Vector2(0f, 1f);
-            objRt.anchoredPosition = new Vector2(28f, -24f);
-            objRt.sizeDelta = new Vector2(460f, 136f);
+            objRt.anchoredPosition = new Vector2(22f, -80f);
+            objRt.sizeDelta = new Vector2(444f, 192f);
 
-            GameObject headerGo = new GameObject("Header");
-            headerGo.transform.SetParent(objCard.transform, false);
-            Text header = headerGo.AddComponent<Text>();
-            header.font = GetFont();
-            header.text = "NHIỆM VỤ · ĐO VÂN NEWTON";
-            header.fontSize = 12;
-            header.fontStyle = FontStyle.Bold;
-            header.color = new Color(0.85f, 0.92f, 0.98f, 0.85f);
-            RectTransform hrt = headerGo.GetComponent<RectTransform>();
-            hrt.anchoredPosition = new Vector2(18f, -14f);
-            hrt.sizeDelta = new Vector2(424f, 20f);
-            header.alignment = TextAnchor.UpperLeft;
-
-            GameObject infoGo = new GameObject("ProblemInfo");
+            // Top row matching reference image: "k = ...      i = ..."
+            GameObject infoGo = new GameObject("ProblemInfo", typeof(RectTransform));
             infoGo.transform.SetParent(objCard.transform, false);
             objectiveInfoText = infoGo.AddComponent<Text>();
             objectiveInfoText.font = GetFont();
-            objectiveInfoText.text = $"ĐỀ BÀI: i = {fringeOrderI}   k = {fringeOrderK}   ·   Vân sáng {colorNameVi} (λ = {sourceLambda:F0} nm)";
-            objectiveInfoText.fontSize = 13;
+            objectiveInfoText.text = $"k = {fringeOrderK}          i = {fringeOrderI}";
+            objectiveInfoText.fontSize = 21;
             objectiveInfoText.fontStyle = FontStyle.Bold;
-            objectiveInfoText.color = new Color(spectralAccent.r, spectralAccent.g, spectralAccent.b, 0.95f);
+            objectiveInfoText.color = LabStyleUI.TextPrimary;
+            objectiveInfoText.alignment = TextAnchor.MiddleCenter;
             RectTransform irt = infoGo.GetComponent<RectTransform>();
-            irt.anchoredPosition = new Vector2(18f, -36f);
-            irt.sizeDelta = new Vector2(424f, 22f);
-            objectiveInfoText.alignment = TextAnchor.UpperLeft;
+            irt.anchorMin = new Vector2(0f, 1f);
+            irt.anchorMax = new Vector2(1f, 1f);
+            irt.pivot = new Vector2(0.5f, 1f);
+            irt.anchoredPosition = new Vector2(0f, -12f);
+            irt.sizeDelta = new Vector2(-32f, 28f);
 
-            GameObject titleGo = new GameObject("Title");
-            titleGo.transform.SetParent(objCard.transform, false);
-            objectiveTitleText = titleGo.AddComponent<Text>();
-            objectiveTitleText.font = GetFont();
-            objectiveTitleText.text = $"CHỌN K TRÊN VÂN k = {fringeOrderK}";
-            objectiveTitleText.fontSize = 18;
-            objectiveTitleText.fontStyle = FontStyle.Bold;
-            objectiveTitleText.color = new Color(0.96f, 0.98f, 1f, 1f);
-            RectTransform trt = titleGo.GetComponent<RectTransform>();
-            trt.anchoredPosition = new Vector2(18f, -62f);
-            trt.sizeDelta = new Vector2(424f, 28f);
-            objectiveTitleText.alignment = TextAnchor.UpperLeft;
+            // Subtle spectral wavelength subtitle right under k / i
+            GameObject waveTagGo = new GameObject("WavelengthTag", typeof(RectTransform));
+            waveTagGo.transform.SetParent(objCard.transform, false);
+            Text waveTag = waveTagGo.AddComponent<Text>();
+            waveTag.font = GetFont();
+            waveTag.text = $"Hệ vân tròn Newton · Ánh sáng {colorNameVi} (λ = {sourceLambda:F0} nm)";
+            waveTag.fontSize = 12;
+            waveTag.fontStyle = FontStyle.Bold;
+            waveTag.color = new Color(spectralAccent.r, spectralAccent.g, spectralAccent.b, 0.94f);
+            waveTag.alignment = TextAnchor.MiddleCenter;
+            RectTransform wrt = waveTagGo.GetComponent<RectTransform>();
+            wrt.anchorMin = new Vector2(0f, 1f);
+            wrt.anchorMax = new Vector2(1f, 1f);
+            wrt.pivot = new Vector2(0.5f, 1f);
+            wrt.anchoredPosition = new Vector2(0f, -40f);
+            wrt.sizeDelta = new Vector2(-32f, 18f);
 
-            GameObject subGo = new GameObject("Sub");
-            subGo.transform.SetParent(objCard.transform, false);
-            objectiveSubText = subGo.AddComponent<Text>();
-            objectiveSubText.font = GetFont();
-            objectiveSubText.text = "Đứng trên thanh K và nhấn X để đánh dấu";
-            objectiveSubText.fontSize = 13;
-            objectiveSubText.color = new Color(0.72f, 0.82f, 0.90f, 0.78f);
-            RectTransform srt = subGo.GetComponent<RectTransform>();
-            srt.anchoredPosition = new Vector2(18f, -94f);
-            srt.sizeDelta = new Vector2(424f, 30f);
-            objectiveSubText.alignment = TextAnchor.UpperLeft;
+            // 3 Recessed Coordinate Readout Slots matching reference image: x_k [giá trị  mm], x_i [giá trị  mm], x_k' [giá trị  mm]
+            slotXkValText = CreateCoordinateSlot(objCard.transform, "Slot_Xk", "x_k", new Vector2(-136f, -94f));
+            slotXiValText = CreateCoordinateSlot(objCard.transform, "Slot_Xi", "x_i", new Vector2(0f, -94f));
+            slotXkpValText = CreateCoordinateSlot(objCard.transform, "Slot_Xkp", "x_k′", new Vector2(136f, -94f));
 
-            // Feedback Text (Top-center so it never covers the rings)
-            GameObject fbGo = new GameObject("FeedbackText");
-            fbGo.transform.SetParent(hudCanvasGo.transform, false);
-            feedbackText = fbGo.AddComponent<Text>();
-            feedbackText.font = GetFont();
-            feedbackText.text = string.Empty;
-            feedbackText.fontSize = 22;
-            feedbackText.fontStyle = FontStyle.Bold;
-            feedbackText.alignment = TextAnchor.MiddleCenter;
-            feedbackText.color = new Color(0.95f, 0.98f, 1f, 1f);
-            Outline fbOut = fbGo.AddComponent<Outline>();
-            fbOut.effectColor = new Color(0f, 0f, 0f, 0.8f);
-            fbOut.effectDistance = new Vector2(2f, -2f);
-            RectTransform fbrt = fbGo.GetComponent<RectTransform>();
-            fbrt.anchorMin = new Vector2(0.5f, 1f);
-            fbrt.anchorMax = new Vector2(0.5f, 1f);
-            fbrt.pivot = new Vector2(0.5f, 1f);
-            fbrt.anchoredPosition = new Vector2(0f, -24f);
-            fbrt.sizeDelta = new Vector2(720f, 48f);
+            // Bottom Royal-Blue Primary CTA Button ("NHẬP") matching reference image
+            GameObject enterBtnGo = new GameObject("MarkActionButton", typeof(RectTransform));
+            enterBtnGo.transform.SetParent(objCard.transform, false);
+            Image enterBg = enterBtnGo.AddComponent<Image>();
+            LabStyleUI.ApplySlicedSprite(enterBg, LabStyleUI.GetPrimaryButtonSprite(), true, -3f);
 
-            // Control Bar docked directly under ObjectiveCard on Top-Left so bottom Newton rings stay 100% clear
-            bottomBarGo = new GameObject("BottomBar");
+            Button enterBtn = enterBtnGo.AddComponent<Button>();
+            enterBtn.navigation = new Navigation { mode = Navigation.Mode.None };
+            enterBtn.targetGraphic = enterBg;
+            enterBtn.colors = LabStyleUI.MakeButtonColorBlock();
+            enterBtn.onClick.AddListener(OnPlayerNewtonMarkInput);
+
+            RectTransform enterRt = enterBtnGo.GetComponent<RectTransform>();
+            enterRt.anchorMin = new Vector2(0.5f, 0f);
+            enterRt.anchorMax = new Vector2(0.5f, 0f);
+            enterRt.pivot = new Vector2(0.5f, 0f);
+            enterRt.anchoredPosition = new Vector2(0f, 14f);
+            enterRt.sizeDelta = new Vector2(396f, 40f);
+
+            GameObject enterLblGo = new GameObject("Label", typeof(RectTransform));
+            enterLblGo.transform.SetParent(enterBtnGo.transform, false);
+            Text enterLbl = enterLblGo.AddComponent<Text>();
+            enterLbl.font = GetFont();
+            enterLbl.text = "NHẬP  (PHÍM X)";
+            enterLbl.fontSize = 15;
+            enterLbl.fontStyle = FontStyle.Bold;
+            enterLbl.alignment = TextAnchor.MiddleCenter;
+            enterLbl.color = Color.white;
+            enterLbl.raycastTarget = false;
+            RectTransform elRt = enterLblGo.GetComponent<RectTransform>();
+            elRt.anchorMin = Vector2.zero;
+            elRt.anchorMax = Vector2.one;
+            elRt.offsetMin = Vector2.zero;
+            elRt.offsetMax = Vector2.zero;
+
+            // 2. Callout Stadium Pill docked directly below ObjectiveCard on Top-Left ("Đọc và ghi lại toạ độ ...")
+            // Preserves BottomBarGo anchored at (0, 1) so bottom of Newton rings is never covered
+            bottomBarGo = new GameObject("BottomBar", typeof(RectTransform));
             bottomBarGo.transform.SetParent(hudCanvasGo.transform, false);
             Image barBg = bottomBarGo.AddComponent<Image>();
-            barBg.color = new Color(0.02f, 0.04f, 0.07f, 0.82f);
-            Outline barOut = bottomBarGo.AddComponent<Outline>();
-            barOut.effectColor = new Color(0.75f, 0.85f, 0.95f, 0.18f);
-            barOut.effectDistance = new Vector2(1f, -1f);
+            LabStyleUI.ApplySlicedSprite(barBg, LabStyleUI.GetPillSprite(), true, -4f);
+
             RectTransform brt = bottomBarGo.GetComponent<RectTransform>();
             brt.anchorMin = new Vector2(0f, 1f);
             brt.anchorMax = new Vector2(0f, 1f);
             brt.pivot = new Vector2(0f, 1f);
-            brt.anchoredPosition = new Vector2(28f, -168f);
-            brt.sizeDelta = new Vector2(460f, 42f);
+            brt.anchoredPosition = new Vector2(22f, -282f);
+            brt.sizeDelta = new Vector2(444f, 62f);
 
-            GameObject barTextGo = new GameObject("Controls");
-            barTextGo.transform.SetParent(bottomBarGo.transform, false);
-            Text barText = barTextGo.AddComponent<Text>();
-            barText.font = GetFont();
-            barText.text = "A/D: Di chuyển · SPACE: Nhảy · ←/→: Đổi pha · X: Đánh dấu";
-            barText.fontSize = 13;
-            barText.fontStyle = FontStyle.Bold;
-            barText.alignment = TextAnchor.MiddleCenter;
-            barText.color = new Color(0.85f, 0.92f, 0.98f, 0.9f);
-            RectTransform btrt = barTextGo.GetComponent<RectTransform>();
-            btrt.anchorMin = Vector2.zero;
-            btrt.anchorMax = Vector2.one;
-            btrt.sizeDelta = Vector2.zero;
+            GameObject titleGo = new GameObject("Title", typeof(RectTransform));
+            titleGo.transform.SetParent(bottomBarGo.transform, false);
+            objectiveTitleText = titleGo.AddComponent<Text>();
+            objectiveTitleText.font = GetFont();
+            objectiveTitleText.text = $"Đọc và ghi lại toạ độ x_k  (vân k = {fringeOrderK})";
+            objectiveTitleText.fontSize = 15;
+            objectiveTitleText.fontStyle = FontStyle.Bold;
+            objectiveTitleText.color = LabStyleUI.TextPrimary;
+            objectiveTitleText.alignment = TextAnchor.MiddleCenter;
+            RectTransform trt = titleGo.GetComponent<RectTransform>();
+            trt.anchorMin = new Vector2(0f, 0.46f);
+            trt.anchorMax = new Vector2(1f, 1f);
+            trt.offsetMin = new Vector2(16f, 0f);
+            trt.offsetMax = new Vector2(-16f, -4f);
+
+            GameObject subGo = new GameObject("Sub", typeof(RectTransform));
+            subGo.transform.SetParent(bottomBarGo.transform, false);
+            objectiveSubText = subGo.AddComponent<Text>();
+            objectiveSubText.font = GetFont();
+            objectiveSubText.text = "Đứng trên thanh K và nhấn X (hoặc nút NHẬP)";
+            objectiveSubText.fontSize = 12;
+            objectiveSubText.color = LabStyleUI.TextSecondary;
+            objectiveSubText.alignment = TextAnchor.MiddleCenter;
+            RectTransform srt = subGo.GetComponent<RectTransform>();
+            srt.anchorMin = new Vector2(0f, 0f);
+            srt.anchorMax = new Vector2(1f, 0.50f);
+            srt.offsetMin = new Vector2(16f, 4f);
+            srt.offsetMax = new Vector2(-16f, 0f);
+
+            // Feedback Toast Text (Top-center below TopLabDock so it never covers the rings)
+            GameObject fbGo = new GameObject("FeedbackText", typeof(RectTransform));
+            fbGo.transform.SetParent(hudCanvasGo.transform, false);
+            feedbackText = fbGo.AddComponent<Text>();
+            feedbackText.font = GetFont();
+            feedbackText.text = string.Empty;
+            feedbackText.fontSize = 19;
+            feedbackText.fontStyle = FontStyle.Bold;
+            feedbackText.alignment = TextAnchor.MiddleCenter;
+            feedbackText.color = LabStyleUI.TextPrimary;
+            Outline fbOut = fbGo.AddComponent<Outline>();
+            fbOut.effectColor = new Color(0.02f, 0.05f, 0.10f, 0.85f);
+            fbOut.effectDistance = new Vector2(1.5f, -1.5f);
+            RectTransform fbrt = fbGo.GetComponent<RectTransform>();
+            fbrt.anchorMin = new Vector2(0.5f, 1f);
+            fbrt.anchorMax = new Vector2(0.5f, 1f);
+            fbrt.pivot = new Vector2(0.5f, 1f);
+            fbrt.anchoredPosition = new Vector2(0f, -66f);
+            fbrt.sizeDelta = new Vector2(720f, 42f);
 
             // Calculation Results Card (Phase D & E)
             BuildCalculationPanel();
@@ -867,33 +906,101 @@ namespace Contrast.Level
             hudCanvasGo.SetActive(false);
         }
 
+        private Text CreateCoordinateSlot(Transform parent, string slotName, string symbolLabel, Vector2 posFromTopCenter)
+        {
+            GameObject wrap = new GameObject(slotName, typeof(RectTransform));
+            wrap.transform.SetParent(parent, false);
+            RectTransform wRt = wrap.GetComponent<RectTransform>();
+            wRt.anchorMin = new Vector2(0.5f, 1f);
+            wRt.anchorMax = new Vector2(0.5f, 1f);
+            wRt.pivot = new Vector2(0.5f, 0.5f);
+            wRt.anchoredPosition = posFromTopCenter;
+            wRt.sizeDelta = new Vector2(126f, 56f);
+
+            // Symbol label above recessed box ("x_k", "x_i", "x_k'")
+            GameObject symGo = new GameObject("Symbol", typeof(RectTransform));
+            symGo.transform.SetParent(wrap.transform, false);
+            Text sym = symGo.AddComponent<Text>();
+            sym.font = GetFont();
+            sym.text = symbolLabel;
+            sym.fontSize = 13;
+            sym.fontStyle = FontStyle.Bold;
+            sym.alignment = TextAnchor.LowerLeft;
+            sym.color = LabStyleUI.TextPrimary;
+            RectTransform symRt = symGo.GetComponent<RectTransform>();
+            symRt.anchorMin = new Vector2(0f, 0.64f);
+            symRt.anchorMax = new Vector2(1f, 1f);
+            symRt.offsetMin = new Vector2(4f, 0f);
+            symRt.offsetMax = Vector2.zero;
+
+            // Recessed slot box ("[giá trị    mm]")
+            GameObject boxGo = new GameObject("SlotBox", typeof(RectTransform));
+            boxGo.transform.SetParent(wrap.transform, false);
+            Image boxImg = boxGo.AddComponent<Image>();
+            LabStyleUI.ApplySlicedSprite(boxImg, LabStyleUI.GetRecessedSlotSprite(), false);
+            RectTransform bRt = boxGo.GetComponent<RectTransform>();
+            bRt.anchorMin = new Vector2(0f, 0f);
+            bRt.anchorMax = new Vector2(1f, 0.62f);
+            bRt.offsetMin = Vector2.zero;
+            bRt.offsetMax = Vector2.zero;
+
+            GameObject valGo = new GameObject("Value", typeof(RectTransform));
+            valGo.transform.SetParent(boxGo.transform, false);
+            Text valTxt = valGo.AddComponent<Text>();
+            valTxt.font = GetFont();
+            valTxt.text = "giá trị";
+            valTxt.fontSize = 12;
+            valTxt.fontStyle = FontStyle.Normal;
+            valTxt.alignment = TextAnchor.MiddleLeft;
+            valTxt.color = LabStyleUI.TextMuted;
+            RectTransform vRt = valGo.GetComponent<RectTransform>();
+            vRt.anchorMin = new Vector2(0f, 0f);
+            vRt.anchorMax = new Vector2(0.72f, 1f);
+            vRt.offsetMin = new Vector2(10f, 0f);
+            vRt.offsetMax = Vector2.zero;
+
+            GameObject unitGo = new GameObject("Unit", typeof(RectTransform));
+            unitGo.transform.SetParent(boxGo.transform, false);
+            Text unitTxt = unitGo.AddComponent<Text>();
+            unitTxt.font = GetFont();
+            unitTxt.text = "mm";
+            unitTxt.fontSize = 12;
+            unitTxt.fontStyle = FontStyle.Bold;
+            unitTxt.alignment = TextAnchor.MiddleRight;
+            unitTxt.color = LabStyleUI.TextSecondary;
+            RectTransform uRt = unitGo.GetComponent<RectTransform>();
+            uRt.anchorMin = new Vector2(0.68f, 0f);
+            uRt.anchorMax = new Vector2(1f, 1f);
+            uRt.offsetMin = Vector2.zero;
+            uRt.offsetMax = new Vector2(-10f, 0f);
+
+            return valTxt;
+        }
+
         private void BuildCalculationPanel()
         {
             Color spectralCol = NewtonRingsPresentation.WavelengthToRgb(sourceLambda);
             string colorNameVi = NewtonRingsPresentation.GetWavelengthColorNameVi(sourceLambda);
             Color spectralAccent = Color.Lerp(spectralCol, Color.white, 0.25f);
 
-            calculationPanelGo = new GameObject("CalculationPanel");
+            calculationPanelGo = new GameObject("CalculationPanel", typeof(RectTransform));
             calculationPanelGo.transform.SetParent(hudCanvasGo.transform, false);
             Image bg = calculationPanelGo.AddComponent<Image>();
-            bg.color = new Color(0.015f, 0.03f, 0.055f, 0.90f);
-            Outline outl = calculationPanelGo.AddComponent<Outline>();
-            outl.effectColor = new Color(spectralAccent.r, spectralAccent.g, spectralAccent.b, 0.38f);
-            outl.effectDistance = new Vector2(1.5f, -1.5f);
+            LabStyleUI.ApplySlicedSprite(bg, LabStyleUI.GetCardSprite(), true, -5f);
 
             calcCanvasGroup = calculationPanelGo.AddComponent<CanvasGroup>();
             calcCanvasGroup.alpha = 0f;
 
-            // Docked on Top-Left below ObjectiveCard so it never covers the Newton rings
+            // Docked on Top-Left (slides up to -80 when ObjectiveCard hides) so it never covers the Newton rings
             RectTransform rt = calculationPanelGo.GetComponent<RectTransform>();
             rt.anchorMin = new Vector2(0f, 1f);
             rt.anchorMax = new Vector2(0f, 1f);
             rt.pivot = new Vector2(0f, 1f);
-            rt.anchoredPosition = new Vector2(28f, -168f);
-            rt.sizeDelta = new Vector2(460f, 168f);
+            rt.anchoredPosition = new Vector2(22f, -282f);
+            rt.sizeDelta = new Vector2(464f, 182f);
 
             // 1. Formula line
-            GameObject fGo = new GameObject("FormulaText");
+            GameObject fGo = new GameObject("FormulaText", typeof(RectTransform));
             fGo.transform.SetParent(calculationPanelGo.transform, false);
             calcFormulaText = fGo.AddComponent<Text>();
             calcFormulaText.font = GetFont();
@@ -901,147 +1008,171 @@ namespace Contrast.Level
             calcFormulaText.fontSize = 15;
             calcFormulaText.fontStyle = FontStyle.Bold;
             calcFormulaText.alignment = TextAnchor.MiddleCenter;
-            calcFormulaText.color = new Color(0.88f, 0.94f, 0.98f, 0.95f);
+            calcFormulaText.color = LabStyleUI.TextPrimary;
             RectTransform frt = fGo.GetComponent<RectTransform>();
-            frt.anchoredPosition = new Vector2(0f, 52f);
+            frt.anchoredPosition = new Vector2(0f, 58f);
             frt.sizeDelta = new Vector2(436f, 26f);
 
-            // 2. Measured values line
-            GameObject vGo = new GameObject("ValuesText");
-            vGo.transform.SetParent(calculationPanelGo.transform, false);
+            // 2. Measured values line inside recessed slot
+            GameObject vSlot = new GameObject("ValuesSlot", typeof(RectTransform));
+            vSlot.transform.SetParent(calculationPanelGo.transform, false);
+            Image vSlotImg = vSlot.AddComponent<Image>();
+            LabStyleUI.ApplySlicedSprite(vSlotImg, LabStyleUI.GetRecessedSlotSprite(), false);
+            RectTransform vsRt = vSlot.GetComponent<RectTransform>();
+            vsRt.anchoredPosition = new Vector2(0f, 22f);
+            vsRt.sizeDelta = new Vector2(428f, 30f);
+
+            GameObject vGo = new GameObject("ValuesText", typeof(RectTransform));
+            vGo.transform.SetParent(vSlot.transform, false);
             calcValuesText = vGo.AddComponent<Text>();
             calcValuesText.font = GetFont();
-            calcValuesText.text = $"B = 0.000 mm   b = 0.000 mm   R = {radiusOfCurvatureMm:F0} mm   i = {fringeOrderI}   k = {fringeOrderK}";
-            calcValuesText.fontSize = 13;
+            calcValuesText.text = $"B = 0.000 mm   b = 0.000 mm   R = {radiusOfCurvatureMm:F0} mm";
+            calcValuesText.fontSize = 12;
+            calcValuesText.fontStyle = FontStyle.Bold;
             calcValuesText.alignment = TextAnchor.MiddleCenter;
-            calcValuesText.color = new Color(0.72f, 0.84f, 0.92f, 0.88f);
+            calcValuesText.color = LabStyleUI.TextSecondary;
             RectTransform vrt = vGo.GetComponent<RectTransform>();
-            vrt.anchoredPosition = new Vector2(0f, 22f);
-            vrt.sizeDelta = new Vector2(436f, 24f);
+            vrt.anchorMin = Vector2.zero;
+            vrt.anchorMax = Vector2.one;
+            vrt.offsetMin = Vector2.zero;
+            vrt.offsetMax = Vector2.zero;
 
             // 3. Equation line
-            GameObject eGo = new GameObject("EquationText");
+            GameObject eGo = new GameObject("EquationText", typeof(RectTransform));
             eGo.transform.SetParent(calculationPanelGo.transform, false);
             calcEquationText = eGo.AddComponent<Text>();
             calcEquationText.font = GetFont();
             calcEquationText.text = "λ = (B × b) / [|k − i| × R]";
-            calcEquationText.fontSize = 17;
+            calcEquationText.fontSize = 15;
             calcEquationText.fontStyle = FontStyle.Bold;
             calcEquationText.alignment = TextAnchor.MiddleCenter;
-            calcEquationText.color = new Color(0.92f, 0.96f, 1f, 1f);
+            calcEquationText.color = LabStyleUI.TextPrimary;
             RectTransform ert = eGo.GetComponent<RectTransform>();
-            ert.anchoredPosition = new Vector2(0f, -8f);
-            ert.sizeDelta = new Vector2(436f, 26f);
+            ert.anchoredPosition = new Vector2(0f, -12f);
+            ert.sizeDelta = new Vector2(436f, 24f);
 
-            // 4. Result line
-            GameObject rGo = new GameObject("ResultText");
-            rGo.transform.SetParent(calculationPanelGo.transform, false);
+            // 4. Result Royal-Blue Pill
+            GameObject rBadge = new GameObject("ResultBadge", typeof(RectTransform));
+            rBadge.transform.SetParent(calculationPanelGo.transform, false);
+            Image rBadgeImg = rBadge.AddComponent<Image>();
+            LabStyleUI.ApplySlicedSprite(rBadgeImg, LabStyleUI.GetPrimaryButtonSprite(), false);
+            RectTransform rbRt = rBadge.GetComponent<RectTransform>();
+            rbRt.anchoredPosition = new Vector2(0f, -54f);
+            rbRt.sizeDelta = new Vector2(428f, 40f);
+
+            GameObject rGo = new GameObject("ResultText", typeof(RectTransform));
+            rGo.transform.SetParent(rBadge.transform, false);
             calcResultText = rGo.AddComponent<Text>();
             calcResultText.font = GetFont();
             calcResultText.text = $"λ ≈ {sourceLambda:F1} nm · Ánh sáng {colorNameVi}";
-            calcResultText.fontSize = 22;
+            calcResultText.fontSize = 18;
             calcResultText.fontStyle = FontStyle.Bold;
             calcResultText.alignment = TextAnchor.MiddleCenter;
             calcResultText.color = spectralAccent;
-            Outline rOut = rGo.AddComponent<Outline>();
-            rOut.effectColor = new Color(spectralCol.r * 0.5f, spectralCol.g * 0.5f, spectralCol.b * 0.5f, 0.65f);
-            rOut.effectDistance = new Vector2(1.5f, -1.5f);
             RectTransform rrt = rGo.GetComponent<RectTransform>();
-            rrt.anchoredPosition = new Vector2(0f, -46f);
-            rrt.sizeDelta = new Vector2(436f, 36f);
+            rrt.anchorMin = Vector2.zero;
+            rrt.anchorMax = Vector2.one;
+            rrt.offsetMin = Vector2.zero;
+            rrt.offsetMax = Vector2.zero;
 
             calculationPanelGo.SetActive(false);
         }
 
         private void BuildCompletionPanel()
         {
-            completionPanelGo = new GameObject("CompletionPanel");
+            completionPanelGo = new GameObject("CompletionPanel", typeof(RectTransform));
             completionPanelGo.transform.SetParent(hudCanvasGo.transform, false);
             Image bg = completionPanelGo.AddComponent<Image>();
-            bg.color = new Color(0.01f, 0.02f, 0.04f, 0.95f);
+            bg.color = new Color(0.01f, 0.02f, 0.05f, 0.88f);
             RectTransform rt = completionPanelGo.GetComponent<RectTransform>();
             rt.anchorMin = Vector2.zero;
             rt.anchorMax = Vector2.one;
             rt.sizeDelta = Vector2.zero;
 
-            // Content Container
-            GameObject box = new GameObject("Box");
+            // Content Container (Frosted Slate Card)
+            GameObject box = new GameObject("Box", typeof(RectTransform));
             box.transform.SetParent(completionPanelGo.transform, false);
             Image boxBg = box.AddComponent<Image>();
-            boxBg.color = new Color(0.04f, 0.07f, 0.12f, 0.95f);
-            Outline outl = box.AddComponent<Outline>();
-            outl.effectColor = new Color(0.75f, 0.88f, 0.98f, 0.35f);
-            outl.effectDistance = new Vector2(2f, -2f);
+            LabStyleUI.ApplySlicedSprite(boxBg, LabStyleUI.GetCardSprite(), true, -6f);
             RectTransform boxRt = box.GetComponent<RectTransform>();
-            boxRt.sizeDelta = new Vector2(880f, 480f);
+            boxRt.sizeDelta = new Vector2(860f, 440f);
             boxRt.anchoredPosition = Vector2.zero;
 
             // Title
-            GameObject titleGo = new GameObject("Title");
+            GameObject titleGo = new GameObject("Title", typeof(RectTransform));
             titleGo.transform.SetParent(box.transform, false);
             Text title = titleGo.AddComponent<Text>();
             title.font = GetFont();
-            title.text = "MEASUREMENT COMPLETE";
-            title.fontSize = 52;
+            title.text = "HOÀN THÀNH PHÉP ĐO";
+            title.fontSize = 44;
             title.fontStyle = FontStyle.Bold;
             title.alignment = TextAnchor.MiddleCenter;
-            title.color = new Color(0.96f, 0.98f, 1f, 1f);
-            Outline tOut = titleGo.AddComponent<Outline>();
-            tOut.effectColor = new Color(0.5f, 0.8f, 1f, 0.4f);
-            tOut.effectDistance = new Vector2(2f, -2f);
+            title.color = LabStyleUI.TextPrimary;
             RectTransform trt = titleGo.GetComponent<RectTransform>();
-            trt.anchoredPosition = new Vector2(0f, 145f);
-            trt.sizeDelta = new Vector2(800f, 70f);
+            trt.anchoredPosition = new Vector2(0f, 128f);
+            trt.sizeDelta = new Vector2(780f, 62f);
 
             // Subtitle
-            GameObject subGo = new GameObject("Subtitle");
+            GameObject subGo = new GameObject("Subtitle", typeof(RectTransform));
             subGo.transform.SetParent(box.transform, false);
             Text sub = subGo.AddComponent<Text>();
             sub.font = GetFont();
-            sub.text = "HOÀN THÀNH PHÉP ĐO QUANG HỌC VÂN TRÒN NEWTON";
-            sub.fontSize = 17;
+            sub.text = "Thí nghiệm giao thoa hệ vân tròn Newton đã hoàn tất chính xác";
+            sub.fontSize = 16;
             sub.alignment = TextAnchor.MiddleCenter;
-            sub.color = new Color(0.72f, 0.84f, 0.92f, 0.85f);
+            sub.color = LabStyleUI.TextSecondary;
             RectTransform srt = subGo.GetComponent<RectTransform>();
-            srt.anchoredPosition = new Vector2(0f, 85f);
-            srt.sizeDelta = new Vector2(800f, 32f);
+            srt.anchoredPosition = new Vector2(0f, 74f);
+            srt.sizeDelta = new Vector2(780f, 30f);
 
-            // Detail line
+            // Recessed Detail Slot
             string compColorNameVi = NewtonRingsPresentation.GetWavelengthColorNameVi(sourceLambda);
-            GameObject detGo = new GameObject("Detail");
-            detGo.transform.SetParent(box.transform, false);
+            GameObject detSlot = new GameObject("DetailSlot", typeof(RectTransform));
+            detSlot.transform.SetParent(box.transform, false);
+            Image detSlotBg = detSlot.AddComponent<Image>();
+            LabStyleUI.ApplySlicedSprite(detSlotBg, LabStyleUI.GetRecessedSlotSprite(), false);
+            RectTransform dsRt = detSlot.GetComponent<RectTransform>();
+            dsRt.anchoredPosition = new Vector2(0f, 16f);
+            dsRt.sizeDelta = new Vector2(740f, 48f);
+
+            GameObject detGo = new GameObject("Detail", typeof(RectTransform));
+            detGo.transform.SetParent(detSlot.transform, false);
             completionDetailText = detGo.AddComponent<Text>();
             completionDetailText.font = GetFont();
-            completionDetailText.text = $"Xác lập trục K–O · Đo đối xứng qua tâm · Bước sóng λ ≈ {sourceLambda:F1} nm (Ánh sáng {compColorNameVi})";
+            completionDetailText.text = $"Bước sóng đo được: λ ≈ {sourceLambda:F1} nm (Ánh sáng {compColorNameVi})";
             completionDetailText.fontSize = 16;
-            completionDetailText.fontStyle = FontStyle.Italic;
+            completionDetailText.fontStyle = FontStyle.Bold;
             completionDetailText.alignment = TextAnchor.MiddleCenter;
             completionDetailText.color = Color.Lerp(NewtonRingsPresentation.WavelengthToRgb(sourceLambda), Color.white, 0.35f);
             RectTransform drt = detGo.GetComponent<RectTransform>();
-            drt.anchoredPosition = new Vector2(0f, 35f);
-            drt.sizeDelta = new Vector2(800f, 30f);
+            drt.anchorMin = Vector2.zero;
+            drt.anchorMax = Vector2.one;
+            drt.offsetMin = Vector2.zero;
+            drt.offsetMax = Vector2.zero;
 
-            // Buttons Row
-            GameObject btnRow = new GameObject("ButtonRow");
+            // Buttons Row (Generously spaced: 120px clear gap between buttons)
+            GameObject btnRow = new GameObject("ButtonRow", typeof(RectTransform));
             btnRow.transform.SetParent(box.transform, false);
-            RectTransform rowRt = btnRow.AddComponent<RectTransform>();
-            rowRt.anchoredPosition = new Vector2(0f, -80f);
-            rowRt.sizeDelta = new Vector2(650f, 80f);
+            RectTransform rowRt = btnRow.GetComponent<RectTransform>();
+            rowRt.anchoredPosition = new Vector2(0f, -96f);
+            rowRt.sizeDelta = new Vector2(740f, 72f);
 
-            // Button 1: PLAY AGAIN
+            // Button 1: Royal-Blue Primary CTA
             CreateButton(
                 btnRow.transform,
                 "PLAY AGAIN",
-                "CHƠI LẠI MÀN NÀY",
-                new Vector2(-160f, 0f),
+                "Chơi lại màn này",
+                new Vector2(-200f, 0f),
+                true,
                 OnPlayAgainClicked);
 
-            // Button 2: RETURN TO LEVEL SELECT
+            // Button 2: Matte Slate Secondary
             CreateButton(
                 btnRow.transform,
                 "LEVEL SELECT",
-                "CHỌN MÀN CHƠI",
-                new Vector2(160f, 0f),
+                "Quay lại menu",
+                new Vector2(200f, 0f),
+                false,
                 OnReturnToLevelSelectClicked);
 
             completionPanelGo.SetActive(false);
@@ -1049,59 +1180,47 @@ namespace Contrast.Level
 
         private static Button CreateButton(
             Transform parent,
-            string label,
-            string sub,
+            string objectKey,
+            string displayLabelVi,
             Vector2 pos,
+            bool isPrimary,
             UnityEngine.Events.UnityAction callback)
         {
-            GameObject btnGo = new GameObject(label + "Button");
+            GameObject btnGo = new GameObject(objectKey + "Button", typeof(RectTransform));
             btnGo.transform.SetParent(parent, false);
 
             Image img = btnGo.AddComponent<Image>();
-            img.color = new Color(0.08f, 0.14f, 0.22f, 0.95f);
-
-            Outline outline = btnGo.AddComponent<Outline>();
-            outline.effectColor = new Color(0.75f, 0.88f, 0.98f, 0.40f);
-            outline.effectDistance = new Vector2(1.5f, -1.5f);
+            LabStyleUI.ApplySlicedSprite(
+                img,
+                isPrimary ? LabStyleUI.GetPrimaryButtonSprite() : LabStyleUI.GetSecondaryButtonSprite(),
+                true,
+                -4f);
 
             Button button = btnGo.AddComponent<Button>();
+            button.navigation = new Navigation { mode = Navigation.Mode.None };
             button.targetGraphic = img;
+            button.colors = LabStyleUI.MakeButtonColorBlock();
             button.onClick.AddListener(callback);
 
-            ColorBlock cb = button.colors;
-            cb.normalColor = new Color(0.08f, 0.14f, 0.22f, 0.95f);
-            cb.highlightedColor = new Color(0.15f, 0.24f, 0.36f, 1f);
-            cb.pressedColor = new Color(0.22f, 0.34f, 0.48f, 1f);
-            button.colors = cb;
-
             RectTransform btnRt = btnGo.GetComponent<RectTransform>();
-            btnRt.sizeDelta = new Vector2(280f, 72f);
+            btnRt.sizeDelta = new Vector2(280f, 58f);
             btnRt.anchoredPosition = pos;
 
-            GameObject textGo = new GameObject("Label");
+            GameObject textGo = new GameObject("Label", typeof(RectTransform));
             textGo.transform.SetParent(btnGo.transform, false);
             Text text = textGo.AddComponent<Text>();
             text.font = GetFont();
-            text.text = label;
-            text.fontSize = 19;
+            text.text = displayLabelVi;
+            text.fontSize = 18;
             text.fontStyle = FontStyle.Bold;
             text.alignment = TextAnchor.MiddleCenter;
-            text.color = new Color(0.96f, 0.98f, 1f, 1f);
+            text.color = Color.white;
+            text.raycastTarget = false;
             RectTransform trt = textGo.GetComponent<RectTransform>();
-            trt.anchoredPosition = new Vector2(0f, 10f);
-            trt.sizeDelta = new Vector2(260f, 32f);
-
-            GameObject subGo = new GameObject("Sub");
-            subGo.transform.SetParent(btnGo.transform, false);
-            Text subText = subGo.AddComponent<Text>();
-            subText.font = GetFont();
-            subText.text = sub;
-            subText.fontSize = 12;
-            subText.alignment = TextAnchor.MiddleCenter;
-            subText.color = new Color(0.72f, 0.82f, 0.90f, 0.70f);
-            RectTransform srt = subGo.GetComponent<RectTransform>();
-            srt.anchoredPosition = new Vector2(0f, -15f);
-            srt.sizeDelta = new Vector2(260f, 22f);
+            trt.anchorMin = Vector2.zero;
+            trt.anchorMax = Vector2.one;
+            trt.offsetMin = Vector2.zero;
+            trt.offsetMax = Vector2.zero;
 
             return button;
         }
@@ -1254,27 +1373,59 @@ namespace Contrast.Level
 
         private void UpdateObjectiveHUD()
         {
+            RefreshCoordinateSlots();
             if (objectiveTitleText == null) return;
 
             switch (CurrentStep)
             {
                 case NewtonFinaleStep.CaptureK:
-                    objectiveTitleText.text = $"CHỌN K TRÊN VÂN k = {fringeOrderK}";
-                    objectiveSubText.text = "Đứng trên thanh K và nhấn X để đánh dấu";
+                    objectiveTitleText.text = $"Đọc và ghi lại toạ độ x_k  (vân k = {fringeOrderK})";
+                    objectiveSubText.text = "Đứng trên thanh K và nhấn X (hoặc nút NHẬP)";
                     break;
                 case NewtonFinaleStep.CaptureI:
-                    objectiveTitleText.text = $"TÌM I TRÊN VÂN i = {fringeOrderI}";
-                    objectiveSubText.text = "Đứng trên thanh I, căn đúng trục K–O và nhấn X";
+                    objectiveTitleText.text = $"Đọc và ghi lại toạ độ x_i  (vân i = {fringeOrderI})";
+                    objectiveSubText.text = "Đứng trên thanh I, căn thẳng trục K–O và nhấn X";
                     break;
                 case NewtonFinaleStep.CaptureKp:
-                    objectiveTitleText.text = $"TÌM K′ TRÊN VÂN k = {fringeOrderK}";
-                    objectiveSubText.text = "Quay lại thanh K, căn phía đối diện và nhấn X";
+                    objectiveTitleText.text = $"Đọc và ghi lại toạ độ x_k′  (vân k = {fringeOrderK})";
+                    objectiveSubText.text = "Quay lại thanh K đối diện tâm O và nhấn X";
                     break;
                 case NewtonFinaleStep.Reveal:
                 case NewtonFinaleStep.Complete:
-                    objectiveTitleText.text = "ĐÃ HOÀN THÀNH K – I – K′";
-                    objectiveSubText.text = "Xác lập trục K–O và tính toán bước sóng";
+                    objectiveTitleText.text = "Đã ghi đủ toạ độ x_k, x_i, x_k′";
+                    objectiveSubText.text = "Đang tính bước sóng giao thoa ánh sáng";
                     break;
+            }
+        }
+
+        private void RefreshCoordinateSlots()
+        {
+            float lambdaSourceMm = sourceLambda * 1e-6f;
+            float physicalR1Mm = Mathf.Sqrt(lambdaSourceMm * radiusOfCurvatureMm);
+            float mmPerUnit = ringScale > 0.001f ? (physicalR1Mm / ringScale) : 0.2f;
+
+            float rkMm = GetRadiusForOrder(fringeOrderK) * mmPerUnit;
+            float riMm = GetRadiusForOrder(fringeOrderI) * mmPerUnit;
+
+            if (slotXkValText != null)
+            {
+                slotXkValText.text = HasK ? $"+{rkMm:F2}" : "giá trị";
+                slotXkValText.color = HasK ? LabStyleUI.TextPrimary : LabStyleUI.TextMuted;
+                slotXkValText.fontStyle = HasK ? FontStyle.Bold : FontStyle.Normal;
+            }
+
+            if (slotXiValText != null)
+            {
+                slotXiValText.text = HasI ? $"−{riMm:F2}" : "giá trị";
+                slotXiValText.color = HasI ? LabStyleUI.TextPrimary : LabStyleUI.TextMuted;
+                slotXiValText.fontStyle = HasI ? FontStyle.Bold : FontStyle.Normal;
+            }
+
+            if (slotXkpValText != null)
+            {
+                slotXkpValText.text = HasKp ? $"−{rkMm:F2}" : "giá trị";
+                slotXkpValText.color = HasKp ? LabStyleUI.TextPrimary : LabStyleUI.TextMuted;
+                slotXkpValText.fontStyle = HasKp ? FontStyle.Bold : FontStyle.Normal;
             }
         }
 
@@ -1534,6 +1685,7 @@ namespace Contrast.Level
                 completionDetailText.text = $"B = {MeasuredB_mm:F3} mm · b = {Measuredb_mm:F3} mm · Bước sóng λ ≈ {CalculatedLambda_nm:F1} nm (Ánh sáng {colorNameVi})";
             }
 
+            RefreshCoordinateSlots();
             if (targetICrosshair != null) targetICrosshair.SetActive(false);
             if (targetKpCrosshair != null) targetKpCrosshair.SetActive(false);
             if (objectiveCardGo != null) objectiveCardGo.SetActive(false);
@@ -1542,7 +1694,7 @@ namespace Contrast.Level
             {
                 RectTransform calcRt = calculationPanelGo.GetComponent<RectTransform>();
                 if (calcRt != null)
-                    calcRt.anchoredPosition = new Vector2(28f, -24f);
+                    calcRt.anchoredPosition = new Vector2(22f, -80f);
             }
         }
 
@@ -1630,15 +1782,13 @@ namespace Contrast.Level
                 if (CurrentStep != NewtonFinaleStep.Complete)
                 {
                     CurrentStep = NewtonFinaleStep.Complete;
-                    if (GameManager.Instance != null && GameManager.Instance.CurrentEntryContext == GameplayEntryContext.Campaign)
+                    if (GameManager.Instance != null)
                     {
                         GameManager.Instance.OnPlayerWon();
                     }
-                    else
+                    else if (completionPanelGo != null)
                     {
-                        if (completionPanelGo != null)
-                            completionPanelGo.SetActive(true);
-                        GameManager.Instance?.OnPlayerWon();
+                        completionPanelGo.SetActive(true);
                     }
                 }
             }
@@ -1694,12 +1844,13 @@ namespace Contrast.Level
             if (targetICrosshair != null) targetICrosshair.SetActive(false);
             if (targetKpCrosshair != null) targetKpCrosshair.SetActive(false);
             if (objectiveCardGo != null) objectiveCardGo.SetActive(true);
+            RefreshCoordinateSlots();
             if (calculationPanelGo != null)
             {
                 calculationPanelGo.SetActive(false);
                 RectTransform calcRt = calculationPanelGo.GetComponent<RectTransform>();
                 if (calcRt != null)
-                    calcRt.anchoredPosition = new Vector2(28f, -168f);
+                    calcRt.anchoredPosition = new Vector2(22f, -282f);
             }
             if (completionPanelGo != null) completionPanelGo.SetActive(false);
             if (bottomBarGo != null) bottomBarGo.SetActive(true);

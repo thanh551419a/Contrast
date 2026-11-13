@@ -84,123 +84,134 @@ namespace Contrast.UI
             canvasGroup = rootPanel.AddComponent<CanvasGroup>();
             canvasGroup.alpha = 0.85f;
 
-            // ── Movement Controls (Bottom Left) ───────────────────────────
+            // ── Movement Controls (Bottom Left — Circular Slate Lab Pads) ──
             CreateTouchHoldButton(
                 rootPanel.transform,
                 "BtnLeft",
                 "◄",
                 new Vector2(0f, 0f),
                 new Vector2(90f, 90f),
-                new Vector2(110f, 110f),
-                held => touchAdapter.SetMoveLeft(held));
+                new Vector2(108f, 108f),
+                held => touchAdapter.SetMoveLeft(held),
+                isCircular: true);
 
             CreateTouchHoldButton(
                 rootPanel.transform,
                 "BtnRight",
                 "►",
                 new Vector2(0f, 0f),
-                new Vector2(220f, 90f),
-                new Vector2(110f, 110f),
-                held => touchAdapter.SetMoveRight(held));
+                new Vector2(216f, 90f),
+                new Vector2(108f, 108f),
+                held => touchAdapter.SetMoveRight(held),
+                isCircular: true);
 
-            // Fast Fall Button (Bottom Left, above Left/Right)
+            // Fast Fall Button (Bottom Left, Stadium Pill above Left/Right)
             CreateTouchHoldButton(
                 rootPanel.transform,
                 "BtnFastFall",
-                "▼ FALL",
+                "▼ Hạ nhanh",
                 new Vector2(0f, 0f),
-                new Vector2(155f, 210f),
-                new Vector2(120f, 70f),
+                new Vector2(153f, 212f),
+                new Vector2(138f, 54f),
                 held => touchAdapter.SetFastFall(held),
-                fontSize: 16);
+                fontSize: 15,
+                isCircular: false);
 
-            // ── Phase Tuning Controls (Bottom Center) ─────────────────────
+            // ── Phase Tuning Controls (Bottom Center — Stadium Pills) ─────
             CreateTouchHoldButton(
                 rootPanel.transform,
                 "BtnPhaseLeft",
-                "◄ PHASE",
+                "◄ Pha",
                 new Vector2(0.5f, 0f),
-                new Vector2(-90f, 50f),
-                new Vector2(150f, 60f),
+                new Vector2(-92f, 52f),
+                new Vector2(156f, 54f),
                 held => touchAdapter.SetPhaseTuneLeft(held),
-                fontSize: 16);
+                fontSize: 15,
+                isCircular: false);
 
             CreateTouchHoldButton(
                 rootPanel.transform,
                 "BtnPhaseRight",
-                "PHASE ►",
+                "Pha ►",
                 new Vector2(0.5f, 0f),
-                new Vector2(90f, 50f),
-                new Vector2(150f, 60f),
+                new Vector2(92f, 52f),
+                new Vector2(156f, 54f),
                 held => touchAdapter.SetPhaseTuneRight(held),
-                fontSize: 16);
+                fontSize: 15,
+                isCircular: false);
 
             // ── Action Controls (Bottom Right) ────────────────────────────
-            // Jump Button (large, prominent)
+            // Jump Button (large circular Slate-Navy Lab button)
             CreateTouchTapButton(
                 rootPanel.transform,
                 "BtnJump",
-                "JUMP",
+                "NHẢY",
                 new Vector2(1f, 0f),
-                new Vector2(-110f, 100f),
-                new Vector2(130f, 130f),
-                new UnityEngine.Color(0.12f, 0.22f, 0.35f, 0.85f),
-                new UnityEngine.Color(0.85f, 0.95f, 1f, 0.6f),
-                () => touchAdapter.TriggerJump(),
-                fontSize: 22);
+                new Vector2(-110f, 96f),
+                new Vector2(124f, 124f),
+                LabStyleUI.GetCircleButtonSprite(),
+                isSliced: false,
+                tintColor: UnityEngine.Color.white,
+                onTap: () => touchAdapter.TriggerJump(),
+                textColor: LabStyleUI.TextPrimary,
+                fontSize: 20);
 
-            // Newton Mark X Button (prominent, gold/cyan accent)
+            // Newton Mark X Button (Royal-Blue "NHẬP (X)" CTA button matching reference image)
             CreateTouchTapButton(
                 rootPanel.transform,
                 "BtnNewtonMark",
-                "X (MARK)",
+                "NHẬP (X)",
                 new Vector2(1f, 0f),
-                new Vector2(-110f, 250f),
-                new Vector2(130f, 80f),
-                new UnityEngine.Color(0.24f, 0.18f, 0.08f, 0.90f),
-                new UnityEngine.Color(1f, 0.85f, 0.35f, 0.85f),
-                () => touchAdapter.TriggerNewtonMark(),
-                textColor: new UnityEngine.Color(1f, 0.92f, 0.55f, 1f),
-                fontSize: 18);
+                new Vector2(-110f, 242f),
+                new Vector2(144f, 60f),
+                LabStyleUI.GetPrimaryButtonSprite(),
+                isSliced: true,
+                tintColor: UnityEngine.Color.white,
+                onTap: () => touchAdapter.TriggerNewtonMark(),
+                textColor: LabStyleUI.TextPrimary,
+                fontSize: 16);
 
-            // Direct Color Switching: White (1), Gray (2), Black (3)
+            // Direct Color Switching: White (1), Gray (2), Black (3) rounded lab pills
             CreateTouchTapButton(
                 rootPanel.transform,
                 "BtnColorWhite",
-                "1 WHITE",
+                "1 · Trắng",
                 new Vector2(1f, 0f),
-                new Vector2(-420f, 85f),
-                new Vector2(100f, 75f),
-                new UnityEngine.Color(0.90f, 0.90f, 0.90f, 0.85f),
-                new UnityEngine.Color(1f, 1f, 1f, 0.7f),
-                () => touchAdapter.TriggerDirectColor(LogicalColor.White),
-                textColor: UnityEngine.Color.black,
+                new Vector2(-436f, 92f),
+                new Vector2(104f, 56f),
+                LabStyleUI.GetPillSprite(),
+                isSliced: true,
+                tintColor: new UnityEngine.Color(1f, 1f, 1f, 1f),
+                onTap: () => touchAdapter.TriggerDirectColor(LogicalColor.White),
+                textColor: LabStyleUI.TextPrimary,
                 fontSize: 14);
 
             CreateTouchTapButton(
                 rootPanel.transform,
                 "BtnColorGray",
-                "2 GRAY",
+                "2 · Xám",
                 new Vector2(1f, 0f),
-                new Vector2(-310f, 85f),
-                new Vector2(100f, 75f),
-                new UnityEngine.Color(0.45f, 0.45f, 0.48f, 0.85f),
-                new UnityEngine.Color(0.7f, 0.7f, 0.8f, 0.6f),
-                () => touchAdapter.TriggerDirectColor(LogicalColor.Gray),
-                textColor: UnityEngine.Color.white,
+                new Vector2(-320f, 92f),
+                new Vector2(104f, 56f),
+                LabStyleUI.GetPillSprite(),
+                isSliced: true,
+                tintColor: new UnityEngine.Color(0.88f, 0.92f, 0.98f, 1f),
+                onTap: () => touchAdapter.TriggerDirectColor(LogicalColor.Gray),
+                textColor: LabStyleUI.TextSecondary,
                 fontSize: 14);
 
             CreateTouchTapButton(
                 rootPanel.transform,
                 "BtnColorBlack",
-                "3 BLACK",
+                "3 · Đen",
                 new Vector2(1f, 0f),
-                new Vector2(-200f, 85f),
-                new Vector2(100f, 75f),
-                new UnityEngine.Color(0.08f, 0.08f, 0.10f, 0.85f),
-                new UnityEngine.Color(0.5f, 0.5f, 0.6f, 0.6f),
-                () => touchAdapter.TriggerDirectColor(LogicalColor.Black),
-                textColor: UnityEngine.Color.white,
+                new Vector2(-204f, 92f),
+                new Vector2(104f, 56f),
+                LabStyleUI.GetPillSprite(),
+                isSliced: true,
+                tintColor: new UnityEngine.Color(0.72f, 0.78f, 0.88f, 1f),
+                onTap: () => touchAdapter.TriggerDirectColor(LogicalColor.Black),
+                textColor: LabStyleUI.TextPrimary,
                 fontSize: 14);
         }
 
@@ -212,7 +223,8 @@ namespace Contrast.UI
             Vector2 position,
             Vector2 size,
             System.Action<bool> onHoldChanged,
-            int fontSize = 36)
+            int fontSize = 32,
+            bool isCircular = false)
         {
             GameObject btnGo = NewUI(name, parent);
             RectTransform rt = btnGo.GetComponent<RectTransform>();
@@ -223,14 +235,26 @@ namespace Contrast.UI
             rt.sizeDelta = size;
 
             Image img = btnGo.AddComponent<Image>();
-            img.color = new UnityEngine.Color(0.06f, 0.09f, 0.14f, 0.82f);
-
-            Outline outline = btnGo.AddComponent<Outline>();
-            outline.effectColor = new UnityEngine.Color(0.7f, 0.85f, 0.95f, 0.35f);
-            outline.effectDistance = new Vector2(1.5f, -1.5f);
+            if (isCircular)
+            {
+                img.sprite = LabStyleUI.GetCircleButtonSprite();
+                img.type = Image.Type.Simple;
+                img.color = UnityEngine.Color.white;
+                LabStyleUI.AddSoftDropShadow(btnGo, -4f, 0.42f);
+            }
+            else
+            {
+                LabStyleUI.ApplySlicedSprite(img, LabStyleUI.GetPillSprite(), addDropShadow: true, shadowOffsetY: -4f);
+            }
 
             VirtualTouchHoldHandler holdHandler = btnGo.AddComponent<VirtualTouchHoldHandler>();
-            holdHandler.OnHoldStateChanged = onHoldChanged;
+            holdHandler.OnHoldStateChanged = held =>
+            {
+                img.color = held
+                    ? new UnityEngine.Color(0.82f, 0.90f, 1f, 1f)
+                    : UnityEngine.Color.white;
+                onHoldChanged?.Invoke(held);
+            };
 
             GameObject textGo = NewUI("Label", btnGo.transform);
             Text txt = textGo.AddComponent<Text>();
@@ -239,7 +263,7 @@ namespace Contrast.UI
             txt.fontSize = fontSize;
             txt.fontStyle = FontStyle.Bold;
             txt.alignment = TextAnchor.MiddleCenter;
-            txt.color = new UnityEngine.Color(0.9f, 0.95f, 1f, 0.95f);
+            txt.color = LabStyleUI.TextPrimary;
             Stretch(textGo.GetComponent<RectTransform>());
         }
 
@@ -250,8 +274,9 @@ namespace Contrast.UI
             Vector2 anchor,
             Vector2 position,
             Vector2 size,
-            UnityEngine.Color bgColor,
-            UnityEngine.Color outlineColor,
+            Sprite sprite,
+            bool isSliced,
+            UnityEngine.Color tintColor,
             System.Action onTap,
             UnityEngine.Color? textColor = null,
             int fontSize = 16)
@@ -265,22 +290,24 @@ namespace Contrast.UI
             rt.sizeDelta = size;
 
             Image img = btnGo.AddComponent<Image>();
-            img.color = bgColor;
-
-            Outline outline = btnGo.AddComponent<Outline>();
-            outline.effectColor = outlineColor;
-            outline.effectDistance = new Vector2(1.5f, -1.5f);
+            if (isSliced)
+            {
+                LabStyleUI.ApplySlicedSprite(img, sprite, addDropShadow: true, shadowOffsetY: -4f);
+                img.color = tintColor;
+            }
+            else
+            {
+                img.sprite = sprite;
+                img.type = Image.Type.Simple;
+                img.color = tintColor;
+                LabStyleUI.AddSoftDropShadow(btnGo, -4f, 0.42f);
+            }
 
             Button btn = btnGo.AddComponent<Button>();
             btn.navigation = new Navigation { mode = Navigation.Mode.None };
             btn.targetGraphic = img;
+            btn.colors = LabStyleUI.MakeButtonColorBlock();
             btn.onClick.AddListener(() => onTap?.Invoke());
-
-            ColorBlock cb = btn.colors;
-            cb.normalColor = bgColor;
-            cb.highlightedColor = bgColor * 1.2f;
-            cb.pressedColor = bgColor * 0.8f;
-            btn.colors = cb;
 
             GameObject textGo = NewUI("Label", btnGo.transform);
             Text txt = textGo.AddComponent<Text>();
@@ -289,7 +316,7 @@ namespace Contrast.UI
             txt.fontSize = fontSize;
             txt.fontStyle = FontStyle.Bold;
             txt.alignment = TextAnchor.MiddleCenter;
-            txt.color = textColor ?? new UnityEngine.Color(0.95f, 0.97f, 1f, 1f);
+            txt.color = textColor ?? LabStyleUI.TextPrimary;
             Stretch(textGo.GetComponent<RectTransform>());
         }
 

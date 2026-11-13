@@ -169,6 +169,21 @@ namespace Contrast.Core
                     return;
                 }
 
+                if (State == GameState.Won && EnterKeyPressed())
+                {
+                    if (CurrentCampaignIndex >= 0 && CurrentCampaignIndex < CampaignLevelResources.Length - 1)
+                        PlayCampaignLevel(CurrentCampaignIndex + 1);
+                    else
+                        StartCampaign();
+                    return;
+                }
+
+                if ((State == GameState.GameOver || State == GameState.Won) && RKeyPressed())
+                {
+                    Restart();
+                    return;
+                }
+
                 if (State == GameState.GameOver && RestartKeyPressed())
                     Restart();
                 return;
@@ -608,29 +623,44 @@ namespace Contrast.Core
                 return;
 
             Debug.Log($"[FLOW][WIN] Player won level (context={CurrentEntryContext}, campaignIndex={CurrentCampaignIndex})");
+            Contrast.Audio.ContrastAudioManager.EnsureInstance().PlayWin();
 
-            if (CurrentEntryContext == GameplayEntryContext.Campaign)
+            SetState(GameState.Won);
+
+            if (CurrentEntryContext == GameplayEntryContext.Campaign && gameOverUI != null)
             {
                 if (CurrentCampaignIndex >= 0 && CurrentCampaignIndex < CampaignLevelResources.Length - 1)
                 {
-                    StartCoroutine(AdvanceCampaignRoutine(CurrentCampaignIndex + 1));
+                    int nextIdx = CurrentCampaignIndex + 1;
+                    string curTitle = CampaignLevelTitles[CurrentCampaignIndex];
+                    string nextTitle = CampaignLevelTitles[nextIdx];
+                    gameOverUI.ShowLevelComplete(
+                        curTitle,
+                        nextTitle,
+                        onNextLevel: () => PlayCampaignLevel(nextIdx),
+                        onReplayLevel: () => Restart(),
+                        onMainMenu: () => ReturnToMainMenu());
                     return;
                 }
                 else
                 {
-                    SetState(GameState.Won);
-                    if (gameOverUI != null)
-                    {
-                        gameOverUI.ShowCampaignComplete(
-                            onPlayAgain: () => StartCampaign(),
-                            onMainMenu: () => ReturnToMainMenu()
-                        );
-                    }
+                    gameOverUI.ShowCampaignComplete(
+                        onPlayAgain: () => StartCampaign(),
+                        onMainMenu: () => ReturnToMainMenu()
+                    );
                     return;
                 }
             }
+        }
 
-            SetState(GameState.Won);
+        public void QuitGame()
+        {
+            Debug.Log("[FLOW][QUIT] Exiting Contrast application.");
+#if UNITY_EDITOR
+            UnityEditor.EditorApplication.isPlaying = false;
+#else
+            Application.Quit();
+#endif
         }
 
         private IEnumerator AdvanceCampaignRoutine(int nextIndex)
@@ -739,6 +769,12 @@ namespace Contrast.Core
             State = state;
             Debug.Log($"[FLOW][STATE] {previous} -> {State}");
 
+            var audio = Contrast.Audio.ContrastAudioManager.EnsureInstance();
+            if (state == GameState.MainMenu)
+                audio?.PlayMenuMusic();
+            else if (state == GameState.Playing)
+                audio?.PlayGameplayMusic();
+
             mainMenuUI?.Show(state == GameState.MainMenu);
             levelSelectUI?.Show(state == GameState.LevelSelect);
             loadingOverlayUI?.Show(state == GameState.Loading);
@@ -790,6 +826,17 @@ namespace Contrast.Core
             return kb != null && kb.rKey.wasPressedThisFrame;
 #else
             return Input.GetKeyDown(KeyCode.R);
+#endif
+        }
+
+        private static bool EnterKeyPressed()
+        {
+#if ENABLE_INPUT_SYSTEM
+            Keyboard kb = Keyboard.current;
+            return kb != null &&
+                   (kb.enterKey.wasPressedThisFrame || kb.numpadEnterKey.wasPressedThisFrame);
+#else
+            return Input.GetKeyDown(KeyCode.Return) || Input.GetKeyDown(KeyCode.KeypadEnter);
 #endif
         }
 

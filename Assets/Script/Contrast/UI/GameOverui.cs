@@ -1,22 +1,33 @@
 namespace Contrast.UI
 {
+    using System.Collections.Generic;
+    using Contrast.Audio;
     using Contrast.Core;
+    using Contrast.Level;
+    using Contrast.Presentation;
     using UnityEngine;
     using UnityEngine.EventSystems;
     using UnityEngine.UI;
     using Color = UnityEngine.Color;
+
     /// <summary>
-    /// Result overlay for GAME OVER / YOU WIN styled with the dark optical
-    /// translucent aesthetics of demo_quangbai1.html.
+    /// Virtual Physics Lab Result & Level Completion UI for Contrast.
+    /// Styled with frosted rounded slate-navy cards, recessed measurement readout slot,
+    /// royal-blue primary CTA button, matte-slate secondary buttons, and generous horizontal spacing.
     /// </summary>
     public class GameOverUI : MonoBehaviour
     {
         private GameObject panel;
+        private Image badgeBg;
+        private Text badgeText;
         private Text titleText;
         private Text subText;
+        private GameObject statsBox;
+        private Text statsText;
         private Button retryButton;
         private Button restartButton;
         private Button returnButton;
+        private Text hintLabel;
 
         private void Awake()
         {
@@ -25,7 +36,6 @@ namespace Contrast.UI
             ShowResult(false, "GAME OVER", false);
         }
 
-        // Kept for compatibility with older callers.
         public void Show(bool visible)
         {
             ShowResult(visible, "GAME OVER", false);
@@ -33,84 +43,309 @@ namespace Contrast.UI
 
         public void ShowResult(bool visible, string title, bool allowRetry)
         {
+            bool isWin = title == "YOU WIN" || title.Contains("COMPLETE") || title.Contains("HOÀN THÀNH");
+            Color accent = isWin
+                ? new Color(0.45f, 0.92f, 0.80f, 1f)
+                : new Color(0.98f, 0.56f, 0.58f, 1f);
+
+            ApplyAccentTheme(accent, isWin
+                ? "Hoàn thành thí nghiệm giao thoa"
+                : "Mất đồng bộ pha quang học");
+
             if (titleText != null)
-                titleText.text = title;
+                titleText.text = isWin ? "HOÀN THÀNH MÀN CHƠI" : "THẤT BẠI";
 
             if (subText != null)
             {
-                subText.text = title == "YOU WIN"
-                    ? "HOÀN THÀNH PHÉP ĐO QUANG HỌC · OPTICAL MEASUREMENT COMPLETE"
-                    : "MẤT ĐỒNG BỘ PHA · THỬ LẠI ĐỂ TÁI LẬP GIAO THOA";
+                subText.text = isWin
+                    ? "Đã xác lập trục giao thoa K–O và hoàn tất phép đo bước sóng ánh sáng"
+                    : "Hãy khôi phục điểm lưu hoặc bắt đầu lại thí nghiệm";
             }
 
+            RefreshOpticalStats(isWin);
+
             if (retryButton != null)
+            {
                 retryButton.gameObject.SetActive(allowRetry);
-
-            if (restartButton != null)
-            {
-                Text label = restartButton.transform.Find("Label")?.GetComponent<Text>();
-                Text sub = restartButton.transform.Find("SubLabel")?.GetComponent<Text>();
-                if (label != null) label.text = "RESTART";
-                if (sub != null) sub.text = "CHƠI LẠI TỪ ĐẦU";
-                restartButton.onClick.RemoveAllListeners();
-                restartButton.onClick.AddListener(OnRestartClicked);
+                ConfigureButton(
+                    retryButton,
+                    "ĐIỂM LƯU GẦN NHẤT",
+                    LabStyleUI.GetPrimaryButtonSprite(),
+                    LabStyleUI.IconKind.Retry,
+                    OnRetryClicked);
             }
-
-            if (returnButton != null)
-            {
-                Text label = returnButton.transform.Find("Label")?.GetComponent<Text>();
-                Text sub = returnButton.transform.Find("SubLabel")?.GetComponent<Text>();
-                if (label != null) label.text = "RETURN";
-                if (sub != null) sub.text = "QUAY LẠI";
-                returnButton.onClick.RemoveAllListeners();
-                returnButton.onClick.AddListener(OnReturnClicked);
-            }
-
-            if (panel != null)
-                panel.SetActive(visible);
-        }
-
-        public void ShowCampaignComplete(UnityEngine.Events.UnityAction onPlayAgain, UnityEngine.Events.UnityAction onMainMenu)
-        {
-            if (titleText != null)
-                titleText.text = "CAMPAIGN COMPLETE";
-
-            if (subText != null)
-                subText.text = "CHÚC MỪNG! BẠN ĐÃ HOÀN THÀNH TOÀN BỘ 3 MÀN CHƠI CỦA CONTRAST";
-
-            if (retryButton != null)
-                retryButton.gameObject.SetActive(false);
 
             if (restartButton != null)
             {
                 restartButton.gameObject.SetActive(true);
-                Text label = restartButton.transform.Find("Label")?.GetComponent<Text>();
-                Text sub = restartButton.transform.Find("SubLabel")?.GetComponent<Text>();
-                if (label != null) label.text = "PLAY AGAIN";
-                if (sub != null) sub.text = "CHƠI LẠI TỪ ĐẦU (L01)";
-                restartButton.onClick.RemoveAllListeners();
-                if (onPlayAgain != null)
-                    restartButton.onClick.AddListener(onPlayAgain);
-                else
-                    restartButton.onClick.AddListener(OnRestartClicked);
+                ConfigureButton(
+                    restartButton,
+                    "CHƠI LẠI MÀN",
+                    allowRetry ? LabStyleUI.GetSecondaryButtonSprite() : LabStyleUI.GetPrimaryButtonSprite(),
+                    LabStyleUI.IconKind.Restart,
+                    OnRestartClicked);
             }
 
             if (returnButton != null)
             {
                 returnButton.gameObject.SetActive(true);
-                Text label = returnButton.transform.Find("Label")?.GetComponent<Text>();
-                Text sub = returnButton.transform.Find("SubLabel")?.GetComponent<Text>();
-                if (label != null) label.text = "MAIN MENU";
-                if (sub != null) sub.text = "MENU CHÍNH";
-                returnButton.onClick.RemoveAllListeners();
-                if (onMainMenu != null)
-                    returnButton.onClick.AddListener(onMainMenu);
-                else
-                    returnButton.onClick.AddListener(OnReturnClicked);
+                ConfigureButton(
+                    returnButton,
+                    "Quay lại Menu",
+                    LabStyleUI.GetPillSprite(),
+                    LabStyleUI.IconKind.ChevronLeft,
+                    OnReturnClicked);
             }
+
+            if (hintLabel != null)
+            {
+                hintLabel.text = isWin
+                    ? "Nhấn ENTER / R để tiếp tục  ·  ESC để quay lại Menu chính"
+                    : "Nhấn R để chơi lại màn  ·  ESC để quay lại Menu chính";
+            }
+
+            ArrangeActiveButtons();
+
+            if (panel != null)
+                panel.SetActive(visible);
+        }
+
+        public void ShowLevelComplete(
+            string levelTitle,
+            string nextLevelTitle,
+            UnityEngine.Events.UnityAction onNextLevel,
+            UnityEngine.Events.UnityAction onReplayLevel,
+            UnityEngine.Events.UnityAction onMainMenu)
+        {
+            Color accent = GetCurrentNewtonAccent(new Color(0.45f, 0.92f, 0.80f, 1f));
+            ApplyAccentTheme(accent, $"Hoàn thành · {levelTitle}");
+
+            if (titleText != null)
+                titleText.text = "HOÀN THÀNH THÍ NGHIỆM";
+
+            if (subText != null)
+                subText.text = $"Kết quả đo đã được ghi nhận. Tiếp theo: {nextLevelTitle}";
+
+            RefreshOpticalStats(true);
+
+            // Button 1: Royal-Blue Primary CTA ("MÀN TIẾP THEO")
+            if (retryButton != null)
+            {
+                retryButton.gameObject.SetActive(true);
+                ConfigureButton(
+                    retryButton,
+                    "MÀN TIẾP THEO",
+                    LabStyleUI.GetPrimaryButtonSprite(),
+                    LabStyleUI.IconKind.PlayTriangle,
+                    onNextLevel ?? OnRestartClicked);
+            }
+
+            // Button 2: Matte-Slate Secondary ("CHƠI LẠI MÀN")
+            if (restartButton != null)
+            {
+                restartButton.gameObject.SetActive(true);
+                ConfigureButton(
+                    restartButton,
+                    "CHƠI LẠI MÀN",
+                    LabStyleUI.GetSecondaryButtonSprite(),
+                    LabStyleUI.IconKind.Restart,
+                    onReplayLevel ?? OnRestartClicked);
+            }
+
+            // Button 3: Stadium Pill ("Quay lại Menu")
+            if (returnButton != null)
+            {
+                returnButton.gameObject.SetActive(true);
+                ConfigureButton(
+                    returnButton,
+                    "Quay lại Menu",
+                    LabStyleUI.GetPillSprite(),
+                    LabStyleUI.IconKind.ChevronLeft,
+                    onMainMenu ?? OnReturnClicked);
+            }
+
+            if (hintLabel != null)
+                hintLabel.text = "Nhấn ENTER sang màn tiếp theo  ·  R chơi lại  ·  ESC quay lại Menu chính";
+
+            ArrangeActiveButtons();
 
             if (panel != null)
                 panel.SetActive(true);
+        }
+
+        public void ShowCampaignComplete(
+            UnityEngine.Events.UnityAction onPlayAgain,
+            UnityEngine.Events.UnityAction onMainMenu)
+        {
+            Color accent = GetCurrentNewtonAccent(new Color(0.48f, 0.86f, 1f, 1f));
+            ApplyAccentTheme(accent, "Hoàn tất trọn vẹn 3 thí nghiệm quang học (L01 · L02 · L03)");
+
+            if (titleText != null)
+                titleText.text = "HOÀN THÀNH TOÀN BỘ THÍ NGHIỆM";
+
+            if (subText != null)
+                subText.text = "Chúc mừng! Bạn đã đo thành công bước sóng ánh sáng Lục, Đỏ và Xanh dương";
+
+            RefreshOpticalStats(true);
+
+            // Button 1: Matte-Slate Secondary ("CHƠI LẠI MÀN 3")
+            if (retryButton != null)
+            {
+                retryButton.gameObject.SetActive(true);
+                ConfigureButton(
+                    retryButton,
+                    "CHƠI LẠI MÀN 3",
+                    LabStyleUI.GetSecondaryButtonSprite(),
+                    LabStyleUI.IconKind.Restart,
+                    OnRestartClicked);
+            }
+
+            // Button 2: Royal-Blue Primary CTA ("CHƠI TỪ ĐẦU")
+            if (restartButton != null)
+            {
+                restartButton.gameObject.SetActive(true);
+                ConfigureButton(
+                    restartButton,
+                    "CHƠI TỪ ĐẦU",
+                    LabStyleUI.GetPrimaryButtonSprite(),
+                    LabStyleUI.IconKind.PlayTriangle,
+                    onPlayAgain ?? OnRestartClicked);
+            }
+
+            // Button 3: Stadium Pill ("Quay lại Menu")
+            if (returnButton != null)
+            {
+                returnButton.gameObject.SetActive(true);
+                ConfigureButton(
+                    returnButton,
+                    "Quay lại Menu",
+                    LabStyleUI.GetPillSprite(),
+                    LabStyleUI.IconKind.ChevronLeft,
+                    onMainMenu ?? OnReturnClicked);
+            }
+
+            if (hintLabel != null)
+                hintLabel.text = "Cảm ơn bạn đã hoàn thành chuỗi thí nghiệm CONTRAST  ·  ESC quay lại Menu chính";
+
+            ArrangeActiveButtons();
+
+            if (panel != null)
+                panel.SetActive(true);
+        }
+
+        private void ApplyAccentTheme(Color accent, string badgeStr)
+        {
+            if (badgeText != null)
+            {
+                badgeText.text = badgeStr;
+                badgeText.color = Color.Lerp(accent, Color.white, 0.35f);
+            }
+        }
+
+        private void RefreshOpticalStats(bool showStats)
+        {
+            if (statsBox == null || statsText == null)
+                return;
+
+            if (!showStats)
+            {
+                statsBox.SetActive(false);
+                return;
+            }
+
+            statsBox.SetActive(true);
+            int collected = QuangDiemItem.CollectedCount;
+            int total = QuangDiemItem.TotalCount;
+            string qdPart = total > 0
+                ? $"✦ Quang Điểm: {collected} / {total}"
+                : "✦ Giao thoa hoàn tất";
+
+            EasyNewtonFinaleController newton = EasyNewtonFinaleController.Instance;
+            if (newton != null && newton.CalculatedLambda_nm > 1f)
+            {
+                string colVi = NewtonRingsPresentation.GetWavelengthColorNameVi(newton.CalculatedLambda_nm);
+                statsText.text = $"{qdPart}      ·      ◎ Bước sóng đo được:  λ ≈ {newton.CalculatedLambda_nm:F1} nm  (Ánh sáng {colVi})";
+            }
+            else
+            {
+                statsText.text = $"{qdPart}      ·      ◎ Đồng bộ pha quang học chính xác";
+            }
+        }
+
+        private static Color GetCurrentNewtonAccent(Color fallback)
+        {
+            EasyNewtonFinaleController newton = EasyNewtonFinaleController.Instance;
+            if (newton != null && newton.SourceLambda > 1f)
+            {
+                Color c = NewtonRingsPresentation.WavelengthToRgb(newton.SourceLambda);
+                return Color.Lerp(c, Color.white, 0.25f);
+            }
+            return fallback;
+        }
+
+        /// <summary>
+        /// Dynamically centers all visible buttons with generous horizontal spacing (>= 78px).
+        /// </summary>
+        private void ArrangeActiveButtons()
+        {
+            List<Button> active = new List<Button>(3);
+            if (retryButton != null && retryButton.gameObject.activeSelf)
+                active.Add(retryButton);
+            if (restartButton != null && restartButton.gameObject.activeSelf)
+                active.Add(restartButton);
+            if (returnButton != null && returnButton.gameObject.activeSelf)
+                active.Add(returnButton);
+
+            if (active.Count == 0)
+                return;
+
+            float buttonWidth = active.Count <= 2 ? 296f : 280f;
+            float buttonHeight = 62f;
+            float gap = active.Count <= 2 ? 112f : 78f;
+            float step = buttonWidth + gap;
+            float startX = -0.5f * (active.Count - 1) * step;
+
+            for (int i = 0; i < active.Count; i++)
+            {
+                RectTransform rt = active[i].GetComponent<RectTransform>();
+                if (rt != null)
+                {
+                    rt.sizeDelta = new Vector2(buttonWidth, buttonHeight);
+                    rt.anchoredPosition = new Vector2(startX + i * step, 0f);
+                }
+            }
+        }
+
+        private static void ConfigureButton(
+            Button btn,
+            string mainText,
+            Sprite bgSprite,
+            LabStyleUI.IconKind iconKind,
+            UnityEngine.Events.UnityAction onClick)
+        {
+            if (btn == null)
+                return;
+
+            Image img = btn.GetComponent<Image>();
+            if (img != null)
+                LabStyleUI.ApplySlicedSprite(img, bgSprite, true, -4f);
+
+            btn.colors = LabStyleUI.MakeButtonColorBlock();
+
+            Image iconImg = btn.transform.Find("Icon")?.GetComponent<Image>();
+            if (iconImg != null)
+                iconImg.sprite = LabStyleUI.GetIconSprite(iconKind);
+
+            Text label = btn.transform.Find("Label")?.GetComponent<Text>();
+            if (label != null)
+                label.text = mainText;
+
+            btn.onClick.RemoveAllListeners();
+            btn.onClick.AddListener(() =>
+            {
+                ContrastAudioManager.Instance?.PlayButtonClick();
+                onClick?.Invoke();
+            });
         }
 
         private void OnRestartClicked()
@@ -135,7 +370,7 @@ namespace Contrast.UI
 
             Canvas canvas = canvasGo.AddComponent<Canvas>();
             canvas.renderMode = RenderMode.ScreenSpaceOverlay;
-            canvas.sortingOrder = 100;
+            canvas.sortingOrder = 210;
 
             CanvasScaler scaler = canvasGo.AddComponent<CanvasScaler>();
             scaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
@@ -146,145 +381,175 @@ namespace Contrast.UI
 
             panel = NewUI("Panel", canvasGo.transform);
             Image bg = panel.AddComponent<Image>();
-            // Dark vignette backdrop #03060c at 92%
-            bg.color = new Color(0.012f, 0.024f, 0.047f, 0.92f);
+            bg.color = new Color(0.016f, 0.030f, 0.056f, 0.86f);
             Stretch(panel.GetComponent<RectTransform>());
 
-            // Title
-            GameObject title = NewUI("Title", panel.transform);
+            // Frosted Slate-Navy Modal Card
+            GameObject card = NewUI("ResultCard", panel.transform);
+            Image cardBg = card.AddComponent<Image>();
+            LabStyleUI.ApplySlicedSprite(cardBg, LabStyleUI.GetCardSprite(), true, -7f);
+            RectTransform cardRt = card.GetComponent<RectTransform>();
+            cardRt.sizeDelta = new Vector2(1120f, 528f);
+            cardRt.anchoredPosition = Vector2.zero;
+
+            // Status Stadium Pill
+            GameObject badgeGo = NewUI("StatusBadge", card.transform);
+            badgeBg = badgeGo.AddComponent<Image>();
+            LabStyleUI.ApplySlicedSprite(badgeBg, LabStyleUI.GetPillSprite(), false);
+            RectTransform badgeRt = badgeGo.GetComponent<RectTransform>();
+            badgeRt.sizeDelta = new Vector2(580f, 40f);
+            badgeRt.anchoredPosition = new Vector2(0f, 194f);
+
+            GameObject badgeTxtGo = NewUI("BadgeText", badgeGo.transform);
+            badgeText = badgeTxtGo.AddComponent<Text>();
+            badgeText.font = LabStyleUI.GetFont();
+            badgeText.text = "Hoàn thành thí nghiệm giao thoa";
+            badgeText.fontSize = 14;
+            badgeText.fontStyle = FontStyle.Bold;
+            badgeText.alignment = TextAnchor.MiddleCenter;
+            badgeText.color = LabStyleUI.TextSecondary;
+            Stretch(badgeTxtGo.GetComponent<RectTransform>());
+
+            // Main Title
+            GameObject title = NewUI("Title", card.transform);
             titleText = title.AddComponent<Text>();
-            titleText.font = GetFont();
-            titleText.text = "GAME OVER";
-            titleText.fontSize = 72;
+            titleText.font = LabStyleUI.GetFont();
+            titleText.text = "HOÀN THÀNH THÍ NGHIỆM";
+            titleText.fontSize = 48;
             titleText.fontStyle = FontStyle.Bold;
             titleText.alignment = TextAnchor.MiddleCenter;
-            titleText.color = new Color(0.96f, 0.98f, 1f, 1f);
-
-            Outline titleOutline = title.AddComponent<Outline>();
-            titleOutline.effectColor = new Color(0.85f, 0.95f, 1f, 0.35f);
-            titleOutline.effectDistance = new Vector2(2f, -2f);
+            titleText.color = LabStyleUI.TextPrimary;
 
             RectTransform titleRt = title.GetComponent<RectTransform>();
-            titleRt.sizeDelta = new Vector2(1200f, 100f);
-            titleRt.anchoredPosition = new Vector2(0f, 120f);
+            titleRt.sizeDelta = new Vector2(1000f, 68f);
+            titleRt.anchoredPosition = new Vector2(0f, 122f);
 
             // Subtitle
-            GameObject sub = NewUI("Subtitle", panel.transform);
+            GameObject sub = NewUI("Subtitle", card.transform);
             subText = sub.AddComponent<Text>();
-            subText.font = GetFont();
-            subText.text = "MẤT ĐỒNG BỘ PHA · THỬ LẠI ĐỂ TÁI LẬP GIAO THOA";
-            subText.fontSize = 16;
+            subText.font = LabStyleUI.GetFont();
+            subText.text = "Đã xác lập trục giao thoa K–O và hoàn tất phép đo bước sóng ánh sáng";
+            subText.fontSize = 17;
             subText.fontStyle = FontStyle.Normal;
             subText.alignment = TextAnchor.MiddleCenter;
-            subText.color = new Color(0.72f, 0.82f, 0.90f, 0.70f);
+            subText.color = LabStyleUI.TextSecondary;
 
             RectTransform subRt = sub.GetComponent<RectTransform>();
-            subRt.sizeDelta = new Vector2(1000f, 36f);
-            subRt.anchoredPosition = new Vector2(0f, 55f);
+            subRt.sizeDelta = new Vector2(960f, 34f);
+            subRt.anchoredPosition = new Vector2(0f, 64f);
 
-            // Button container
-            GameObject btnRow = NewUI("ButtonRow", panel.transform);
+            // Recessed Measurement Summary Slot (matching [giá trị  mm] slot aesthetic)
+            statsBox = NewUI("StatsBox", card.transform);
+            Image statsBg = statsBox.AddComponent<Image>();
+            LabStyleUI.ApplySlicedSprite(statsBg, LabStyleUI.GetRecessedSlotSprite(), false);
+            RectTransform statsRt = statsBox.GetComponent<RectTransform>();
+            statsRt.sizeDelta = new Vector2(920f, 54f);
+            statsRt.anchoredPosition = new Vector2(0f, 2f);
+
+            GameObject statsTxtGo = NewUI("StatsText", statsBox.transform);
+            statsText = statsTxtGo.AddComponent<Text>();
+            statsText.font = LabStyleUI.GetFont();
+            statsText.text = string.Empty;
+            statsText.fontSize = 16;
+            statsText.fontStyle = FontStyle.Bold;
+            statsText.alignment = TextAnchor.MiddleCenter;
+            statsText.color = LabStyleUI.TextPrimary;
+            Stretch(statsTxtGo.GetComponent<RectTransform>());
+
+            // Button Row Container
+            GameObject btnRow = NewUI("ButtonRow", card.transform);
             RectTransform rowRt = btnRow.GetComponent<RectTransform>();
-            rowRt.sizeDelta = new Vector2(800f, 80f);
-            rowRt.anchoredPosition = new Vector2(0f, -60f);
+            rowRt.sizeDelta = new Vector2(1040f, 84f);
+            rowRt.anchoredPosition = new Vector2(0f, -108f);
 
-            // Retry Button
             retryButton = CreateStyledButton(
                 btnRow.transform,
                 "RETRY",
                 "ĐIỂM LƯU GẦN NHẤT",
-                new Vector2(-240f, 0f),
+                LabStyleUI.IconKind.Retry,
+                new Vector2(-358f, 0f),
                 OnRetryClicked);
 
-            // Restart Button
             restartButton = CreateStyledButton(
                 btnRow.transform,
                 "RESTART",
-                "CHƠI LẠI TỪ ĐẦU",
+                "CHƠI LẠI MÀN",
+                LabStyleUI.IconKind.Restart,
                 new Vector2(0f, 0f),
                 OnRestartClicked);
 
-            // Return Button
             returnButton = CreateStyledButton(
                 btnRow.transform,
                 "RETURN",
-                "QUAY LẠI",
-                new Vector2(240f, 0f),
+                "Quay lại Menu",
+                LabStyleUI.IconKind.ChevronLeft,
+                new Vector2(358f, 0f),
                 OnReturnClicked);
 
-            // Hint
-            GameObject hint = NewUI("Hint", panel.transform);
-            Text hintText = hint.AddComponent<Text>();
-            hintText.font = GetFont();
-            hintText.text = "hoặc nhấn R để chơi lại · ESC để quay lại";
-            hintText.fontSize = 13;
-            hintText.fontStyle = FontStyle.Normal;
-            hintText.alignment = TextAnchor.MiddleCenter;
-            hintText.color = new Color(0.75f, 0.85f, 0.92f, 0.50f);
+            // Footer Hint
+            GameObject hint = NewUI("Hint", card.transform);
+            hintLabel = hint.AddComponent<Text>();
+            hintLabel.font = LabStyleUI.GetFont();
+            hintLabel.text = "Nhấn R để chơi lại  ·  ESC để quay lại Menu chính";
+            hintLabel.fontSize = 13;
+            hintLabel.fontStyle = FontStyle.Normal;
+            hintLabel.alignment = TextAnchor.MiddleCenter;
+            hintLabel.color = LabStyleUI.TextMuted;
 
             RectTransform hintRt = hint.GetComponent<RectTransform>();
-            hintRt.sizeDelta = new Vector2(600f, 30f);
-            hintRt.anchoredPosition = new Vector2(0f, -145f);
+            hintRt.sizeDelta = new Vector2(900f, 26f);
+            hintRt.anchoredPosition = new Vector2(0f, -204f);
         }
 
         private static Button CreateStyledButton(
             Transform parent,
-            string label,
-            string sub,
+            string keyName,
+            string labelText,
+            LabStyleUI.IconKind iconKind,
             Vector2 pos,
             UnityEngine.Events.UnityAction callback)
         {
-            GameObject btnGo = NewUI(label + "Button", parent);
+            GameObject btnGo = NewUI(keyName + "Button", parent);
             Image btnImg = btnGo.AddComponent<Image>();
-            btnImg.color = new Color(0.08f, 0.12f, 0.18f, 0.92f);
-
-            Outline outline = btnGo.AddComponent<Outline>();
-            outline.effectColor = new Color(0.75f, 0.88f, 0.98f, 0.32f);
-            outline.effectDistance = new Vector2(1.2f, -1.2f);
+            LabStyleUI.ApplySlicedSprite(btnImg, LabStyleUI.GetSecondaryButtonSprite(), true, -4f);
 
             Button button = btnGo.AddComponent<Button>();
+            button.navigation = new Navigation { mode = Navigation.Mode.None };
             button.targetGraphic = btnImg;
+            button.colors = LabStyleUI.MakeButtonColorBlock();
             button.onClick.AddListener(callback);
 
-            ColorBlock cb = button.colors;
-            cb.normalColor = new Color(0.08f, 0.12f, 0.18f, 0.92f);
-            cb.highlightedColor = new Color(0.14f, 0.20f, 0.28f, 0.98f);
-            cb.pressedColor = new Color(0.20f, 0.28f, 0.38f, 1f);
-            button.colors = cb;
-
             RectTransform btnRt = btnGo.GetComponent<RectTransform>();
-            btnRt.sizeDelta = new Vector2(260f, 68f);
+            btnRt.sizeDelta = new Vector2(280f, 62f);
             btnRt.anchoredPosition = pos;
+
+            GameObject iconGo = NewUI("Icon", btnGo.transform);
+            Image iconImg = iconGo.AddComponent<Image>();
+            iconImg.sprite = LabStyleUI.GetIconSprite(iconKind);
+            iconImg.color = Color.white;
+            iconImg.raycastTarget = false;
+            RectTransform iRt = iconGo.GetComponent<RectTransform>();
+            iRt.anchorMin = new Vector2(0f, 0.5f);
+            iRt.anchorMax = new Vector2(0f, 0.5f);
+            iRt.pivot = new Vector2(0.5f, 0.5f);
+            iRt.anchoredPosition = new Vector2(28f, 0f);
+            iRt.sizeDelta = new Vector2(20f, 20f);
 
             GameObject textGo = NewUI("Label", btnGo.transform);
             Text text = textGo.AddComponent<Text>();
-            text.font = GetFont();
-            text.text = label;
-            text.fontSize = 18;
+            text.font = LabStyleUI.GetFont();
+            text.text = labelText;
+            text.fontSize = 16;
             text.fontStyle = FontStyle.Bold;
             text.alignment = TextAnchor.MiddleCenter;
-            text.color = new Color(0.94f, 0.97f, 1f, 1f);
+            text.color = Color.white;
+            text.raycastTarget = false;
 
             RectTransform textRt = textGo.GetComponent<RectTransform>();
-            textRt.anchorMin = new Vector2(0f, 0.35f);
-            textRt.anchorMax = new Vector2(1f, 1f);
-            textRt.offsetMin = Vector2.zero;
-            textRt.offsetMax = Vector2.zero;
-
-            GameObject subGo = NewUI("SubLabel", btnGo.transform);
-            Text subText = subGo.AddComponent<Text>();
-            subText.font = GetFont();
-            subText.text = sub;
-            subText.fontSize = 10;
-            subText.fontStyle = FontStyle.Normal;
-            subText.alignment = TextAnchor.MiddleCenter;
-            subText.color = new Color(0.72f, 0.82f, 0.90f, 0.65f);
-
-            RectTransform subRt = subGo.GetComponent<RectTransform>();
-            subRt.anchorMin = new Vector2(0f, 0f);
-            subRt.anchorMax = new Vector2(1f, 0.45f);
-            subRt.offsetMin = Vector2.zero;
-            subRt.offsetMax = Vector2.zero;
+            textRt.anchorMin = Vector2.zero;
+            textRt.anchorMax = Vector2.one;
+            textRt.offsetMin = new Vector2(44f, 0f);
+            textRt.offsetMax = new Vector2(-14f, 0f);
 
             return button;
         }
@@ -308,15 +573,6 @@ namespace Contrast.UI
             rt.anchorMax = Vector2.one;
             rt.offsetMin = Vector2.zero;
             rt.offsetMax = Vector2.zero;
-        }
-
-        private static Font GetFont()
-        {
-#if UNITY_2022_2_OR_NEWER
-            return Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
-#else
-            return Resources.GetBuiltinResource<Font>("Arial.ttf");
-#endif
         }
 
         private static void EnsureEventSystem()
