@@ -419,15 +419,23 @@ namespace Contrast.Level
             }
         }
 
+        private bool wasLevelAlreadyCompletedOnStart;
+
+        private bool IsCurrentLevelAlreadyCompleted()
+        {
+            return Config.Instance.IsLevelCompleted(GetCurrentLevelSlotIndex());
+        }
+
         private void SpawnApparatus()
         {
             GameObject ringsGo = new GameObject("NewtonRingsApparatus");
             ringsGo.transform.SetParent(apparatusRoot.transform, false);
             ringsGo.transform.localPosition = Vector3.zero;
 
+            wasLevelAlreadyCompletedOnStart = IsCurrentLevelAlreadyCompleted();
             apparatusVisuals = ringsGo.AddComponent<NewtonRingsPresentation>();
             float outerR = ringScale * Mathf.Sqrt(MaxFringeOrderK + 0.65f) + 1.5f;
-            apparatusVisuals.Configure(ringScale, outerR, sourceLambda, referenceLambda);
+            apparatusVisuals.Configure(ringScale, outerR, sourceLambda, referenceLambda, startColored: wasLevelAlreadyCompletedOnStart);
             apparatusVisuals.SetCenterPosition(centerO);
         }
 
@@ -1969,15 +1977,27 @@ namespace Contrast.Level
 
             ComputePhysicalWavelength();
 
+            wasLevelAlreadyCompletedOnStart = IsCurrentLevelAlreadyCompleted();
+            Color spectralCol = NewtonRingsPresentation.WavelengthToRgb(sourceLambda);
+            Color spectralAccent = Color.Lerp(spectralCol, Color.white, 0.30f);
             string colorNameVi = NewtonRingsPresentation.GetWavelengthColorNameVi(CalculatedLambda_nm);
+
             if (calcValuesText != null)
             {
                 calcValuesText.text = $"B = {MeasuredB_mm:F3} mm   b = {Measuredb_mm:F3} mm   R = {radiusOfCurvatureMm:F0} mm   i = {fringeOrderI}   k = {fringeOrderK}";
             }
             if (calcResultText != null)
             {
-                calcResultText.text = $"Bước sóng đo được:  λ ≈ {CalculatedLambda_nm:F1} nm";
-                calcResultText.color = LabStyleUI.TextPrimary;
+                if (wasLevelAlreadyCompletedOnStart)
+                {
+                    calcResultText.text = $"λ ≈ {CalculatedLambda_nm:F1} nm · Ánh sáng {colorNameVi}";
+                    calcResultText.color = spectralAccent;
+                }
+                else
+                {
+                    calcResultText.text = $"Bước sóng đo được:  λ ≈ {CalculatedLambda_nm:F1} nm";
+                    calcResultText.color = LabStyleUI.TextPrimary;
+                }
             }
             if (completionDetailText != null)
             {
@@ -1985,7 +2005,7 @@ namespace Contrast.Level
             }
 
             isQuizDisplayed = false;
-            isColorQuizAnsweredCorrectly = false;
+            isColorQuizAnsweredCorrectly = wasLevelAlreadyCompletedOnStart;
             isBingoAnimPlaying = false;
             bingoAnimTimer = 0f;
             wrongQuizAttemptsCount = 0;
@@ -1995,7 +2015,7 @@ namespace Contrast.Level
                 quizCardGo.transform.localScale = Vector3.one;
             }
             if (apparatusVisuals != null)
-                apparatusVisuals.SetColorRevealedImmediate(false);
+                apparatusVisuals.SetColorRevealedImmediate(wasLevelAlreadyCompletedOnStart);
 
             RefreshCoordinateSlots();
             if (targetICrosshair != null) targetICrosshair.SetActive(false);
@@ -2394,7 +2414,7 @@ namespace Contrast.Level
 
                 if (calcResultText != null)
                 {
-                    if (isColorQuizAnsweredCorrectly)
+                    if (wasLevelAlreadyCompletedOnStart || isColorQuizAnsweredCorrectly)
                     {
                         string colorNameVi = NewtonRingsPresentation.GetWavelengthColorNameVi(CalculatedLambda_nm);
                         calcResultText.text = $"λ ≈ {CalculatedLambda_nm:F1} nm · Ánh sáng {colorNameVi}";
@@ -2406,7 +2426,29 @@ namespace Contrast.Level
                 }
             }
 
-            // Phase E — Show Bottom-Docked Wavelength Color Quiz Card at tm >= 2.55s
+            // If this level was ALREADY completed previously: skip the quiz and color-reveal anim,
+            // and directly display the bottom-docked ResultCard after the calculation readout hold!
+            if (wasLevelAlreadyCompletedOnStart)
+            {
+                if (tm >= 3.6f && CurrentStep != NewtonFinaleStep.Complete)
+                {
+                    CurrentStep = NewtonFinaleStep.Complete;
+                    if (PhaseTunerUI.Instance != null && PhaseTunerUI.Instance.TunerPanelRect != null)
+                        PhaseTunerUI.Instance.TunerPanelRect.gameObject.SetActive(false);
+
+                    if (GameManager.Instance != null)
+                    {
+                        GameManager.Instance.OnPlayerWon();
+                    }
+                    else if (completionPanelGo != null)
+                    {
+                        completionPanelGo.SetActive(true);
+                    }
+                }
+                return;
+            }
+
+            // Phase E — For uncompleted level ("như game mới"): Show Bottom-Docked Wavelength Color Quiz Card at tm >= 2.55s
             if (tm >= 2.55f && !isQuizDisplayed)
             {
                 ShowWavelengthColorQuizCard();
@@ -2526,16 +2568,28 @@ namespace Contrast.Level
                 quizCardGo.SetActive(false);
             }
             isQuizDisplayed = false;
-            isColorQuizAnsweredCorrectly = false;
+            wasLevelAlreadyCompletedOnStart = IsCurrentLevelAlreadyCompleted();
+            isColorQuizAnsweredCorrectly = wasLevelAlreadyCompletedOnStart;
             isBingoAnimPlaying = false;
             bingoAnimTimer = 0f;
             wrongQuizAttemptsCount = 0;
             if (apparatusVisuals != null)
-                apparatusVisuals.SetColorRevealedImmediate(false);
+                apparatusVisuals.SetColorRevealedImmediate(wasLevelAlreadyCompletedOnStart);
             if (wavelengthTagText != null)
             {
-                wavelengthTagText.text = "Hệ vân tròn Newton · Phép đo bước sóng ánh sáng (λ = ? nm)";
-                wavelengthTagText.color = LabStyleUI.TextSecondary;
+                if (wasLevelAlreadyCompletedOnStart)
+                {
+                    Color spectralCol = NewtonRingsPresentation.WavelengthToRgb(sourceLambda);
+                    Color spectralAccent = Color.Lerp(spectralCol, Color.white, 0.30f);
+                    string colorNameVi = NewtonRingsPresentation.GetWavelengthColorNameVi(sourceLambda);
+                    wavelengthTagText.text = $"Hệ vân tròn Newton · Ánh sáng {colorNameVi} (λ = {sourceLambda:F0} nm)";
+                    wavelengthTagText.color = new Color(spectralAccent.r, spectralAccent.g, spectralAccent.b, 0.94f);
+                }
+                else
+                {
+                    wavelengthTagText.text = "Hệ vân tròn Newton · Phép đo bước sóng ánh sáng (λ = ? nm)";
+                    wavelengthTagText.color = LabStyleUI.TextSecondary;
+                }
             }
             if (PhaseTunerUI.Instance != null && PhaseTunerUI.Instance.TunerPanelRect != null)
                 PhaseTunerUI.Instance.TunerPanelRect.gameObject.SetActive(true);
