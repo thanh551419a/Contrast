@@ -12,6 +12,38 @@ namespace Contrast.UI
     /// </summary>
     internal sealed class MainMenuPlayPanelCluster
     {
+        private static readonly string[] LevelButtonNames =
+        {
+            "SelectLevel_L01",
+            "SelectLevel_L02",
+            "SelectLevel_L03"
+        };
+
+        private static readonly string[] LevelBaseTitles =
+        {
+            "Bài 01  ·  Cánh cửa không phải vật cản",
+            "Bài 02  ·  Cầu thang ma",
+            "Bài 03  ·  Giếng ba tầng"
+        };
+
+        private static readonly string[] LevelWavelengthBadges =
+        {
+            "550 nm · Lục",
+            "650 nm · Đỏ",
+            "470 nm · Lam"
+        };
+
+        private static readonly Color[] LevelCompletedColors =
+        {
+            new Color(0.28f, 0.92f, 0.52f, 1f),
+            new Color(0.98f, 0.36f, 0.38f, 1f),
+            new Color(0.38f, 0.68f, 1f, 1f)
+        };
+
+        private static readonly Color UncompletedOrderCircleGray = new Color(0.60f, 0.64f, 0.70f, 1f);
+        private static readonly Color UncompletedOrderTextBlack = new Color(0.02f, 0.03f, 0.05f, 1f);
+        private static readonly Color CompletedOrderTextDark = new Color(0.06f, 0.10f, 0.16f, 1f);
+
         public GameObject RootPanel { get; private set; }
 
         public bool IsOpen => RootPanel != null && RootPanel.activeSelf;
@@ -19,7 +51,72 @@ namespace Contrast.UI
         public void SetActive(bool active)
         {
             if (RootPanel != null)
+            {
+                if (active)
+                    RefreshLevelCompletionVisuals();
                 RootPanel.SetActive(active);
+            }
+        }
+
+        public void RefreshLevelCompletionVisuals()
+        {
+            if (RootPanel == null)
+                return;
+
+            for (int i = 0; i < LevelButtonNames.Length; i++)
+            {
+                Transform tr = RootPanel.transform.Find(LevelButtonNames[i]);
+                if (tr == null)
+                    continue;
+
+                bool completed = Contrast.Core.Config.Instance.IsLevelCompleted(i);
+                Color activeBadgeColor = completed ? LevelCompletedColors[i] : UncompletedOrderCircleGray;
+
+                Transform orderCircle = tr.Find("OrderCircle");
+                if (orderCircle != null)
+                {
+                    Image cImg = orderCircle.GetComponent<Image>();
+                    if (cImg != null)
+                    {
+                        cImg.sprite = LabStyleUI.GetSoftCircleSprite();
+                        cImg.color = activeBadgeColor;
+                    }
+                    Text orderTxt = orderCircle.Find("OrderText")?.GetComponent<Text>();
+                    if (orderTxt != null)
+                    {
+                        orderTxt.color = completed ? CompletedOrderTextDark : UncompletedOrderTextBlack;
+                    }
+                }
+
+                Transform titleTr = tr.Find("Title");
+                if (titleTr != null)
+                {
+                    Text titleTxt = titleTr.GetComponent<Text>();
+                    if (titleTxt != null)
+                    {
+                        titleTxt.text = LevelBaseTitles[i];
+                    }
+                }
+
+                Transform waveSlot = tr.Find("WavelengthSlot");
+                if (waveSlot != null)
+                {
+                    waveSlot.gameObject.SetActive(completed);
+                    if (completed)
+                    {
+                        Transform dot = waveSlot.Find("SpectrumDot");
+                        if (dot != null)
+                        {
+                            Image dImg = dot.GetComponent<Image>();
+                            if (dImg != null)
+                                dImg.color = LevelCompletedColors[i];
+                        }
+                        Text waveTxt = waveSlot.Find("WaveText")?.GetComponent<Text>();
+                        if (waveTxt != null)
+                            waveTxt.text = LevelWavelengthBadges[i];
+                    }
+                }
+            }
         }
 
         public bool BindExisting(
@@ -45,6 +142,7 @@ namespace Contrast.UI
             BindButton(existing, "SettingsButton", LabStyleUI.GetPillSprite(), LabStyleUI.IconKind.SettingsSliders, onOpenSettings);
             BindButton(existing, "ExitButton", LabStyleUI.GetDangerButtonSprite(), LabStyleUI.IconKind.PowerExit, onQuitApplication);
 
+            RefreshLevelCompletionVisuals();
             return true;
         }
 
@@ -260,6 +358,7 @@ namespace Contrast.UI
                 LabStyleUI.TextMuted,
                 TextAnchor.MiddleCenter);
 
+            RefreshLevelCompletionVisuals();
             RootPanel.SetActive(true);
         }
     }

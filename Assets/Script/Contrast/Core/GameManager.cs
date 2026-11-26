@@ -115,6 +115,7 @@ namespace Contrast.Core
             Instance = null;
             hasPendingCampaignLaunch = false;
             pendingCampaignLevelIndex = -1;
+            Config.Instance.ResetCompletedLevels();
         }
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]

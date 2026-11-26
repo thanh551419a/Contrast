@@ -117,12 +117,18 @@ namespace Contrast.Level
         public GameObject ObjectiveCardGo => objectiveCardGo;
         public GameObject BottomBarGo => bottomBarGo;
         public GameObject CalculationPanelGo => calculationPanelGo;
+        public GameObject QuizCardGo => quizCardGo;
+        public bool IsQuizActive => quizCardGo != null && quizCardGo.activeSelf && !isColorQuizAnsweredCorrectly && wrongQuizAttemptsCount < 2;
+        public bool IsColorQuizAnsweredCorrectly => isColorQuizAnsweredCorrectly;
+        public int WrongQuizAttemptsCount => wrongQuizAttemptsCount;
+        public IReadOnlyList<string> CurrentQuizOptions => currentQuizOptions;
 
         // Presentation & UI
         private GameObject hudCanvasGo;
         private Canvas hudCanvas;
         private GameObject objectiveCardGo;
         private Text objectiveInfoText;
+        private Text wavelengthTagText;
         private Text objectiveTitleText;
         private Text objectiveSubText;
         private Text slotXkValText;
@@ -139,6 +145,47 @@ namespace Contrast.Level
         private Text calcResultText;
         private Text completionDetailText;
         private GameObject completionPanelGo;
+
+        // Bottom-Docked Wavelength Color Quiz Card (shown after measurement before ResultCard)
+        private GameObject quizCardGo;
+        private Text quizBadgeText;
+        private Text quizQuestionText;
+        private Text quizFeedbackText;
+        private GameObject quizOptionsRowGo;
+        private readonly Button[] quizOptionButtons = new Button[4];
+        private readonly Text[] quizOptionLabels = new Text[4];
+        private readonly Image[] quizOptionImages = new Image[4];
+        private GameObject quizErrorResetButtonGo;
+        private readonly string[] currentQuizOptions = new string[4];
+        private int wrongQuizAttemptsCount;
+        private bool isQuizDisplayed;
+        private bool isColorQuizAnsweredCorrectly;
+        private bool isBingoAnimPlaying;
+        private float bingoAnimTimer;
+
+        private static readonly string[] AllColorChoicesPool =
+        {
+            "Đỏ",
+            "Lục",
+            "Xanh dương",
+            "Vàng",
+            "Cam",
+            "Tím",
+            "Trắng",
+            "Đen",
+            "Chàm"
+        };
+
+        // Per-level memory of the 4 option slots so if 2 wrong options are picked and the level resets,
+        // the 2 unpicked options stay in place and only the 2 picked wrong options are re-randomized.
+        private static readonly string[][] ActiveOptionSlotsByLevel = new string[3][];
+        private static readonly bool[][] PickedWrongSlotMaskByLevel = new bool[3][];
+        private static readonly HashSet<string>[] EliminatedWrongColorsByLevel =
+        {
+            new HashSet<string>(),
+            new HashSet<string>(),
+            new HashSet<string>()
+        };
 
         // In-world visual markers & lines
         private LineRenderer axisLineRenderer;
@@ -820,15 +867,16 @@ namespace Contrast.Level
             irt.anchoredPosition = new Vector2(0f, -12f);
             irt.sizeDelta = new Vector2(-32f, 28f);
 
-            // Subtle spectral wavelength subtitle right under k / i
+            // Subtle spectral wavelength subtitle right under k / i (hides wavelength & color until quiz is solved)
             GameObject waveTagGo = new GameObject("WavelengthTag", typeof(RectTransform));
             waveTagGo.transform.SetParent(objCard.transform, false);
             Text waveTag = waveTagGo.AddComponent<Text>();
+            wavelengthTagText = waveTag;
             waveTag.font = GetFont();
-            waveTag.text = $"Hệ vân tròn Newton · Ánh sáng {colorNameVi} (λ = {sourceLambda:F0} nm)";
+            waveTag.text = "Hệ vân tròn Newton · Phép đo bước sóng ánh sáng (λ = ? nm)";
             waveTag.fontSize = 12;
             waveTag.fontStyle = FontStyle.Bold;
-            waveTag.color = new Color(spectralAccent.r, spectralAccent.g, spectralAccent.b, 0.94f);
+            waveTag.color = LabStyleUI.TextSecondary;
             waveTag.alignment = TextAnchor.MiddleCenter;
             RectTransform wrt = waveTagGo.GetComponent<RectTransform>();
             wrt.anchorMin = new Vector2(0f, 1f);
@@ -946,6 +994,9 @@ namespace Contrast.Level
 
             // Calculation Results Card (Phase D & E)
             BuildCalculationPanel();
+
+            // Wavelength Color Quiz Card (Docked at bottom-center before ResultCard)
+            BuildQuizCard();
 
             // Completion Overlay (Section 6)
             BuildCompletionPanel();
@@ -1113,11 +1164,11 @@ namespace Contrast.Level
             rGo.transform.SetParent(rBadge.transform, false);
             calcResultText = rGo.AddComponent<Text>();
             calcResultText.font = GetFont();
-            calcResultText.text = $"λ ≈ {sourceLambda:F1} nm · Ánh sáng {colorNameVi}";
+            calcResultText.text = $"Bước sóng đo được:  λ ≈ {sourceLambda:F1} nm";
             calcResultText.fontSize = 18;
             calcResultText.fontStyle = FontStyle.Bold;
             calcResultText.alignment = TextAnchor.MiddleCenter;
-            calcResultText.color = spectralAccent;
+            calcResultText.color = LabStyleUI.TextPrimary;
             RectTransform rrt = rGo.GetComponent<RectTransform>();
             rrt.anchorMin = Vector2.zero;
             rrt.anchorMax = Vector2.one;
@@ -1127,25 +1178,166 @@ namespace Contrast.Level
             calculationPanelGo.SetActive(false);
         }
 
+        private void BuildQuizCard()
+        {
+            quizCardGo = new GameObject("WavelengthColorQuizCard", typeof(RectTransform));
+            quizCardGo.transform.SetParent(hudCanvasGo.transform, false);
+            Image cardBg = quizCardGo.AddComponent<Image>();
+            LabStyleUI.ApplySlicedSprite(cardBg, LabStyleUI.GetCardSprite(), true, -6f);
+
+            // Centered horizontally and docked right near the bottom edge so Newton rings stay unobstructed
+            RectTransform cardRt = quizCardGo.GetComponent<RectTransform>();
+            cardRt.anchorMin = new Vector2(0.5f, 0f);
+            cardRt.anchorMax = new Vector2(0.5f, 0f);
+            cardRt.pivot = new Vector2(0.5f, 0f);
+            cardRt.sizeDelta = new Vector2(1080f, 208f);
+            cardRt.anchoredPosition = new Vector2(0f, 12f);
+
+            // 1. Top Pill Status Badge
+            GameObject badgeGo = new GameObject("QuizStatusBadge", typeof(RectTransform));
+            badgeGo.transform.SetParent(quizCardGo.transform, false);
+            Image badgeBg = badgeGo.AddComponent<Image>();
+            LabStyleUI.ApplySlicedSprite(badgeBg, LabStyleUI.GetPillSprite(), false);
+            RectTransform badgeRt = badgeGo.GetComponent<RectTransform>();
+            badgeRt.anchoredPosition = new Vector2(0f, 76f);
+            badgeRt.sizeDelta = new Vector2(560f, 26f);
+
+            GameObject badgeTxtGo = new GameObject("BadgeText", typeof(RectTransform));
+            badgeTxtGo.transform.SetParent(badgeGo.transform, false);
+            quizBadgeText = badgeTxtGo.AddComponent<Text>();
+            quizBadgeText.font = GetFont();
+            quizBadgeText.text = "XÁC ĐỊNH MÀU ÁNH SÁNG TỪ BƯỚC SÓNG  ·  LƯỢT CHỌN: 2/2";
+            quizBadgeText.fontSize = 12;
+            quizBadgeText.fontStyle = FontStyle.Bold;
+            quizBadgeText.alignment = TextAnchor.MiddleCenter;
+            quizBadgeText.color = LabStyleUI.TextSecondary;
+            RectTransform btrt = badgeTxtGo.GetComponent<RectTransform>();
+            btrt.anchorMin = Vector2.zero;
+            btrt.anchorMax = Vector2.one;
+            btrt.offsetMin = Vector2.zero;
+            btrt.offsetMax = Vector2.zero;
+
+            // 2. Question Title
+            GameObject qGo = new GameObject("QuestionText", typeof(RectTransform));
+            qGo.transform.SetParent(quizCardGo.transform, false);
+            quizQuestionText = qGo.AddComponent<Text>();
+            quizQuestionText.font = GetFont();
+            quizQuestionText.text = $"Bước sóng đo được = {sourceLambda:F0} nm, vậy ánh sáng này là màu gì?";
+            quizQuestionText.fontSize = 22;
+            quizQuestionText.fontStyle = FontStyle.Bold;
+            quizQuestionText.alignment = TextAnchor.MiddleCenter;
+            quizQuestionText.color = LabStyleUI.TextPrimary;
+            RectTransform qrt = qGo.GetComponent<RectTransform>();
+            qrt.anchoredPosition = new Vector2(0f, 40f);
+            qrt.sizeDelta = new Vector2(1000f, 34f);
+
+            // 3. Feedback / Instruction Subtitle
+            GameObject fbGo = new GameObject("FeedbackLine", typeof(RectTransform));
+            fbGo.transform.SetParent(quizCardGo.transform, false);
+            quizFeedbackText = fbGo.AddComponent<Text>();
+            quizFeedbackText.font = GetFont();
+            quizFeedbackText.text = "Hãy chọn màu ánh sáng tương ứng với bước sóng vừa đo được:";
+            quizFeedbackText.fontSize = 14;
+            quizFeedbackText.fontStyle = FontStyle.Normal;
+            quizFeedbackText.alignment = TextAnchor.MiddleCenter;
+            quizFeedbackText.color = LabStyleUI.TextSecondary;
+            RectTransform fbrt = fbGo.GetComponent<RectTransform>();
+            fbrt.anchoredPosition = new Vector2(0f, 10f);
+            fbrt.sizeDelta = new Vector2(960f, 24f);
+
+            // 4. 4 Multiple-Choice Answer Buttons Row
+            quizOptionsRowGo = new GameObject("OptionsRow", typeof(RectTransform));
+            quizOptionsRowGo.transform.SetParent(quizCardGo.transform, false);
+            RectTransform rowRt = quizOptionsRowGo.GetComponent<RectTransform>();
+            rowRt.anchoredPosition = new Vector2(0f, -48f);
+            rowRt.sizeDelta = new Vector2(1000f, 56f);
+
+            const float btnW = 222f;
+            const float btnH = 50f;
+            const float gap = 24f;
+            const float step = btnW + gap;
+            const float startX = -1.5f * step;
+
+            for (int i = 0; i < 4; i++)
+            {
+                int slotIdx = i;
+                GameObject btnGo = new GameObject($"QuizOption_{i}", typeof(RectTransform));
+                btnGo.transform.SetParent(quizOptionsRowGo.transform, false);
+
+                Image btnImg = btnGo.AddComponent<Image>();
+                LabStyleUI.ApplySlicedSprite(btnImg, LabStyleUI.GetSecondaryButtonSprite(), true, -3f);
+                quizOptionImages[i] = btnImg;
+
+                Button btn = btnGo.AddComponent<Button>();
+                btn.navigation = new Navigation { mode = Navigation.Mode.None };
+                btn.targetGraphic = btnImg;
+                btn.colors = LabStyleUI.MakeButtonColorBlock();
+                btn.onClick.AddListener(() => OnQuizOptionClicked(slotIdx));
+                quizOptionButtons[i] = btn;
+
+                RectTransform brt = btnGo.GetComponent<RectTransform>();
+                brt.sizeDelta = new Vector2(btnW, btnH);
+                brt.anchoredPosition = new Vector2(startX + i * step, 0f);
+
+                GameObject lblGo = new GameObject("Label", typeof(RectTransform));
+                lblGo.transform.SetParent(btnGo.transform, false);
+                Text lbl = lblGo.AddComponent<Text>();
+                lbl.font = GetFont();
+                lbl.text = "Màu";
+                lbl.fontSize = 17;
+                lbl.fontStyle = FontStyle.Bold;
+                lbl.alignment = TextAnchor.MiddleCenter;
+                lbl.color = Color.white;
+                lbl.raycastTarget = false;
+                quizOptionLabels[i] = lbl;
+
+                RectTransform lrt = lblGo.GetComponent<RectTransform>();
+                lrt.anchorMin = Vector2.zero;
+                lrt.anchorMax = Vector2.one;
+                lrt.offsetMin = Vector2.zero;
+                lrt.offsetMax = Vector2.zero;
+            }
+
+            // 5. Reset Button (shown only if player picks wrong 2 times)
+            Button resetBtn = CreateButton(
+                quizCardGo.transform,
+                "QUIZ_ERROR_RESET",
+                "CHƠI LẠI TỪ ĐẦU",
+                new Vector2(0f, -48f),
+                true,
+                OnPlayAgainClicked);
+            quizErrorResetButtonGo = resetBtn.gameObject;
+            Image resetImg = quizErrorResetButtonGo.GetComponent<Image>();
+            if (resetImg != null)
+                LabStyleUI.ApplySlicedSprite(resetImg, LabStyleUI.GetDangerButtonSprite(), true, -4f);
+            quizErrorResetButtonGo.SetActive(false);
+
+            quizCardGo.SetActive(false);
+        }
+
         private void BuildCompletionPanel()
         {
             completionPanelGo = new GameObject("CompletionPanel", typeof(RectTransform));
             completionPanelGo.transform.SetParent(hudCanvasGo.transform, false);
             Image bg = completionPanelGo.AddComponent<Image>();
-            bg.color = new Color(0.01f, 0.02f, 0.05f, 0.88f);
+            bg.color = new Color(0.01f, 0.02f, 0.05f, 0.0f);
+            bg.raycastTarget = false;
             RectTransform rt = completionPanelGo.GetComponent<RectTransform>();
             rt.anchorMin = Vector2.zero;
             rt.anchorMax = Vector2.one;
             rt.sizeDelta = Vector2.zero;
 
-            // Content Container (Frosted Slate Card)
+            // Content Container (Frosted Slate Card docked at bottom-center so Newton rings stay unobstructed)
             GameObject box = new GameObject("Box", typeof(RectTransform));
             box.transform.SetParent(completionPanelGo.transform, false);
             Image boxBg = box.AddComponent<Image>();
             LabStyleUI.ApplySlicedSprite(boxBg, LabStyleUI.GetCardSprite(), true, -6f);
             RectTransform boxRt = box.GetComponent<RectTransform>();
-            boxRt.sizeDelta = new Vector2(860f, 440f);
-            boxRt.anchoredPosition = Vector2.zero;
+            boxRt.anchorMin = new Vector2(0.5f, 0f);
+            boxRt.anchorMax = new Vector2(0.5f, 0f);
+            boxRt.pivot = new Vector2(0.5f, 0f);
+            boxRt.sizeDelta = new Vector2(1040f, 214f);
+            boxRt.anchoredPosition = new Vector2(0f, 12f);
 
             // Title
             GameObject titleGo = new GameObject("Title", typeof(RectTransform));
@@ -1153,13 +1345,13 @@ namespace Contrast.Level
             Text title = titleGo.AddComponent<Text>();
             title.font = GetFont();
             title.text = "HOÀN THÀNH PHÉP ĐO";
-            title.fontSize = 44;
+            title.fontSize = 26;
             title.fontStyle = FontStyle.Bold;
             title.alignment = TextAnchor.MiddleCenter;
             title.color = LabStyleUI.TextPrimary;
             RectTransform trt = titleGo.GetComponent<RectTransform>();
-            trt.anchoredPosition = new Vector2(0f, 128f);
-            trt.sizeDelta = new Vector2(780f, 62f);
+            trt.anchoredPosition = new Vector2(0f, 70f);
+            trt.sizeDelta = new Vector2(880f, 34f);
 
             // Subtitle
             GameObject subGo = new GameObject("Subtitle", typeof(RectTransform));
@@ -1167,12 +1359,12 @@ namespace Contrast.Level
             Text sub = subGo.AddComponent<Text>();
             sub.font = GetFont();
             sub.text = "Thí nghiệm giao thoa hệ vân tròn Newton đã hoàn tất chính xác";
-            sub.fontSize = 16;
+            sub.fontSize = 14;
             sub.alignment = TextAnchor.MiddleCenter;
             sub.color = LabStyleUI.TextSecondary;
             RectTransform srt = subGo.GetComponent<RectTransform>();
-            srt.anchoredPosition = new Vector2(0f, 74f);
-            srt.sizeDelta = new Vector2(780f, 30f);
+            srt.anchoredPosition = new Vector2(0f, 40f);
+            srt.sizeDelta = new Vector2(880f, 22f);
 
             // Recessed Detail Slot
             string compColorNameVi = NewtonRingsPresentation.GetWavelengthColorNameVi(sourceLambda);
@@ -1181,15 +1373,15 @@ namespace Contrast.Level
             Image detSlotBg = detSlot.AddComponent<Image>();
             LabStyleUI.ApplySlicedSprite(detSlotBg, LabStyleUI.GetRecessedSlotSprite(), false);
             RectTransform dsRt = detSlot.GetComponent<RectTransform>();
-            dsRt.anchoredPosition = new Vector2(0f, 16f);
-            dsRt.sizeDelta = new Vector2(740f, 48f);
+            dsRt.anchoredPosition = new Vector2(0f, 4f);
+            dsRt.sizeDelta = new Vector2(880f, 34f);
 
             GameObject detGo = new GameObject("Detail", typeof(RectTransform));
             detGo.transform.SetParent(detSlot.transform, false);
             completionDetailText = detGo.AddComponent<Text>();
             completionDetailText.font = GetFont();
             completionDetailText.text = $"Bước sóng đo được: λ ≈ {sourceLambda:F1} nm (Ánh sáng {compColorNameVi})";
-            completionDetailText.fontSize = 16;
+            completionDetailText.fontSize = 14;
             completionDetailText.fontStyle = FontStyle.Bold;
             completionDetailText.alignment = TextAnchor.MiddleCenter;
             completionDetailText.color = Color.Lerp(NewtonRingsPresentation.WavelengthToRgb(sourceLambda), Color.white, 0.35f);
@@ -1203,8 +1395,8 @@ namespace Contrast.Level
             GameObject btnRow = new GameObject("ButtonRow", typeof(RectTransform));
             btnRow.transform.SetParent(box.transform, false);
             RectTransform rowRt = btnRow.GetComponent<RectTransform>();
-            rowRt.anchoredPosition = new Vector2(0f, -96f);
-            rowRt.sizeDelta = new Vector2(740f, 72f);
+            rowRt.anchoredPosition = new Vector2(0f, -54f);
+            rowRt.sizeDelta = new Vector2(740f, 58f);
 
             // Button 1: Royal-Blue Primary CTA
             CreateButton(
@@ -1784,12 +1976,26 @@ namespace Contrast.Level
             }
             if (calcResultText != null)
             {
-                calcResultText.text = $"λ ≈ {CalculatedLambda_nm:F1} nm · Ánh sáng {colorNameVi}";
+                calcResultText.text = $"Bước sóng đo được:  λ ≈ {CalculatedLambda_nm:F1} nm";
+                calcResultText.color = LabStyleUI.TextPrimary;
             }
             if (completionDetailText != null)
             {
                 completionDetailText.text = $"B = {MeasuredB_mm:F3} mm · b = {Measuredb_mm:F3} mm · Bước sóng λ ≈ {CalculatedLambda_nm:F1} nm (Ánh sáng {colorNameVi})";
             }
+
+            isQuizDisplayed = false;
+            isColorQuizAnsweredCorrectly = false;
+            isBingoAnimPlaying = false;
+            bingoAnimTimer = 0f;
+            wrongQuizAttemptsCount = 0;
+            if (quizCardGo != null)
+            {
+                quizCardGo.SetActive(false);
+                quizCardGo.transform.localScale = Vector3.one;
+            }
+            if (apparatusVisuals != null)
+                apparatusVisuals.SetColorRevealedImmediate(false);
 
             RefreshCoordinateSlots();
             if (targetICrosshair != null) targetICrosshair.SetActive(false);
@@ -1801,6 +2007,317 @@ namespace Contrast.Level
                 RectTransform calcRt = calculationPanelGo.GetComponent<RectTransform>();
                 if (calcRt != null)
                     calcRt.anchoredPosition = new Vector2(22f, -80f);
+            }
+        }
+
+        private int GetCurrentLevelSlotIndex()
+        {
+            if (GameManager.Instance != null && GameManager.Instance.CurrentCampaignIndex >= 0 && GameManager.Instance.CurrentCampaignIndex < 3)
+                return GameManager.Instance.CurrentCampaignIndex;
+            int idx = Config.GetLevelIndexForWavelength(sourceLambda);
+            return idx >= 0 ? idx : 0;
+        }
+
+        private void ShowWavelengthColorQuizCard()
+        {
+            if (quizCardGo == null)
+                return;
+
+            isQuizDisplayed = true;
+            isColorQuizAnsweredCorrectly = false;
+            isBingoAnimPlaying = false;
+            bingoAnimTimer = 0f;
+            wrongQuizAttemptsCount = 0;
+
+            // Hide bottom-center PhaseTunerPanel while the bottom quiz card is active so they do not overlap
+            if (PhaseTunerUI.Instance != null && PhaseTunerUI.Instance.TunerPanelRect != null)
+                PhaseTunerUI.Instance.TunerPanelRect.gameObject.SetActive(false);
+
+            string correctColor = NewtonRingsPresentation.GetWavelengthColorNameVi(CalculatedLambda_nm);
+            PrepareQuizOptions(correctColor);
+
+            if (quizBadgeText != null)
+            {
+                quizBadgeText.text = "XÁC ĐỊNH MÀU ÁNH SÁNG TỪ BƯỚC SÓNG  ·  LƯỢT CHỌN: 2/2";
+                quizBadgeText.color = LabStyleUI.TextSecondary;
+            }
+
+            if (quizQuestionText != null)
+            {
+                quizQuestionText.text = $"Bước sóng đo được ≈ {CalculatedLambda_nm:F0} nm — vậy ánh sáng này là màu gì?";
+                quizQuestionText.color = LabStyleUI.TextPrimary;
+            }
+
+            if (quizFeedbackText != null)
+            {
+                quizFeedbackText.text = "Hãy chọn 1 trong 4 đáp án bên dưới (cho phép chọn sai tối đa 1 lần):";
+                quizFeedbackText.color = LabStyleUI.TextSecondary;
+            }
+
+            if (quizOptionsRowGo != null)
+                quizOptionsRowGo.SetActive(true);
+            if (quizErrorResetButtonGo != null)
+                quizErrorResetButtonGo.SetActive(false);
+
+            for (int i = 0; i < 4; i++)
+            {
+                if (quizOptionButtons[i] != null)
+                    quizOptionButtons[i].interactable = true;
+                if (quizOptionImages[i] != null)
+                {
+                    LabStyleUI.ApplySlicedSprite(quizOptionImages[i], LabStyleUI.GetSecondaryButtonSprite(), true, -3f);
+                    quizOptionImages[i].color = Color.white;
+                }
+                if (quizOptionLabels[i] != null)
+                {
+                    quizOptionLabels[i].text = currentQuizOptions[i];
+                    quizOptionLabels[i].color = Color.white;
+                }
+            }
+
+            quizCardGo.transform.localScale = Vector3.one;
+            quizCardGo.SetActive(true);
+        }
+
+        private void PrepareQuizOptions(string correctColor)
+        {
+            int lvlIdx = GetCurrentLevelSlotIndex();
+            string[] savedSlots = ActiveOptionSlotsByLevel[lvlIdx];
+            bool[] wrongMask = PickedWrongSlotMaskByLevel[lvlIdx];
+            HashSet<string> eliminated = EliminatedWrongColorsByLevel[lvlIdx];
+
+            bool hasPartialPreservedSlots = false;
+            if (savedSlots != null && wrongMask != null && savedSlots.Length == 4 && wrongMask.Length == 4)
+            {
+                for (int i = 0; i < 4; i++)
+                {
+                    if (wrongMask[i])
+                    {
+                        hasPartialPreservedSlots = true;
+                        break;
+                    }
+                }
+            }
+
+            if (hasPartialPreservedSlots)
+            {
+                // Keep unpicked options in their exact slots, and only replace the picked wrong slots
+                HashSet<string> usedInCard = new HashSet<string>();
+                for (int i = 0; i < 4; i++)
+                {
+                    if (!wrongMask[i] && !string.IsNullOrEmpty(savedSlots[i]))
+                        usedInCard.Add(savedSlots[i]);
+                }
+
+                // Ensure correctColor is always present among kept or replaced slots
+                bool hasCorrect = usedInCard.Contains(correctColor);
+
+                List<string> candidates = BuildReplacementCandidateList(usedInCard, eliminated, correctColor);
+                for (int i = 0; i < 4; i++)
+                {
+                    if (wrongMask[i])
+                    {
+                        if (!hasCorrect)
+                        {
+                            savedSlots[i] = correctColor;
+                            usedInCard.Add(correctColor);
+                            hasCorrect = true;
+                        }
+                        else if (candidates.Count > 0)
+                        {
+                            int pickIdx = UnityEngine.Random.Range(0, candidates.Count);
+                            string picked = candidates[pickIdx];
+                            candidates.RemoveAt(pickIdx);
+                            savedSlots[i] = picked;
+                            usedInCard.Add(picked);
+                        }
+                    }
+                    wrongMask[i] = false;
+                    currentQuizOptions[i] = savedSlots[i];
+                }
+                return;
+            }
+
+            // Fresh initialization of 4 random options (1 correct + 3 random distractors)
+            savedSlots = new string[4];
+            wrongMask = new bool[4];
+            eliminated.Clear();
+
+            List<string> pool = new List<string>(AllColorChoicesPool.Length);
+            for (int i = 0; i < AllColorChoicesPool.Length; i++)
+            {
+                if (AllColorChoicesPool[i] != correctColor)
+                    pool.Add(AllColorChoicesPool[i]);
+            }
+
+            savedSlots[0] = correctColor;
+            for (int i = 1; i < 4 && pool.Count > 0; i++)
+            {
+                int pick = UnityEngine.Random.Range(0, pool.Count);
+                savedSlots[i] = pool[pick];
+                pool.RemoveAt(pick);
+            }
+
+            // Fisher-Yates shuffle
+            for (int i = 3; i > 0; i--)
+            {
+                int j = UnityEngine.Random.Range(0, i + 1);
+                string tmp = savedSlots[i];
+                savedSlots[i] = savedSlots[j];
+                savedSlots[j] = tmp;
+            }
+
+            ActiveOptionSlotsByLevel[lvlIdx] = savedSlots;
+            PickedWrongSlotMaskByLevel[lvlIdx] = wrongMask;
+            for (int i = 0; i < 4; i++)
+                currentQuizOptions[i] = savedSlots[i];
+        }
+
+        private static List<string> BuildReplacementCandidateList(
+            HashSet<string> usedInCard,
+            HashSet<string> eliminated,
+            string correctColor)
+        {
+            List<string> candidates = new List<string>();
+            for (int i = 0; i < AllColorChoicesPool.Length; i++)
+            {
+                string col = AllColorChoicesPool[i];
+                if (col != correctColor && !usedInCard.Contains(col) && !eliminated.Contains(col))
+                    candidates.Add(col);
+            }
+
+            // If we exhausted the pool across many failures, allow previously eliminated colors except those currently on the card
+            if (candidates.Count < 2)
+            {
+                eliminated.Clear();
+                candidates.Clear();
+                for (int i = 0; i < AllColorChoicesPool.Length; i++)
+                {
+                    string col = AllColorChoicesPool[i];
+                    if (col != correctColor && !usedInCard.Contains(col))
+                        candidates.Add(col);
+                }
+            }
+
+            return candidates;
+        }
+
+        public void SelectQuizOption(int slotIndex) => OnQuizOptionClicked(slotIndex);
+
+        private void OnQuizOptionClicked(int slotIndex)
+        {
+            if (slotIndex < 0 || slotIndex >= 4 || isColorQuizAnsweredCorrectly || wrongQuizAttemptsCount >= 2)
+                return;
+
+            string chosenColor = currentQuizOptions[slotIndex];
+            string correctColor = NewtonRingsPresentation.GetWavelengthColorNameVi(CalculatedLambda_nm);
+            int lvlIdx = GetCurrentLevelSlotIndex();
+
+            Debug.Log($"[UI_BUTTON][NewtonQuiz] Clicked QuizOption_{slotIndex} ('{chosenColor}', correct='{correctColor}')");
+            Contrast.Audio.ContrastAudioManager.Instance?.PlayButtonClick();
+
+            if (chosenColor == correctColor)
+            {
+                // CORRECT! Mark level completed, start Bingo animation + radial Newton ring color bloom
+                isColorQuizAnsweredCorrectly = true;
+                isBingoAnimPlaying = true;
+                bingoAnimTimer = 0f;
+
+                Config.Instance.MarkLevelCompletedByWavelength(sourceLambda);
+                Config.Instance.SetLevelCompleted(lvlIdx, true);
+
+                ActiveOptionSlotsByLevel[lvlIdx] = null;
+                PickedWrongSlotMaskByLevel[lvlIdx] = null;
+                EliminatedWrongColorsByLevel[lvlIdx].Clear();
+
+                Color spectralCol = NewtonRingsPresentation.WavelengthToRgb(sourceLambda);
+                Color spectralAccent = Color.Lerp(spectralCol, Color.white, 0.30f);
+
+                if (wavelengthTagText != null)
+                {
+                    wavelengthTagText.text = $"Hệ vân tròn Newton · Ánh sáng {correctColor} (λ = {sourceLambda:F0} nm)";
+                    wavelengthTagText.color = new Color(spectralAccent.r, spectralAccent.g, spectralAccent.b, 0.94f);
+                }
+                if (calcResultText != null)
+                {
+                    calcResultText.text = $"λ ≈ {CalculatedLambda_nm:F1} nm · Ánh sáng {correctColor}";
+                    calcResultText.color = spectralAccent;
+                }
+
+                if (quizOptionsRowGo != null)
+                    quizOptionsRowGo.SetActive(false);
+
+                if (quizBadgeText != null)
+                {
+                    quizBadgeText.text = "✦ BINGO! CHÍNH XÁC 100% — ĐÃ XÁC ĐỊNH ĐÚNG PHỔ MÀU ✦";
+                    quizBadgeText.color = new Color(0.45f, 0.96f, 0.78f, 1f);
+                }
+                if (quizQuestionText != null)
+                {
+                    quizQuestionText.text = $"BINGO! Ánh sáng {correctColor} (λ ≈ {CalculatedLambda_nm:F0} nm)";
+                    quizQuestionText.color = spectralAccent;
+                }
+                if (quizFeedbackText != null)
+                {
+                    quizFeedbackText.text = "Hệ vân tròn Newton đang khôi phục màu sắc quang học thực tế...";
+                    quizFeedbackText.color = LabStyleUI.TextPrimary;
+                }
+                return;
+            }
+
+            // WRONG CHOICE
+            wrongQuizAttemptsCount++;
+            if (PickedWrongSlotMaskByLevel[lvlIdx] == null || PickedWrongSlotMaskByLevel[lvlIdx].Length != 4)
+                PickedWrongSlotMaskByLevel[lvlIdx] = new bool[4];
+            PickedWrongSlotMaskByLevel[lvlIdx][slotIndex] = true;
+            EliminatedWrongColorsByLevel[lvlIdx].Add(chosenColor);
+
+            if (wrongQuizAttemptsCount == 1)
+            {
+                // 1st wrong choice allowed: disable that button and warn player (1 attempt remaining)
+                if (quizOptionButtons[slotIndex] != null)
+                    quizOptionButtons[slotIndex].interactable = false;
+                if (quizOptionImages[slotIndex] != null)
+                    quizOptionImages[slotIndex].color = new Color(0.55f, 0.22f, 0.25f, 0.75f);
+                if (quizOptionLabels[slotIndex] != null)
+                {
+                    quizOptionLabels[slotIndex].text = $"✗ {chosenColor}";
+                    quizOptionLabels[slotIndex].color = new Color(1f, 0.65f, 0.65f, 0.9f);
+                }
+                if (quizBadgeText != null)
+                {
+                    quizBadgeText.text = "CẢNH BÁO SAI LẦN 1  ·  CÒN 1 LƯỢT CHỌN CUỐI CÙNG (1/2)";
+                    quizBadgeText.color = new Color(1f, 0.78f, 0.35f, 1f);
+                }
+                if (quizFeedbackText != null)
+                {
+                    quizFeedbackText.text = $"Đáp án '{chosenColor}' chưa chính xác! Bạn còn 1 lượt chọn duy nhất.";
+                    quizFeedbackText.color = new Color(1f, 0.78f, 0.38f, 1f);
+                }
+            }
+            else
+            {
+                // 2nd wrong choice: report measurement error and require level restart from the beginning
+                if (quizOptionsRowGo != null)
+                    quizOptionsRowGo.SetActive(false);
+                if (quizErrorResetButtonGo != null)
+                    quizErrorResetButtonGo.SetActive(true);
+
+                if (quizBadgeText != null)
+                {
+                    quizBadgeText.text = "⚠ BÁO CÁO LỖI THÍ NGHIỆM  ·  CHỌN SAI QUÁ SỐ LƯỢT (2/2)";
+                    quizBadgeText.color = new Color(1f, 0.45f, 0.48f, 1f);
+                }
+                if (quizQuestionText != null)
+                {
+                    quizQuestionText.text = "PHÉP ĐO BỊ LỖI — BẠN ĐÃ CHỌN SAI MÀU ÁNH SÁNG 2 LẦN!";
+                    quizQuestionText.color = new Color(1f, 0.48f, 0.50f, 1f);
+                }
+                if (quizFeedbackText != null)
+                {
+                    quizFeedbackText.text = "Kết quả xác định phổ ánh sáng không hợp lệ. Vui lòng khởi động lại màn chơi từ đầu.";
+                    quizFeedbackText.color = LabStyleUI.TextSecondary;
+                }
             }
         }
 
@@ -1877,24 +2394,66 @@ namespace Contrast.Level
 
                 if (calcResultText != null)
                 {
-                    string colorNameVi = NewtonRingsPresentation.GetWavelengthColorNameVi(CalculatedLambda_nm);
-                    calcResultText.text = $"λ ≈ {CalculatedLambda_nm:F1} nm · Ánh sáng {colorNameVi}";
+                    if (isColorQuizAnsweredCorrectly)
+                    {
+                        string colorNameVi = NewtonRingsPresentation.GetWavelengthColorNameVi(CalculatedLambda_nm);
+                        calcResultText.text = $"λ ≈ {CalculatedLambda_nm:F1} nm · Ánh sáng {colorNameVi}";
+                    }
+                    else
+                    {
+                        calcResultText.text = $"Bước sóng đo được:  λ ≈ {CalculatedLambda_nm:F1} nm";
+                    }
                 }
             }
 
-            // Phase E — Result hold (2.55 - 5.6s), then Complete
-            if (tm >= 5.6f)
+            // Phase E — Show Bottom-Docked Wavelength Color Quiz Card at tm >= 2.55s
+            if (tm >= 2.55f && !isQuizDisplayed)
             {
-                if (CurrentStep != NewtonFinaleStep.Complete)
+                ShowWavelengthColorQuizCard();
+            }
+
+            // Phase F — After correct answer: play Bingo card bounce + radial color bloom on Newton rings, then open ResultCard
+            if (isColorQuizAnsweredCorrectly && isBingoAnimPlaying)
+            {
+                bingoAnimTimer += dt;
+
+                // Gentle celebratory bounce on the Bingo card during the first 0.50s
+                if (quizCardGo != null)
                 {
-                    CurrentStep = NewtonFinaleStep.Complete;
-                    if (GameManager.Instance != null)
+                    float pulsePhase = Mathf.Clamp01(bingoAnimTimer / 0.50f);
+                    float scale = 1f + 0.055f * Mathf.Sin(pulsePhase * Mathf.PI);
+                    quizCardGo.transform.localScale = new Vector3(scale, scale, 1f);
+                }
+
+                // Progressive radial color bloom across the Newton rings over 1.10s
+                if (apparatusVisuals != null)
+                {
+                    float bloomProgress = Mathf.Clamp01(bingoAnimTimer / 1.10f);
+                    apparatusVisuals.SetColorRevealProgress(bloomProgress);
+                }
+
+                if (bingoAnimTimer >= 1.40f)
+                {
+                    isBingoAnimPlaying = false;
+                    if (apparatusVisuals != null)
+                        apparatusVisuals.SetColorRevealedImmediate(true);
+                    if (quizCardGo != null)
                     {
-                        GameManager.Instance.OnPlayerWon();
+                        quizCardGo.transform.localScale = Vector3.one;
+                        quizCardGo.SetActive(false);
                     }
-                    else if (completionPanelGo != null)
+
+                    if (CurrentStep != NewtonFinaleStep.Complete)
                     {
-                        completionPanelGo.SetActive(true);
+                        CurrentStep = NewtonFinaleStep.Complete;
+                        if (GameManager.Instance != null)
+                        {
+                            GameManager.Instance.OnPlayerWon();
+                        }
+                        else if (completionPanelGo != null)
+                        {
+                            completionPanelGo.SetActive(true);
+                        }
                     }
                 }
             }
@@ -1961,6 +2520,25 @@ namespace Contrast.Level
                     calcRt.anchoredPosition = new Vector2(22f, -282f);
             }
             if (completionPanelGo != null) completionPanelGo.SetActive(false);
+            if (quizCardGo != null)
+            {
+                quizCardGo.transform.localScale = Vector3.one;
+                quizCardGo.SetActive(false);
+            }
+            isQuizDisplayed = false;
+            isColorQuizAnsweredCorrectly = false;
+            isBingoAnimPlaying = false;
+            bingoAnimTimer = 0f;
+            wrongQuizAttemptsCount = 0;
+            if (apparatusVisuals != null)
+                apparatusVisuals.SetColorRevealedImmediate(false);
+            if (wavelengthTagText != null)
+            {
+                wavelengthTagText.text = "Hệ vân tròn Newton · Phép đo bước sóng ánh sáng (λ = ? nm)";
+                wavelengthTagText.color = LabStyleUI.TextSecondary;
+            }
+            if (PhaseTunerUI.Instance != null && PhaseTunerUI.Instance.TunerPanelRect != null)
+                PhaseTunerUI.Instance.TunerPanelRect.gameObject.SetActive(true);
             if (bottomBarGo != null) bottomBarGo.SetActive(true);
 
             if (cameraFollow != null)

@@ -71,6 +71,13 @@ namespace Contrast.UI
                 return false;
 
             panel = existingPanel.gameObject;
+            Image panelBg = panel.GetComponent<Image>();
+            if (panelBg != null)
+            {
+                panelBg.color = new Color(0.016f, 0.030f, 0.056f, 0.0f);
+                panelBg.raycastTarget = false;
+            }
+
             Image cardBg = card.GetComponent<Image>();
             if (cardBg != null)
                 LabStyleUI.ApplySlicedSprite(cardBg, LabStyleUI.GetCardSprite(), false);
@@ -105,8 +112,94 @@ namespace Contrast.UI
                 returnButton = btnRow.Find("RETURNButton")?.GetComponent<Button>();
             }
 
-            hintLabel = card.Find("KeyboardHint")?.GetComponent<Text>();
+            hintLabel = (card.Find("KeyboardHint") ?? card.Find("Hint"))?.GetComponent<Text>();
+            ApplyBottomDockedCardLayout(card.GetComponent<RectTransform>());
             return retryButton != null && restartButton != null && returnButton != null;
+        }
+
+        private static void ApplyBottomDockedCardLayout(RectTransform cardRt)
+        {
+            if (cardRt == null)
+                return;
+
+            // Dock centered horizontally and flush near the bottom edge so Newton rings stay unobstructed
+            cardRt.anchorMin = new Vector2(0.5f, 0f);
+            cardRt.anchorMax = new Vector2(0.5f, 0f);
+            cardRt.pivot = new Vector2(0.5f, 0f);
+            cardRt.sizeDelta = new Vector2(1120f, 224f);
+            cardRt.anchoredPosition = new Vector2(0f, 12f);
+
+            RectTransform badgeRt = cardRt.Find("StatusBadge")?.GetComponent<RectTransform>();
+            if (badgeRt != null)
+            {
+                badgeRt.anchorMin = new Vector2(0.5f, 0.5f);
+                badgeRt.anchorMax = new Vector2(0.5f, 0.5f);
+                badgeRt.pivot = new Vector2(0.5f, 0.5f);
+                badgeRt.sizeDelta = new Vector2(560f, 26f);
+                badgeRt.anchoredPosition = new Vector2(0f, 88f);
+            }
+
+            RectTransform titleRt = cardRt.Find("Title")?.GetComponent<RectTransform>();
+            if (titleRt != null)
+            {
+                titleRt.anchorMin = new Vector2(0.5f, 0.5f);
+                titleRt.anchorMax = new Vector2(0.5f, 0.5f);
+                titleRt.pivot = new Vector2(0.5f, 0.5f);
+                titleRt.sizeDelta = new Vector2(1000f, 34f);
+                titleRt.anchoredPosition = new Vector2(0f, 54f);
+                Text t = titleRt.GetComponent<Text>();
+                if (t != null)
+                {
+                    bool isSupersampled = Mathf.Abs(titleRt.localScale.x - 0.5f) < 0.05f;
+                    t.fontSize = isSupersampled ? 52 : 26;
+                }
+            }
+
+            RectTransform subRt = cardRt.Find("Subtitle")?.GetComponent<RectTransform>();
+            if (subRt != null)
+            {
+                subRt.anchorMin = new Vector2(0.5f, 0.5f);
+                subRt.anchorMax = new Vector2(0.5f, 0.5f);
+                subRt.pivot = new Vector2(0.5f, 0.5f);
+                subRt.sizeDelta = new Vector2(960f, 22f);
+                subRt.anchoredPosition = new Vector2(0f, 24f);
+                Text st = subRt.GetComponent<Text>();
+                if (st != null)
+                {
+                    bool isSupersampled = Mathf.Abs(subRt.localScale.x - 0.5f) < 0.05f;
+                    st.fontSize = isSupersampled ? 28 : 14;
+                }
+            }
+
+            RectTransform statsRt = cardRt.Find("StatsBox")?.GetComponent<RectTransform>();
+            if (statsRt != null)
+            {
+                statsRt.anchorMin = new Vector2(0.5f, 0.5f);
+                statsRt.anchorMax = new Vector2(0.5f, 0.5f);
+                statsRt.pivot = new Vector2(0.5f, 0.5f);
+                statsRt.sizeDelta = new Vector2(960f, 32f);
+                statsRt.anchoredPosition = new Vector2(0f, -8f);
+            }
+
+            RectTransform rowRt = cardRt.Find("ButtonRow")?.GetComponent<RectTransform>();
+            if (rowRt != null)
+            {
+                rowRt.anchorMin = new Vector2(0.5f, 0.5f);
+                rowRt.anchorMax = new Vector2(0.5f, 0.5f);
+                rowRt.pivot = new Vector2(0.5f, 0.5f);
+                rowRt.sizeDelta = new Vector2(1040f, 54f);
+                rowRt.anchoredPosition = new Vector2(0f, -56f);
+            }
+
+            RectTransform hintRt = (cardRt.Find("KeyboardHint") ?? cardRt.Find("Hint"))?.GetComponent<RectTransform>();
+            if (hintRt != null)
+            {
+                hintRt.anchorMin = new Vector2(0.5f, 0.5f);
+                hintRt.anchorMax = new Vector2(0.5f, 0.5f);
+                hintRt.pivot = new Vector2(0.5f, 0.5f);
+                hintRt.sizeDelta = new Vector2(900f, 18f);
+                hintRt.anchoredPosition = new Vector2(0f, -97f);
+            }
         }
 
         public void Show(bool visible)
@@ -376,7 +469,7 @@ namespace Contrast.UI
                 return;
 
             float buttonWidth = active.Count <= 2 ? 296f : 280f;
-            float buttonHeight = 62f;
+            float buttonHeight = 50f;
             float gap = active.Count <= 2 ? 112f : 78f;
             float step = buttonWidth + gap;
             float startX = -0.5f * (active.Count - 1) * step;
@@ -462,30 +555,34 @@ namespace Contrast.UI
 
             panel = NewUI("Panel", canvasGo.transform);
             Image bg = panel.AddComponent<Image>();
-            bg.color = new Color(0.016f, 0.030f, 0.056f, 0.86f);
+            bg.color = new Color(0.016f, 0.030f, 0.056f, 0.0f);
+            bg.raycastTarget = false;
             Stretch(panel.GetComponent<RectTransform>());
 
-            // Frosted Slate-Navy Modal Card
+            // Frosted Slate-Navy Modal Card (Docked at bottom-center so Newton rings remain visible)
             GameObject card = NewUI("ResultCard", panel.transform);
             Image cardBg = card.AddComponent<Image>();
             LabStyleUI.ApplySlicedSprite(cardBg, LabStyleUI.GetCardSprite(), true, -7f);
             RectTransform cardRt = card.GetComponent<RectTransform>();
-            cardRt.sizeDelta = new Vector2(1120f, 528f);
-            cardRt.anchoredPosition = Vector2.zero;
+            cardRt.anchorMin = new Vector2(0.5f, 0f);
+            cardRt.anchorMax = new Vector2(0.5f, 0f);
+            cardRt.pivot = new Vector2(0.5f, 0f);
+            cardRt.sizeDelta = new Vector2(1120f, 224f);
+            cardRt.anchoredPosition = new Vector2(0f, 12f);
 
             // Status Stadium Pill
             GameObject badgeGo = NewUI("StatusBadge", card.transform);
             badgeBg = badgeGo.AddComponent<Image>();
             LabStyleUI.ApplySlicedSprite(badgeBg, LabStyleUI.GetPillSprite(), false);
             RectTransform badgeRt = badgeGo.GetComponent<RectTransform>();
-            badgeRt.sizeDelta = new Vector2(580f, 40f);
-            badgeRt.anchoredPosition = new Vector2(0f, 194f);
+            badgeRt.sizeDelta = new Vector2(560f, 26f);
+            badgeRt.anchoredPosition = new Vector2(0f, 88f);
 
             GameObject badgeTxtGo = NewUI("BadgeText", badgeGo.transform);
             badgeText = badgeTxtGo.AddComponent<Text>();
             badgeText.font = LabStyleUI.GetFont();
             badgeText.text = "Hoàn thành thí nghiệm giao thoa";
-            badgeText.fontSize = 14;
+            badgeText.fontSize = 13;
             badgeText.fontStyle = FontStyle.Bold;
             badgeText.alignment = TextAnchor.MiddleCenter;
             badgeText.color = LabStyleUI.TextSecondary;
@@ -496,42 +593,42 @@ namespace Contrast.UI
             titleText = title.AddComponent<Text>();
             titleText.font = LabStyleUI.GetFont();
             titleText.text = "HOÀN THÀNH THÍ NGHIỆM";
-            titleText.fontSize = 48;
+            titleText.fontSize = 26;
             titleText.fontStyle = FontStyle.Bold;
             titleText.alignment = TextAnchor.MiddleCenter;
             titleText.color = LabStyleUI.TextPrimary;
 
             RectTransform titleRt = title.GetComponent<RectTransform>();
-            titleRt.sizeDelta = new Vector2(1000f, 68f);
-            titleRt.anchoredPosition = new Vector2(0f, 122f);
+            titleRt.sizeDelta = new Vector2(1000f, 34f);
+            titleRt.anchoredPosition = new Vector2(0f, 54f);
 
             // Subtitle
             GameObject sub = NewUI("Subtitle", card.transform);
             subText = sub.AddComponent<Text>();
             subText.font = LabStyleUI.GetFont();
             subText.text = "Đã xác lập trục giao thoa K–O và hoàn tất phép đo bước sóng ánh sáng";
-            subText.fontSize = 17;
+            subText.fontSize = 14;
             subText.fontStyle = FontStyle.Normal;
             subText.alignment = TextAnchor.MiddleCenter;
             subText.color = LabStyleUI.TextSecondary;
 
             RectTransform subRt = sub.GetComponent<RectTransform>();
-            subRt.sizeDelta = new Vector2(960f, 34f);
-            subRt.anchoredPosition = new Vector2(0f, 64f);
+            subRt.sizeDelta = new Vector2(960f, 22f);
+            subRt.anchoredPosition = new Vector2(0f, 24f);
 
             // Recessed Measurement Summary Slot (matching [giá trị  mm] slot aesthetic)
             statsBox = NewUI("StatsBox", card.transform);
             Image statsBg = statsBox.AddComponent<Image>();
             LabStyleUI.ApplySlicedSprite(statsBg, LabStyleUI.GetRecessedSlotSprite(), false);
             RectTransform statsRt = statsBox.GetComponent<RectTransform>();
-            statsRt.sizeDelta = new Vector2(920f, 54f);
-            statsRt.anchoredPosition = new Vector2(0f, 2f);
+            statsRt.sizeDelta = new Vector2(960f, 32f);
+            statsRt.anchoredPosition = new Vector2(0f, -8f);
 
             GameObject statsTxtGo = NewUI("StatsText", statsBox.transform);
             statsText = statsTxtGo.AddComponent<Text>();
             statsText.font = LabStyleUI.GetFont();
             statsText.text = string.Empty;
-            statsText.fontSize = 16;
+            statsText.fontSize = 14;
             statsText.fontStyle = FontStyle.Bold;
             statsText.alignment = TextAnchor.MiddleCenter;
             statsText.color = LabStyleUI.TextPrimary;
@@ -540,8 +637,8 @@ namespace Contrast.UI
             // Button Row Container
             GameObject btnRow = NewUI("ButtonRow", card.transform);
             RectTransform rowRt = btnRow.GetComponent<RectTransform>();
-            rowRt.sizeDelta = new Vector2(1040f, 84f);
-            rowRt.anchoredPosition = new Vector2(0f, -108f);
+            rowRt.sizeDelta = new Vector2(1040f, 54f);
+            rowRt.anchoredPosition = new Vector2(0f, -56f);
 
             retryButton = CreateStyledButton(
                 btnRow.transform,
@@ -572,14 +669,15 @@ namespace Contrast.UI
             hintLabel = hint.AddComponent<Text>();
             hintLabel.font = LabStyleUI.GetFont();
             hintLabel.text = "Nhấn R để chơi lại  ·  ESC để quay lại Menu chính";
-            hintLabel.fontSize = 13;
+            hintLabel.fontSize = 12;
             hintLabel.fontStyle = FontStyle.Normal;
             hintLabel.alignment = TextAnchor.MiddleCenter;
             hintLabel.color = LabStyleUI.TextMuted;
 
             RectTransform hintRt = hint.GetComponent<RectTransform>();
-            hintRt.sizeDelta = new Vector2(900f, 26f);
-            hintRt.anchoredPosition = new Vector2(0f, -204f);
+            hintRt.sizeDelta = new Vector2(900f, 18f);
+            hintRt.anchoredPosition = new Vector2(0f, -97f);
+            ApplyBottomDockedCardLayout(cardRt);
         }
 
         private static Button CreateStyledButton(
