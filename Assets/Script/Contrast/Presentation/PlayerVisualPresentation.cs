@@ -51,15 +51,19 @@ namespace Contrast.Presentation
         public const float MaxAnimatedVisualHeight = CropHeightPx / PixelsPerUnit;  // 1.6015625 units
         public static readonly Vector2 VisualPivot = new Vector2(0.5f, 0.0f);
 
-        // Clip timing constants (from SilhouetteMotion v2 Idle.json, Run.json, Jump.json, Celebrate.json, PointMark.json)
+        // Clip timing constants (from CatHandoff Idle.json, Run.json, Jump.json, Fall.json, Land.json, Celebrate.json)
         public const int IdleFrameCount = 110;
         public const int RunFrameCount = 28;
         public const int JumpFrameCount = 61;
+        public const int FallFrameCount = 24;
+        public const int LandFrameCount = 9;
         public const int CelebrateFrameCount = 32;
         public const int PointMarkFrameCount = 32;
 
         public const float IdleDuration = 2.20f;
         public const float RunDuration = 0.56f;
+        public const float FallDuration = 0.48f;
+        public const float LandDuration = 0.18f;
         public const float CelebrateDuration = 0.64f;
         public const float PointMarkDuration = 0.60f;
         public const float JumpAnticipationDuration = 0.07f;
@@ -69,6 +73,12 @@ namespace Contrast.Presentation
         public const float JumpTotalDuration = JumpAnticipationDuration + JumpAirDuration + JumpLandingDuration + JumpRestDuration; // 1.21s
         public const float ReferenceJumpSpeed = 7.4f;
 
+        /// <summary>
+        /// Duration of continuous downward falling before transitioning from the Jump apex/descent
+        /// pose into the dedicated looping "Fall" animation state (24 frames, 0.48s loop).
+        /// </summary>
+        public const float LongFallThresholdSeconds = 0.25f;
+
         private PlayerController player;
         private SpriteRenderer rawSpriteRenderer;
 
@@ -77,6 +87,7 @@ namespace Contrast.Presentation
         private Animator characterAnimator;
         private SpriteRenderer bodyRenderer;
         private SpriteRenderer rimRenderer;
+        private SpriteRenderer eyesRenderer;
         private SpriteRenderer haloRenderer;
         private SpriteRenderer coreRenderer;
 
@@ -100,6 +111,7 @@ namespace Contrast.Presentation
         public Animator CharacterAnimator => characterAnimator;
         public SpriteRenderer BodyRenderer => bodyRenderer;
         public SpriteRenderer RimRenderer => rimRenderer;
+        public SpriteRenderer EyesRenderer => eyesRenderer;
 
         // Animation state & diagnostics
         public PlayerAnimationState CurrentAnimationState { get; private set; } = PlayerAnimationState.Idle;
@@ -107,6 +119,8 @@ namespace Contrast.Presentation
         public int CurrentFrameIndex { get; private set; } = 0;
         public int FacingDirection { get; private set; } = 1; // +1 Right, -1 Left
         public float ComputedUniformWorldScale { get; private set; } = 0.45238096f;
+        public float CurrentFallDuration => fallDurationTimer;
+        public bool IsLongFalling => CurrentAnimationState == PlayerAnimationState.Fall && CurrentClipName == "Fall";
 
         public Vector2 ComputedMaxWorldVisualSize => new Vector2(
             MaxAnimatedVisualWidth * ComputedUniformWorldScale,
@@ -124,6 +138,8 @@ namespace Contrast.Presentation
 
         private float idleClock = 0f;
         private float runClock = 0f;
+        private float fallClock = 0f;
+        private float fallDurationTimer = 0f;
         private float landingTimer = 100f;
         private bool wasGroundedLastFrame = true;
         private Vector3 lastPlayerWorldPos;
@@ -131,18 +147,30 @@ namespace Contrast.Presentation
         private Contrast.Level.ColorPlatform lastGroundedPlatform;
         private bool hasPositionSample = false;
 
-        // Cached SilhouetteMotion frames (normalized white interior + rim contour sprites)
+        // Cached SilhouetteMotion frames (normalized white interior + rim contour + emerald eyes #13D47A sprites)
         private static Sprite[] cachedIdleBodyFrames;
         private static Sprite[] cachedRunBodyFrames;
         private static Sprite[] cachedJumpBodyFrames;
+        private static Sprite[] cachedFallBodyFrames;
+        private static Sprite[] cachedLandBodyFrames;
         private static Sprite[] cachedCelebrateBodyFrames;
         private static Sprite[] cachedPointMarkBodyFrames;
 
         private static Sprite[] cachedIdleRimFrames;
         private static Sprite[] cachedRunRimFrames;
         private static Sprite[] cachedJumpRimFrames;
+        private static Sprite[] cachedFallRimFrames;
+        private static Sprite[] cachedLandRimFrames;
         private static Sprite[] cachedCelebrateRimFrames;
         private static Sprite[] cachedPointMarkRimFrames;
+
+        private static Sprite[] cachedIdleEyesFrames;
+        private static Sprite[] cachedRunEyesFrames;
+        private static Sprite[] cachedJumpEyesFrames;
+        private static Sprite[] cachedFallEyesFrames;
+        private static Sprite[] cachedLandEyesFrames;
+        private static Sprite[] cachedCelebrateEyesFrames;
+        private static Sprite[] cachedPointMarkEyesFrames;
 
         private static Sprite cachedHaloSprite;
         private static Sprite cachedCoreSprite;
@@ -181,6 +209,10 @@ namespace Contrast.Presentation
                     return cachedRunBodyFrames != null ? cachedRunBodyFrames.Length : 0;
                 case "Jump":
                     return cachedJumpBodyFrames != null ? cachedJumpBodyFrames.Length : 0;
+                case "Fall":
+                    return cachedFallBodyFrames != null ? cachedFallBodyFrames.Length : 0;
+                case "Land":
+                    return cachedLandBodyFrames != null ? cachedLandBodyFrames.Length : 0;
                 case "Celebrate":
                 case "AnMung":
                     return cachedCelebrateBodyFrames != null ? cachedCelebrateBodyFrames.Length : 0;
@@ -282,13 +314,23 @@ namespace Contrast.Presentation
             if (unlitMat != null) rimRenderer.sharedMaterial = unlitMat;
             rimRenderer.sortingOrder = 11;
 
-            // Core dot (bright center chest optical emitter for BRIGHT state)
+            // Eyes (Chibi Cat emerald green #13D47A eyes layer rendered untinted on top of body & rim)
+            GameObject eyesGo = new GameObject("OpticalEyes");
+            eyesGo.transform.SetParent(visualRoot, false);
+            eyesRenderer = eyesGo.AddComponent<SpriteRenderer>();
+            eyesRenderer.sprite = SampleEyesSprite("Idle", initFrame);
+            eyesRenderer.color = Color.white;
+            if (unlitMat != null) eyesRenderer.sharedMaterial = unlitMat;
+            eyesRenderer.sortingOrder = 12;
+
+            // Core dot (legacy chest emitter kept inactive so Chibi Cat face eyes remain clean)
             GameObject coreGo = new GameObject("CoreLight");
             coreGo.transform.SetParent(visualRoot, false);
             coreRenderer = coreGo.AddComponent<SpriteRenderer>();
             coreRenderer.sprite = GetCoreSprite();
             if (unlitMat != null) coreRenderer.sharedMaterial = unlitMat;
-            coreRenderer.sortingOrder = 12;
+            coreRenderer.sortingOrder = 13;
+            coreRenderer.enabled = false;
 
             UpdateVisualGeometry();
             UpdateStateColors();
@@ -365,6 +407,13 @@ namespace Contrast.Presentation
                 rimRenderer.flipX = FacingDirection < 0;
             }
 
+            if (eyesRenderer != null)
+            {
+                eyesRenderer.transform.localPosition = Vector3.zero;
+                eyesRenderer.transform.localScale = Vector3.one;
+                eyesRenderer.flipX = FacingDirection < 0;
+            }
+
             float torsoCenterLocalY = MaxAnimatedVisualHeight * 0.48f;
             if (haloRenderer != null)
             {
@@ -385,6 +434,8 @@ namespace Contrast.Presentation
             landingTimer = 100f;
             idleClock = 0f;
             runClock = 0f;
+            fallClock = 0f;
+            fallDurationTimer = 0f;
             wasGroundedLastFrame = player != null && player.IsGrounded;
             lastPlayerWorldPos = transform.position;
             lastGroundedPlatform = player != null ? player.GroundedPlatform : null;
@@ -503,9 +554,14 @@ namespace Contrast.Presentation
             {
                 landingTimer = 0f;
             }
+            if (isGrounded)
+            {
+                fallDurationTimer = 0f;
+                fallClock = 0f;
+            }
             wasGroundedLastFrame = isGrounded;
 
-            // 3. Map authoritative PlayerController state -> SilhouetteMotion animation state
+            // 3. Map authoritative PlayerController state -> Chibi Cat animation state
             if (player.State == PlayerState.Dead)
             {
                 CurrentAnimationState = PlayerAnimationState.Death;
@@ -516,23 +572,38 @@ namespace Contrast.Presentation
                 float vy = player.CurrentVerticalVelocity;
                 if (vy > 0.01f)
                 {
+                    fallDurationTimer = 0f;
+                    fallClock = 0f;
                     CurrentAnimationState = PlayerAnimationState.Jump;
+                    CurrentClipName = "Jump";
                 }
                 else
                 {
-                    CurrentAnimationState = PlayerAnimationState.Fall;
+                    fallDurationTimer += dt;
+                    fallClock += dt;
+                    if (fallDurationTimer >= LongFallThresholdSeconds)
+                    {
+                        // Falling for too long -> switch into the dedicated looping "Fall" animation set
+                        CurrentAnimationState = PlayerAnimationState.Fall;
+                        CurrentClipName = "Fall";
+                    }
+                    else
+                    {
+                        // Initial apex turnover before long-fall threshold -> remain in Jump arc frames
+                        CurrentAnimationState = PlayerAnimationState.Jump;
+                        CurrentClipName = "Jump";
+                    }
                 }
-                CurrentClipName = "Jump";
             }
             else if (absSpeed > 0.12f)
             {
                 CurrentAnimationState = PlayerAnimationState.Run;
                 CurrentClipName = "Run";
             }
-            else if (landingTimer < JumpLandingDuration)
+            else if (landingTimer < LandDuration)
             {
                 CurrentAnimationState = PlayerAnimationState.Landing;
-                CurrentClipName = "Jump";
+                CurrentClipName = "Land";
             }
             else
             {
@@ -572,10 +643,9 @@ namespace Contrast.Presentation
                     break;
 
                 case PlayerAnimationState.Jump:
-                case PlayerAnimationState.Fall:
                 {
                     clip = "Jump";
-                    // SilhouettePlayer velocity-driven airborne pose mapping:
+                    // Velocity-driven airborne pose mapping for ascent and initial apex turnover:
                     float vy = player != null ? player.CurrentVerticalVelocity : 0f;
                     float u = vy >= 0f
                         ? 0.5f * (1f - Mathf.Clamp01(vy / ReferenceJumpSpeed))
@@ -584,9 +654,15 @@ namespace Contrast.Presentation
                     break;
                 }
 
+                case PlayerAnimationState.Fall:
+                    // Dedicated looping "Fall" animation set when falling for too long
+                    clip = "Fall";
+                    sampleTime = fallClock;
+                    break;
+
                 case PlayerAnimationState.Landing:
-                    clip = "Jump";
-                    sampleTime = JumpAnticipationDuration + JumpAirDuration + Mathf.Clamp(landingTimer, 0f, JumpLandingDuration);
+                    clip = "Land";
+                    sampleTime = Mathf.Clamp(landingTimer, 0f, LandDuration - 0.001f);
                     break;
 
                 case PlayerAnimationState.Death:
@@ -609,9 +685,18 @@ namespace Contrast.Presentation
                     rimRenderer.sprite = rimSprite;
             }
 
+            if (eyesRenderer != null)
+            {
+                Sprite eyesSprite = SampleEyesSprite(clip, frameIndex);
+                eyesRenderer.sprite = eyesSprite;
+                eyesRenderer.color = Color.white;
+            }
+
             bodyRenderer.flipX = FacingDirection < 0;
             if (rimRenderer != null)
                 rimRenderer.flipX = FacingDirection < 0;
+            if (eyesRenderer != null)
+                eyesRenderer.flipX = FacingDirection < 0;
         }
 
         private void UpdateStateColors()
@@ -711,21 +796,29 @@ namespace Contrast.Presentation
                 ? cachedIdleBodyFrames
                 : mode == "Run"
                     ? cachedRunBodyFrames
-                    : isCelebrate
-                        ? cachedCelebrateBodyFrames
-                        : isPointMark
-                            ? cachedPointMarkBodyFrames
-                            : cachedJumpBodyFrames;
+                    : mode == "Fall"
+                        ? cachedFallBodyFrames
+                        : mode == "Land"
+                            ? cachedLandBodyFrames
+                            : isCelebrate
+                                ? cachedCelebrateBodyFrames
+                                : isPointMark
+                                    ? cachedPointMarkBodyFrames
+                                    : cachedJumpBodyFrames;
 
             float duration = mode == "Idle"
                 ? IdleDuration
                 : mode == "Run"
                     ? RunDuration
-                    : isCelebrate
-                        ? CelebrateDuration
-                        : isPointMark
-                            ? PointMarkDuration
-                            : JumpTotalDuration;
+                    : mode == "Fall"
+                        ? FallDuration
+                        : mode == "Land"
+                            ? LandDuration
+                            : isCelebrate
+                                ? CelebrateDuration
+                                : isPointMark
+                                    ? PointMarkDuration
+                                    : JumpTotalDuration;
 
             if (frames == null || frames.Length == 0)
             {
@@ -748,11 +841,41 @@ namespace Contrast.Presentation
                 ? cachedIdleRimFrames
                 : mode == "Run"
                     ? cachedRunRimFrames
-                    : isCelebrate
-                        ? cachedCelebrateRimFrames
-                        : isPointMark
-                            ? cachedPointMarkRimFrames
-                            : cachedJumpRimFrames;
+                    : mode == "Fall"
+                        ? cachedFallRimFrames
+                        : mode == "Land"
+                            ? cachedLandRimFrames
+                            : isCelebrate
+                                ? cachedCelebrateRimFrames
+                                : isPointMark
+                                    ? cachedPointMarkRimFrames
+                                    : cachedJumpRimFrames;
+
+            if (frames == null || frames.Length == 0)
+                return null;
+
+            int safeIndex = Mathf.Clamp(index, 0, frames.Length - 1);
+            return frames[safeIndex];
+        }
+
+        public static Sprite SampleEyesSprite(string mode, int index)
+        {
+            EnsureSilhouetteFramesLoaded();
+            bool isCelebrate = mode == "Celebrate" || mode == "AnMung";
+            bool isPointMark = mode == "PointMark" || mode == "ChonDiem";
+            Sprite[] frames = mode == "Idle"
+                ? cachedIdleEyesFrames
+                : mode == "Run"
+                    ? cachedRunEyesFrames
+                    : mode == "Fall"
+                        ? cachedFallEyesFrames
+                        : mode == "Land"
+                            ? cachedLandEyesFrames
+                            : isCelebrate
+                                ? cachedCelebrateEyesFrames
+                                : isPointMark
+                                    ? cachedPointMarkEyesFrames
+                                    : cachedJumpEyesFrames;
 
             if (frames == null || frames.Length == 0)
                 return null;
@@ -774,29 +897,38 @@ namespace Contrast.Presentation
             if (AreFramesValid(cachedIdleBodyFrames, IdleFrameCount) &&
                 AreFramesValid(cachedRunBodyFrames, RunFrameCount) &&
                 AreFramesValid(cachedJumpBodyFrames, JumpFrameCount) &&
+                AreFramesValid(cachedFallBodyFrames, FallFrameCount) &&
+                AreFramesValid(cachedLandBodyFrames, LandFrameCount) &&
                 AreFramesValid(cachedCelebrateBodyFrames, CelebrateFrameCount) &&
                 AreFramesValid(cachedPointMarkBodyFrames, PointMarkFrameCount))
             {
                 return;
             }
 
-            SliceSheetOrFallback("Idle", IdleFrameCount, out cachedIdleBodyFrames, out cachedIdleRimFrames);
-            SliceSheetOrFallback("Run", RunFrameCount, out cachedRunBodyFrames, out cachedRunRimFrames);
-            SliceSheetOrFallback("Jump", JumpFrameCount, out cachedJumpBodyFrames, out cachedJumpRimFrames);
-            SliceSheetOrFallback("Celebrate", CelebrateFrameCount, out cachedCelebrateBodyFrames, out cachedCelebrateRimFrames);
-            SliceSheetOrFallback("PointMark", PointMarkFrameCount, out cachedPointMarkBodyFrames, out cachedPointMarkRimFrames);
+            SliceSheetOrFallback("Idle", IdleFrameCount, out cachedIdleBodyFrames, out cachedIdleRimFrames, out cachedIdleEyesFrames);
+            SliceSheetOrFallback("Run", RunFrameCount, out cachedRunBodyFrames, out cachedRunRimFrames, out cachedRunEyesFrames);
+            SliceSheetOrFallback("Jump", JumpFrameCount, out cachedJumpBodyFrames, out cachedJumpRimFrames, out cachedJumpEyesFrames);
+            SliceSheetOrFallback("Fall", FallFrameCount, out cachedFallBodyFrames, out cachedFallRimFrames, out cachedFallEyesFrames);
+            SliceSheetOrFallback("Land", LandFrameCount, out cachedLandBodyFrames, out cachedLandRimFrames, out cachedLandEyesFrames);
+            SliceSheetOrFallback("Celebrate", CelebrateFrameCount, out cachedCelebrateBodyFrames, out cachedCelebrateRimFrames, out cachedCelebrateEyesFrames);
+            SliceSheetOrFallback("PointMark", PointMarkFrameCount, out cachedPointMarkBodyFrames, out cachedPointMarkRimFrames, out cachedPointMarkEyesFrames);
         }
 
         private static void SliceSheetOrFallback(
             string mode,
             int frameCount,
             out Sprite[] bodyFrames,
-            out Sprite[] rimFrames)
+            out Sprite[] rimFrames,
+            out Sprite[] eyesFrames)
         {
             bodyFrames = new Sprite[frameCount];
             rimFrames = new Sprite[frameCount];
+            eyesFrames = new Sprite[frameCount];
 
             Texture2D rawSheet = Resources.Load<Texture2D>("SilhouetteMotion/Sheets/" + mode);
+            if (rawSheet == null && (mode == "PointMark" || mode == "ChonDiem"))
+                rawSheet = Resources.Load<Texture2D>("SilhouetteMotion/Sheets/Celebrate");
+
             Color32[] srcPixels = null;
             int texW = 0;
             int texH = 0;
@@ -833,22 +965,32 @@ namespace Contrast.Presentation
                 {
                     float sheetScale = Mathf.Max(0.125f, (float)texW / (SheetColumns * SheetCellSizePx));
                     int cellSize = Mathf.Max(16, Mathf.RoundToInt(SheetCellSizePx * sheetScale));
-                    int cropMinX = Mathf.RoundToInt(CropMinXPx * sheetScale);
+                    // Symmetric horizontal crop [32..224) centered at x=128 so Chibi Cat tail (x>=38) and paws (x<=198) never clip
+                    int cropMinX = Mathf.RoundToInt(32 * sheetScale);
                     int cropMinY = Mathf.RoundToInt(CropMinYBottomPx * sheetScale);
-                    int cropW = Mathf.Max(8, Mathf.RoundToInt(CropWidthPx * sheetScale));
-                    // SilhouetteMotion v2 reaches y_bottom = 241 (head crown), so slice 212 px above baseline 32 (y in [32..244))
+                    int cropW = Mathf.Max(8, Mathf.RoundToInt(192 * sheetScale));
                     int cropH = Mathf.Max(8, Mathf.RoundToInt(212 * sheetScale));
                     float effectivePpu = PixelsPerUnit * sheetScale;
 
                     Color32[] bodyPixels = new Color32[srcPixels.Length];
                     Color32[] rimPixels = new Color32[srcPixels.Length];
+                    Color32[] eyesPixels = new Color32[srcPixels.Length];
 
                     // 1. Normalize character RGB to pure white (255,255,255,a) so phase tinting is 1:1
-                    // and transparent texels retain white RGB to avoid dark bilinear edge bleeding.
+                    // and extract the Chibi Cat emerald green eyes (#13D47A, R=19, G=212, B=122) into eyesPixels.
                     for (int i = 0; i < srcPixels.Length; i++)
                     {
-                        byte a = srcPixels[i].a;
+                        Color32 src = srcPixels[i];
+                        byte a = src.a;
                         bodyPixels[i] = new Color32(255, 255, 255, a);
+
+                        if (a > 0 && src.g > src.r + 6)
+                        {
+                            float eyeBlend = Mathf.Clamp01(((src.g - src.r) - 2f) / 191f);
+                            byte eyeA = (byte)Mathf.Clamp(Mathf.RoundToInt(eyeBlend * a), 0, 255);
+                            if (eyeA > 0)
+                                eyesPixels[i] = new Color32(19, 212, 122, eyeA);
+                        }
                     }
 
                     // 2. Build 2-pixel perimeter rim stroke around the silhouette within each cell
@@ -913,6 +1055,15 @@ namespace Contrast.Presentation
                     rimTex.SetPixels32(rimPixels);
                     rimTex.Apply();
 
+                    Texture2D eyesTex = new Texture2D(texW, texH, TextureFormat.RGBA32, false)
+                    {
+                        filterMode = FilterMode.Bilinear,
+                        wrapMode = TextureWrapMode.Clamp,
+                        hideFlags = HideFlags.DontSave
+                    };
+                    eyesTex.SetPixels32(eyesPixels);
+                    eyesTex.Apply();
+
                     for (int i = 0; i < frameCount; i++)
                     {
                         int cellX = (i % SheetColumns) * cellSize;
@@ -943,6 +1094,16 @@ namespace Contrast.Presentation
                             SpriteMeshType.FullRect);
                         rimFrames[i].name = $"{mode}_Rim_{i:D3}";
                         rimFrames[i].hideFlags = HideFlags.DontSave;
+
+                        eyesFrames[i] = Sprite.Create(
+                            eyesTex,
+                            cropRect,
+                            VisualPivot,
+                            effectivePpu,
+                            0,
+                            SpriteMeshType.FullRect);
+                        eyesFrames[i].name = $"{mode}_Eyes_{i:D3}";
+                        eyesFrames[i].hideFlags = HideFlags.DontSave;
                     }
                     return;
                 }

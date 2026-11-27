@@ -1,0 +1,18 @@
+{
+  "version": 2,
+  "idleRevision": 2,
+  "mode": "Fall",
+  "frameCount": 24,
+  "columns": 8,
+  "cellSize": 256,
+  "duration": 0.48,
+  "fps": 50,
+  "pivot": [
+    0.5,
+    0.125
+  ],
+  "pixelsPerUnit": 128,
+  "rootMotion": false,
+  "view": "three-quarter-right",
+  "loop": true
+}

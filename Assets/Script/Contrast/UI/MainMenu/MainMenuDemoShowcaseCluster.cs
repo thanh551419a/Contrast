@@ -26,6 +26,7 @@ namespace Contrast.UI
         private Image demoCharacterHaloImg;
         private Image demoCharacterBodyImg;
         private Image demoCharacterRimImg;
+        private Image demoCharacterEyesImg;
         private Image demoHeadImg;
         private Image demoTorsoImg;
         private Image demoEyeImg;
@@ -829,6 +830,7 @@ namespace Contrast.UI
 
             Sprite bodySprite = PlayerVisualPresentation.SampleBodySprite(clipMode, demoAnimClock, out int frameIdx);
             Sprite rimSprite = PlayerVisualPresentation.SampleRimSprite(clipMode, frameIdx);
+            Sprite eyesSprite = PlayerVisualPresentation.SampleEyesSprite(clipMode, frameIdx);
             bool hasRealSprites = bodySprite != null;
 
             Color bodyCol = colorIdx == 0
@@ -855,12 +857,19 @@ namespace Contrast.UI
             {
                 demoCharacterBodyImg.gameObject.SetActive(hasRealSprites);
                 demoCharacterRimImg.gameObject.SetActive(hasRealSprites);
+                if (demoCharacterEyesImg != null)
+                    demoCharacterEyesImg.gameObject.SetActive(hasRealSprites && eyesSprite != null);
                 if (hasRealSprites)
                 {
                     demoCharacterBodyImg.sprite = bodySprite;
                     demoCharacterBodyImg.color = bodyCol;
                     demoCharacterRimImg.sprite = rimSprite != null ? rimSprite : bodySprite;
                     demoCharacterRimImg.color = rimCol;
+                    if (demoCharacterEyesImg != null && eyesSprite != null)
+                    {
+                        demoCharacterEyesImg.sprite = eyesSprite;
+                        demoCharacterEyesImg.color = Color.white;
+                    }
                 }
             }
 
@@ -1435,6 +1444,16 @@ namespace Contrast.UI
             rimRt.pivot = new Vector2(0.5f, 0f);
             rimRt.anchoredPosition = new Vector2(0f, -4f);
             rimRt.sizeDelta = new Vector2(MainMenuUI.DemoCharacterWidthPx, MainMenuUI.DemoCharacterHeightPx);
+
+            GameObject eyesGo = MainMenuUIBuilder.NewUI("OpticalEyes", root.transform);
+            demoCharacterEyesImg = eyesGo.AddComponent<Image>();
+            demoCharacterEyesImg.raycastTarget = false;
+            demoCharacterEyesImg.preserveAspect = false;
+            RectTransform eyesRt = eyesGo.GetComponent<RectTransform>();
+            MainMenuUIBuilder.AnchorToBottomCenter(eyesRt);
+            eyesRt.pivot = new Vector2(0.5f, 0f);
+            eyesRt.anchoredPosition = new Vector2(0f, -4f);
+            eyesRt.sizeDelta = new Vector2(MainMenuUI.DemoCharacterWidthPx, MainMenuUI.DemoCharacterHeightPx);
 
             // Fallback procedural silhouette parts (only enabled if SilhouetteMotion sprite sheets are unavailable)
             GameObject legL = MainMenuUIBuilder.NewUI("LegL", root.transform);

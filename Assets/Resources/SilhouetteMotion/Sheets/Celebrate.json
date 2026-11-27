@@ -2,17 +2,18 @@
   "version": 2,
   "idleRevision": 2,
   "mode": "Celebrate",
-  "clipAlias": "AnMung",
   "frameCount": 32,
   "columns": 8,
   "cellSize": 256,
   "duration": 0.64,
-  "fps": 50.0,
+  "fps": 50,
   "pivot": [
     0.5,
     0.125
   ],
   "pixelsPerUnit": 128,
   "rootMotion": false,
-  "view": "three-quarter-side"
+  "view": "three-quarter-right",
+  "clipAlias": "AnMung",
+  "loop": false
 }

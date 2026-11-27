@@ -1,0 +1,17 @@
+{
+  "version": 2,
+  "mode": "Land",
+  "frameCount": 9,
+  "columns": 8,
+  "cellSize": 256,
+  "duration": 0.18,
+  "fps": 50,
+  "pivot": [
+    0.5,
+    0.125
+  ],
+  "pixelsPerUnit": 128,
+  "rootMotion": false,
+  "view": "three-quarter-right",
+  "loop": false
+}
